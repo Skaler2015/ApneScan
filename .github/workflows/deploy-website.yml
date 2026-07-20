@@ -1,0 +1,61 @@
+name: Deploy Website
+
+# Software me koi bhi update push hote hi website apne aap update ho jaati hai
+# (version number website par code se nikaal kar daala jata hai).
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/content-review-jjokt7
+      - main
+    paths:
+      - 'ApneScan_Project/apnescan_website.html'
+      - 'ApneScan_Project/apnescan_logo*'
+      - 'ApneScan_Project/apnescan_icon.png'
+      - 'ApneScan_Project/apnescan.py'
+      - '.github/workflows/deploy-website.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build site (inject current app version)
+        run: |
+          mkdir -p _site
+          VERSION=$(grep -oP 'VERSION = "\K[0-9]+' ApneScan_Project/apnescan.py | head -1)
+          echo "App version: v$VERSION"
+          sed "s/{{VERSION}}/v$VERSION/g" ApneScan_Project/apnescan_website.html > _site/index.html
+          cp ApneScan_Project/apnescan_logo.png _site/ 2>/dev/null || true
+          cp ApneScan_Project/apnescan_logo.svg _site/ 2>/dev/null || true
+          cp ApneScan_Project/apnescan_icon.png _site/ 2>/dev/null || true
+          # Custom subdomain (Hostinger DNS: CNAME apnescan -> skaler2015.github.io)
+          echo "apnescan.apnesoft.com" > _site/CNAME
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
