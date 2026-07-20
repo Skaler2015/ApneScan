@@ -46,6 +46,23 @@ jobs:
           cp ApneScan_Project/apnescan_icon.png _site/ 2>/dev/null || true
           # Custom subdomain (Hostinger DNS: CNAME apnescan -> skaler2015.github.io)
           echo "apnescan.apnesoft.com" > _site/CNAME
+          # SEO/GEO files: robots.txt (AI crawlers allowed), llms.txt, sitemap
+          cp ApneScan_Project/website_extras/robots.txt _site/ 2>/dev/null || true
+          cp ApneScan_Project/website_extras/llms.txt _site/ 2>/dev/null || true
+          TODAY=$(date -u +%Y-%m-%d)
+          cat > _site/sitemap.xml <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+            <url>
+              <loc>https://apnescan.apnesoft.com/</loc>
+              <lastmod>$TODAY</lastmod>
+              <changefreq>weekly</changefreq>
+              <priority>1.0</priority>
+            </url>
+          </urlset>
+          EOF
+          # heredoc indentation hatao (yaml ke andar likha tha)
+          sed -i 's/^          //' _site/sitemap.xml
 
       # EXE ko seedha website par rakho — "Download" button click karte hi
       # apnescan.apnesoft.com/ApneScan.exe se download shuru ho jata hai.

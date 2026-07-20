@@ -1,0 +1,27 @@
+# ApneScan — sab search engines aur AI crawlers ka swagat hai
+User-agent: *
+Allow: /
+
+# AI engines (GEO): inhe padhne do taaki AI answers me ApneScan aaye
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+Sitemap: https://apnescan.apnesoft.com/sitemap.xml
