@@ -139,12 +139,105 @@ function _onlineCount() {
   return live;
 }
 
+// ---- v22 extras: users/version/desh (sirf GINTI — kabhi koi document nahi) ----
+function _touchClient(clientId, ver, country) {
+  if (!clientId) return;
+  var sh = _sheet("clients", ["client", "first_seen", "last_seen", "version", "country"]);
+  var data = sh.getDataRange().getValues();
+  var now = new Date().getTime();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(clientId)) {
+      sh.getRange(i + 1, 3).setValue(now);
+      if (ver) sh.getRange(i + 1, 4).setValue(ver);
+      if (country) sh.getRange(i + 1, 5).setValue(country);
+      return;
+    }
+  }
+  sh.appendRow([clientId, now, now, ver || "", country || ""]);
+}
+
+function _usersCount() {
+  var sh = _sheet("clients", ["client", "first_seen", "last_seen", "version", "country"]);
+  return Math.max(0, sh.getLastRow() - 1);
+}
+
+function _breakdown(col) {
+  // col: 4 = version, 5 = country
+  var sh = _sheet("clients", ["client", "first_seen", "last_seen", "version", "country"]);
+  var data = sh.getDataRange().getValues();
+  var out = {};
+  for (var i = 1; i < data.length; i++) {
+    var k = String(data[i][col - 1] || "").trim();
+    if (k) out[k] = (out[k] || 0) + 1;
+  }
+  return out;
+}
+
+function _week() {
+  // pichhle 7 din: [[date, count], ...] purane-se-naye
+  var sh = _sheet("daily", ["date", "count"]);
+  var data = sh.getDataRange().getValues();
+  var byDay = {};
+  for (var i = 1; i < data.length; i++) {
+    var d = _cellDay(data[i][0]);
+    byDay[d] = (byDay[d] || 0) + (Number(data[i][1]) || 0);
+  }
+  var out = [];
+  var tz = Session.getScriptTimeZone();
+  for (var j = 6; j >= 0; j--) {
+    var dt = new Date(new Date().getTime() - j * 86400000);
+    var key = Utilities.formatDate(dt, tz, "yyyy-MM-dd");
+    out.push([key, byDay[key] || 0]);
+  }
+  return out;
+}
+
+function _bumpHour(n) {
+  var sh = _sheet("hourly", ["hour", "count"]);
+  var key = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd-HH");
+  var data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === key) {
+      sh.getRange(i + 1, 2).setValue((Number(data[i][1]) || 0) + n);
+      return;
+    }
+  }
+  sh.appendRow([key, n]);
+  if (data.length > 200) sh.deleteRows(2, data.length - 100);   // purana saaf
+}
+
+function _hourCount() {
+  var sh = _sheet("hourly", ["hour", "count"]);
+  var key = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd-HH");
+  var data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === key) return Number(data[i][1]) || 0;
+  }
+  return 0;
+}
+
+function _bumpPeak(online) {
+  // aaj ke daily row ke col 3 me aaj ka sabse bada online
+  var sh = _sheet("daily", ["date", "count"]);
+  var t = _getToday();
+  var cur = Number(sh.getRange(t.row, 3).getValue()) || 0;
+  if (online > cur) sh.getRange(t.row, 3).setValue(online);
+  return Math.max(cur, online);
+}
+
 function _stats() {
+  var online = _onlineCount();
   return {
     ok: true,
     total: _getTotal(),
     today: _todayCount(),
-    online: _onlineCount()
+    online: online,
+    users: _usersCount(),
+    week: _week(),
+    peak: _bumpPeak(online),
+    hour: _hourCount(),
+    versions: _breakdown(4),
+    countries: _breakdown(5)
   };
 }
 
@@ -177,9 +270,12 @@ function _handle(e) {
         var n = Math.max(0, Math.min(100, parseInt(p.n || "1", 10) || 1));
         _setTotal(_getTotal() + n);
         _addToday(n);
+        _bumpHour(n);
         _touchOnline(client);
+        _touchClient(client, p.v || "", p.c || "");
       } else if (action === "ping") {
         _touchOnline(client);
+        _touchClient(client, p.v || "", p.c || "");
       }
       out = _stats();
     } finally {

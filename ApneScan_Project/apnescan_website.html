@@ -167,6 +167,24 @@
     <a class="cta" href="ApneScan.exe" download>⬇ Download for Windows</a>
     <a class="cta ghost" href="#how">See how it works</a>
     <div class="free-note">हिंदी + English · किसी भी scanner पर चले · आपका data आपके PC पर ही रहता है</div>
+    <div class="free-note" id="livestats" style="display:none;font-weight:700;color:#0f766e"></div>
+    <script>
+    (function(){
+      try {
+        fetch("https://script.google.com/macros/s/AKfycbzwh2HQHXKe_09wgXpSh-NZQu-GbR7N-NVmtUEyRpl8oOa-MdoJ9ShqHB_i0QCcuqe2_w/exec?action=stats")
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            if (d && d.ok && d.total) {
+              var el = document.getElementById("livestats");
+              el.textContent = "🌍 " + Number(d.total).toLocaleString("en-IN") +
+                               " documents scanned worldwide" +
+                               (d.users ? " · " + d.users + " users" : "");
+              el.style.display = "block";
+            }
+          }).catch(function(){});
+      } catch (e) {}
+    })();
+    </script>
 
     <!-- App mock -->
     <div class="shot" aria-hidden="true">

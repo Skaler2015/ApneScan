@@ -151,7 +151,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "21"
+VERSION = "22"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -171,6 +171,7 @@ _PORTABLE = _portable_dir()
 CONFIG_PATH = (os.path.join(_PORTABLE, "apnescan_config.json") if _PORTABLE
                else os.path.join(os.path.expanduser("~"), ".apnescan.json"))
 CRASH_PATH = os.path.join(os.path.expanduser("~"), "apnescan_crash.txt")
+PSTATS_PATH = os.path.join(os.path.expanduser("~"), ".apnescan_pstats.json")
 _OLD_CONFIG = os.path.join(os.path.expanduser("~"), ".noble_doc_scanner.json")
 if not os.path.exists(CONFIG_PATH) and os.path.exists(_OLD_CONFIG):
     try:
@@ -355,6 +356,7 @@ DEFAULT_OPTIONS = {
     "tags": {},                  # pdf path -> [tags]
     "show_files_panel": True,    # daayan "Meri Files" panel
     "fav_folders": [],           # panel ke ⭐ favourite folders
+    "sidebar_stats": [],         # khaali = default set dikhega
     "wia_device_id": None,
     "language": "hi",            # "hi" ya "en"
     "simple_mode": False,
@@ -938,20 +940,28 @@ class EsclTestWorker(QtCore.QThread):
 
 class StatsWorker(QtCore.QThread):
     """Talk to the ApneScan stats server (Google Apps Script). action:
-    'ping' (mark online + fetch), 'scan' (add scans + fetch), 'stats' (fetch)."""
+    'ping' (mark online + fetch), 'scan' (add scans + fetch), 'stats' (fetch).
+    App version + country (sirf 2-akshar ka code) bhi jaata hai — kabhi koi
+    document/naam nahi."""
     got = QtCore.pyqtSignal(int, int, int)   # total, today, online
+    got_full = QtCore.pyqtSignal(dict)       # poora server payload
     failed = QtCore.pyqtSignal()
 
     def __init__(self, url, client, action="ping", n=0):
         super().__init__()
         self.url = url; self.client = client; self.action = action; self.n = n
+        try:
+            self.country = (QtCore.QLocale().name().split("_") + [""])[1][:2]
+        except Exception:
+            self.country = ""
 
     def run(self):
         try:
             import urllib.request as U
             import urllib.parse as P
             import json as J
-            q = {"action": self.action, "client": self.client}
+            q = {"action": self.action, "client": self.client,
+                 "v": VERSION, "c": self.country}
             if self.action == "scan":
                 q["n"] = str(self.n)
             full = self.url + ("&" if "?" in self.url else "?") + P.urlencode(q)
@@ -961,6 +971,10 @@ class StatsWorker(QtCore.QThread):
                 self.got.emit(int(data.get("total", 0)),
                               int(data.get("today", 0)),
                               int(data.get("online", 0)))
+                try:
+                    self.got_full.emit(dict(data))
+                except Exception:
+                    pass
             else:
                 self.failed.emit()
         except Exception:
@@ -3013,6 +3027,41 @@ class PreviewDialog(QtWidgets.QDialog):
             super().keyPressEvent(e)
 
 
+class SparkBars(QtWidgets.QWidget):
+    """Chhota bar-chart (bina kisi library ke) — dashboard ke liye."""
+
+    def __init__(self, values, labels=None, color="#0f766e"):
+        super().__init__()
+        self.v = [max(0, int(x or 0)) for x in (values or [0])]
+        self.labels = labels
+        self.c = QtGui.QColor(color)
+        self.setMinimumHeight(96)
+
+    def paintEvent(self, _e):
+        p = QtGui.QPainter(self)
+        try:
+            W, H = self.width(), self.height() - 18
+            mx = max(self.v) or 1
+            n = max(1, len(self.v))
+            gap = W // n
+            bw = max(6, int(gap * 0.6))
+            p.setPen(QtCore.Qt.NoPen)
+            p.setBrush(self.c)
+            for i, val in enumerate(self.v):
+                h = int((H - 14) * val / mx)
+                x = i * gap + (gap - bw) // 2
+                p.drawRect(x, H - h, bw, h)
+            p.setPen(QtGui.QColor("#64748b"))
+            f = p.font(); f.setPointSize(7); p.setFont(f)
+            for i, val in enumerate(self.v):
+                p.drawText(i * gap, 0, gap, 12, QtCore.Qt.AlignCenter, str(val))
+            if self.labels:
+                for i, lb in enumerate(self.labels):
+                    p.drawText(i * gap, H + 2, gap, 14, QtCore.Qt.AlignCenter, str(lb)[:3])
+        finally:
+            p.end()
+
+
 class LibraryModel(QtWidgets.QFileSystemModel):
     """'Meri Files' panel ka model — AAJ banayi files hari dikhti hain."""
 
@@ -3168,6 +3217,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "Business cards → contacts…", self.business_cards, "हिन्दी: Visiting cards ke scan se naam/phone/email padh kar contact files (.vcf) + Excel banao.\nEnglish: Read visiting cards into contact (.vcf) files and an Excel sheet.")
         self._ma(mt, "Purani photo sudharo (restore)", self.restore_photo_current, "हिन्दी: Feeki/dhundhli purani photo ka rang-roop sudharo.\nEnglish: Restore faded/dull old photos.")
         self._ma(mt, "Scan History…", self.show_history, "हिन्दी: Ab tak ki saari saved PDFs — nayi se purani, filter ke saath.\nEnglish: All saved PDFs, newest first, with quick filter.")
+        self._ma(mt, "📊 Stats Dashboard…", self.show_stats_dashboard, "हिन्दी: Aapki + duniya bhar ki poori statistics — graphs ke saath. (Sidebar ke stats-box par click karke bhi khulta hai.)\nEnglish: Full personal + worldwide statistics with charts.")
         self._ma(mt, "Phone-photo se PDF (photo import)…", self.import_photos, "हिन्दी: Phone se kheenchi document-photos ko saaf karke pages banao (shadow hatana, seedha karna) — phir PDF save karo.\nEnglish: Clean up phone photos of documents (remove shadows, straighten) and add them as pages.")
         self._ma(mt, "ID cards alag karo (is page se)…", self.split_id_cards, "हिन्दी: Ek page par 2-3 ID cards scan kiye hain? Ye unhe alag-alag pages me kaat dega.\nEnglish: Scanned 2-3 ID cards on one page? This splits them into separate pages.")
         self._ma(mt, "Search past PDFs…", self.search_pdfs, "हिन्दी: Purani save ki hui PDF dhoondo (claim/naam/tag se, ya PDF ke andar ke text se).\nEnglish: Search your saved PDFs by name, tag or text content.", "Ctrl+F")
@@ -3206,6 +3256,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.act_simple.setCheckable(True)
         self.act_simple.setChecked(bool(self._opts.get("simple_mode")))
         self.act_files_panel = self._ma(ms, "\"Meri Files\" panel dikhao/chhupao", self.toggle_files_panel, "हिन्दी: Daayin taraf ka folders-wala panel on/off karo.\nEnglish: Show/hide the right-side files panel.")
+        self._ma(ms, "Sidebar stats chuno…", self.choose_sidebar_stats, "हिन्दी: Sidebar ke stats-box me kaun-kaun si ginti dikhe — aap khud chuno (worldwide + personal).\nEnglish: Choose which stats appear in the sidebar box.")
         self.act_touch = self._ma(ms, "Touch / bade-button mode", self.toggle_touch_mode, "हिन्दी: Buttons/likhai badi ho jayegi — touch screen ya buzurgon ke liye aasan.\nEnglish: Bigger buttons and text for touch screens or elderly users.")
         self.act_touch.setCheckable(True)
         self.act_touch.setChecked(bool(self._opts.get("touch_mode")))
@@ -3395,6 +3446,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             it.setData(NAMEKEY_ROLE, key)
             it.setText(label)
             self._named_count = getattr(self, "_named_count", 0) + 1
+            self._pstats_bump(ocr_named=1)
 
     def _on_naming_done(self):
         got = getattr(self, "_named_count", 0)
@@ -3553,28 +3605,15 @@ class ScannerWindow(QtWidgets.QMainWindow):
         return cid
 
     def _set_stats_display(self, stats):
-        if not self._stats_url():
-            self.stats_box.setText(
-                '<b>\U0001f30d ApneScan</b><br>'
-                '<span style="color:#94a3b8;">Worldwide stats band hai<br>'
-                '(Settings \u2192 Stats server URL)</span>')
-            return
-        if stats is None:
-            self.stats_box.setText('<b>\U0001f30d Worldwide</b><br>'
-                                   '<span style="color:#94a3b8;">Loading\u2026</span>')
-            return
-        total, today, online = stats
-        self.stats_box.setText(
-            '<b>\U0001f30d ApneScan Worldwide</b><br>'
-            '\U0001f4c4 Total scans: <b>%s</b><br>'
-            '\U0001f4c5 Aaj (today): <b>%s</b><br>'
-            '\U0001f7e2 Abhi online: <b>%s</b>'
-            % ("{:,}".format(total), "{:,}".format(today), online))
+        if stats and isinstance(stats, tuple) and len(stats) == 3:
+            ws = getattr(self, "_world_stats", {}) or {}
+            ws.update({"total": stats[0], "today": stats[1], "online": stats[2]})
+            self._world_stats = ws
+        self._update_sidebar_stats()
 
     def _stats_failed(self):
-        if self._stats_url():
-            self.stats_box.setText('<b>\U0001f30d Worldwide</b><br>'
-                                   '<span style="color:#94a3b8;">stats abhi nahi mile</span>')
+        # network na ho to bhi personal stats dikhti rahein
+        self._update_sidebar_stats()
 
     def _refresh_stats(self, action="ping"):
         url = self._stats_url()
@@ -3583,6 +3622,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         self._stats_worker = StatsWorker(url, self._get_client_id(), action=action)
         self._stats_worker.got.connect(lambda t, d, o: self._set_stats_display((t, d, o)))
+        self._stats_worker.got_full.connect(self._on_world_stats)
         self._stats_worker.failed.connect(self._stats_failed)
         self._stats_worker.start()
 
@@ -3592,6 +3632,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         self._scan_reporter = StatsWorker(url, self._get_client_id(), action="scan", n=n)
         self._scan_reporter.got.connect(lambda t, d, o: self._set_stats_display((t, d, o)))
+        self._scan_reporter.got_full.connect(self._on_world_stats)
         self._scan_reporter.start()
 
     def set_stats_url(self):
@@ -3891,6 +3932,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             webbrowser.open("https://wa.me/")
         except Exception:
             pass
+        self._pstats_bump(shared=1)
         steps = ("WhatsApp khul raha hai. Chat chuno, phir:\n\n"
                  "1) Chat me Ctrl+V dabao (file copy ho chuki hai)%s\n"
                  "2) Ya Explorer se PDF ko chat par kheench (drag) kar chhod do.\n\n"
@@ -3902,6 +3944,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pdf = self._pick_share_pdf()
         if not pdf:
             return
+        self._pstats_bump(shared=1)
         # Pehle Outlook try karo (attachment ke saath draft khulta hai)
         if HAS_W32:
             try:
@@ -3981,6 +4024,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._warn("Compress fail:\n%s" % traceback.format_exc())
             return
         self._remember_save_dir(out)
+        if src_pdf:
+            try:
+                saved = os.path.getsize(src_pdf) - size
+                if saved > 0:
+                    self._pstats_bump(saved_bytes=saved)
+            except Exception:
+                pass
         kb = size / 1024.0
         pretty = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024.0))
         note = ""
@@ -4710,7 +4760,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.stats_box.setStyleSheet(
             "#statsbox{border:1px solid #cbd5e1; border-radius:8px; padding:8px;"
             " color:#334155; font-size:12px; background:#f8fafc;}")
-        self.stats_box.setToolTip("ApneScan worldwide stats (Settings \u2192 Stats server URL)")
+        self.stats_box.setToolTip("Click karo \u2014 poora Stats Dashboard khulega.\n"
+                                  "Kya-kya dikhe: Settings \u2192 Sidebar stats chuno")
+        self.stats_box.setCursor(QtCore.Qt.PointingHandCursor)
+        self.stats_box.mousePressEvent = lambda _e: self.show_stats_dashboard()
         self._set_stats_display(None)
         pl.addWidget(self.stats_box)
         self.btn_scan = QtWidgets.QPushButton("▶  " + tr("scan", self._lang)); self.btn_scan.setObjectName("primary")
@@ -4842,6 +4895,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._upd_timer.setInterval(6 * 3600 * 1000)
         self._upd_timer.timeout.connect(lambda: self.check_updates(True))
         self._upd_timer.start()
+        # Mahine ki pehli baar kholne par "Aapka Mahina" summary
+        QtCore.QTimer.singleShot(6000, self._maybe_month_wrap)
         # kept (hidden) for the connection feature; IP set via Settings menu
         self.ip_field = QtWidgets.QLineEdit(self._config.get("scanner_ip", "")); self.ip_field.hide()
         self.btn_check = QtWidgets.QPushButton(); self.btn_check.hide()
@@ -5079,6 +5134,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self.status.showMessage("Barcode se claim number mila: %s" % code, 5000)
 
     def _on_scan_done(self, kept, skipped):
+        if kept:
+            self._pstats_bump(scan_ok=1)
         if self._progress:
             self._progress.close(); self._progress = None
         self._scanning = False
@@ -5105,6 +5162,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self._start_next_batch()
 
     def _on_scan_failed(self, msg):
+        self._pstats_bump(scan_fail=1)
         self._last_error = msg
         if self._progress:
             self._progress.close(); self._progress = None
@@ -5491,6 +5549,310 @@ class ScannerWindow(QtWidgets.QMainWindow):
         row.addWidget(b1); row.addWidget(b2); row.addStretch(1); row.addWidget(bc)
         v.addLayout(row)
         dlg.exec_()
+
+    # ---- Personal stats (sab kuch aapke PC par — kahin nahi jaata) ----
+    MILESTONES = [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000]
+
+    def _pstats(self):
+        if not hasattr(self, "_pstats_cache"):
+            try:
+                with open(PSTATS_PATH, "r", encoding="utf-8") as fh:
+                    self._pstats_cache = json.load(fh)
+            except Exception:
+                self._pstats_cache = {}
+        return self._pstats_cache
+
+    def _pstats_save(self):
+        try:
+            with open(PSTATS_PATH, "w", encoding="utf-8") as fh:
+                json.dump(self._pstats(), fh)
+        except Exception:
+            pass
+
+    def _pstats_bump(self, pages=0, pdfs=0, shared=0, ocr_named=0,
+                     scan_ok=0, scan_fail=0, saved_bytes=0, doc_type=None):
+        st = self._pstats()
+        day = datetime.datetime.now().strftime("%Y-%m-%d")
+        d = st.setdefault("days", {}).setdefault(day, {})
+        for k, v in (("pages", pages), ("pdfs", pdfs), ("shared", shared)):
+            if v:
+                d[k] = d.get(k, 0) + v
+        t = st.setdefault("totals", {})
+        for k, v in (("pages", pages), ("pdfs", pdfs), ("shared", shared),
+                     ("ocr_named", ocr_named), ("scan_ok", scan_ok),
+                     ("scan_fail", scan_fail), ("saved_bytes", saved_bytes)):
+            if v:
+                t[k] = t.get(k, 0) + v
+        if pages:
+            hh = st.setdefault("hours", {})
+            h = datetime.datetime.now().strftime("%H")
+            hh[h] = hh.get(h, 0) + pages
+        if doc_type:
+            ty = st.setdefault("types", {})
+            key = str(doc_type).strip()[:24] or "Anya"
+            ty[key] = ty.get(key, 0) + 1
+        self._pstats_save()
+        if pdfs:
+            self._check_milestones()
+        self._update_sidebar_stats()
+
+    def _pstats_sum(self, days=7, key="pages"):
+        st = self._pstats().get("days", {})
+        now = datetime.datetime.now()
+        total = 0
+        for i in range(days):
+            k = (now - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+            total += (st.get(k) or {}).get(key, 0)
+        return total
+
+    def _pstats_streak(self):
+        st = self._pstats().get("days", {})
+        now = datetime.datetime.now()
+        streak = 0
+        i = 0
+        # aaj kaam na hua ho to kal se ginti shuru (streak abhi tuta nahi)
+        if not (st.get(now.strftime("%Y-%m-%d")) or {}).get("pages", 0):
+            i = 1
+        while True:
+            k = (now - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+            if (st.get(k) or {}).get("pages", 0) > 0:
+                streak += 1
+                i += 1
+            else:
+                break
+        return streak
+
+    def _pstats_best_day(self):
+        days = self._pstats().get("days", {})
+        if not days:
+            return ("—", 0)
+        k, v = max(days.items(), key=lambda kv: kv[1].get("pages", 0))
+        return (k, v.get("pages", 0))
+
+    def _check_milestones(self):
+        st = self._pstats()
+        t = st.get("totals", {})
+        shown = st.setdefault("milestones_shown", [])
+        for kind, label in (("pdfs", "PDFs"), ("pages", "pages")):
+            val = t.get(kind, 0)
+            for m in self.MILESTONES:
+                key = "%s_%d" % (kind, m)
+                if val >= m and key not in shown:
+                    shown.append(key)
+                    self._pstats_save()
+                    self.status.showMessage(
+                        "🏆 Badhai ho! Aapke %s %s poore ho gaye!" % ("{:,}".format(m), label), 9000)
+
+    def _maybe_month_wrap(self):
+        """Mahine ki 1 tarikh ko pichhle mahine ka 'Aapka Mahina' summary."""
+        st = self._pstats()
+        now = datetime.datetime.now()
+        this_month = now.strftime("%Y-%m")
+        if st.get("month_shown") == this_month:
+            return
+        prev = (now.replace(day=1) - datetime.timedelta(days=1)).strftime("%Y-%m")
+        days = {k: v for k, v in (st.get("days") or {}).items() if k.startswith(prev)}
+        st["month_shown"] = this_month
+        self._pstats_save()
+        if not days:
+            return
+        pages = sum(d.get("pages", 0) for d in days.values())
+        pdfs = sum(d.get("pdfs", 0) for d in days.values())
+        busy_k, busy_v = max(days.items(), key=lambda kv: kv[1].get("pages", 0))
+        QtWidgets.QMessageBox.information(
+            self, "📊 Aapka mahina (%s)" % prev,
+            "Pichhle mahine aapne:\n\n📄 %s pages scan kiye\n🗂 %s PDFs banayi\n"
+            "🔥 Sabse busy din: %s (%d pages)\n\nShaandaar! 🎉"
+            % ("{:,}".format(pages), "{:,}".format(pdfs), busy_k, busy_v))
+
+    # ---- Sidebar stats (aap chunte ho kya-kya dikhe) ----
+    def _sidebar_stat_items(self):
+        """(key, label, value) — sidebar aur chooser dono iski list se chalte hain."""
+        w = getattr(self, "_world_stats", {}) or {}
+        st = self._pstats()
+        t = st.get("totals", {})
+        day = (st.get("days") or {}).get(datetime.datetime.now().strftime("%Y-%m-%d"), {})
+        return [
+            ("world_total", "🌍 Total scans (world)", w.get("total")),
+            ("world_today", "📅 Aaj (world)", w.get("today")),
+            ("world_online", "🟢 Abhi online", w.get("online")),
+            ("world_users", "👥 Kul users (world)", w.get("users")),
+            ("my_today", "📄 Mere aaj ke pages", day.get("pages", 0)),
+            ("my_today_pdfs", "🗂 Meri aaj ki PDFs", day.get("pdfs", 0)),
+            ("my_week", "🗓 Is hafte (pages)", self._pstats_sum(7, "pages")),
+            ("my_total", "📚 Mere kul pages", t.get("pages", 0)),
+            ("my_pdfs", "🗂 Meri kul PDFs", t.get("pdfs", 0)),
+            ("streak", "🔥 Streak (din)", self._pstats_streak()),
+            ("shared", "📤 Share ki hui", t.get("shared", 0)),
+            ("saved_mb", "🗜 Compress se bachaya (MB)", int(t.get("saved_bytes", 0) / 1048576)),
+        ]
+
+    DEFAULT_SIDEBAR_STATS = ["world_total", "world_today", "world_online",
+                             "my_today", "streak"]
+
+    def _update_sidebar_stats(self):
+        try:
+            sel = self._opts.get("sidebar_stats") or self.DEFAULT_SIDEBAR_STATS
+            items = {k: (lbl, val) for k, lbl, val in self._sidebar_stat_items()}
+            lines = ['<b>📊 ApneScan</b> <span style="color:#94a3b8;font-size:10px;">'
+                     '(click = dashboard)</span>']
+            for k in sel:
+                if k in items:
+                    lbl, val = items[k]
+                    v = "…" if val is None else ("{:,}".format(val) if isinstance(val, int) else str(val))
+                    lines.append("%s: <b>%s</b>" % (lbl, v))
+            self.stats_box.setText("<br>".join(lines))
+        except Exception:
+            pass
+
+    def choose_sidebar_stats(self):
+        """Aap khud chuno sidebar me kaun-kaun si stats dikhein."""
+        items = self._sidebar_stat_items()
+        sel = set(self._opts.get("sidebar_stats") or self.DEFAULT_SIDEBAR_STATS)
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Sidebar stats chuno")
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel("Tick karo jo sidebar me dikhana hai:"))
+        lw = QtWidgets.QListWidget()
+        for k, lbl, _val in items:
+            it = QtWidgets.QListWidgetItem(lbl)
+            it.setData(QtCore.Qt.UserRole, k)
+            it.setFlags(it.flags() | QtCore.Qt.ItemIsUserCheckable)
+            it.setCheckState(QtCore.Qt.Checked if k in sel else QtCore.Qt.Unchecked)
+            lw.addItem(it)
+        v.addWidget(lw, 1)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        chosen = [lw.item(i).data(QtCore.Qt.UserRole) for i in range(lw.count())
+                  if lw.item(i).checkState() == QtCore.Qt.Checked]
+        self._opts["sidebar_stats"] = chosen
+        self._save_opts()
+        self._update_sidebar_stats()
+
+    def _on_world_stats(self, data):
+        try:
+            self._world_stats = dict(data or {})
+        except Exception:
+            self._world_stats = {}
+        self._update_sidebar_stats()
+
+    # ---- Stats Dashboard ----
+    def show_stats_dashboard(self):
+        st = self._pstats()
+        t = st.get("totals", {})
+        w = getattr(self, "_world_stats", {}) or {}
+        now = datetime.datetime.now()
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("📊 Stats Dashboard")
+        dlg.resize(560, 560)
+        v = QtWidgets.QVBoxLayout(dlg)
+        tabs = QtWidgets.QTabWidget()
+        v.addWidget(tabs, 1)
+
+        # --- Meri Stats tab ---
+        p1 = QtWidgets.QWidget()
+        l1 = QtWidgets.QVBoxLayout(p1)
+        days = st.get("days", {})
+        last7, labels = [], []
+        for i in range(6, -1, -1):
+            dt = now - datetime.timedelta(days=i)
+            last7.append((days.get(dt.strftime("%Y-%m-%d")) or {}).get("pages", 0))
+            labels.append(["So", "Mo", "Tu", "We", "Th", "Fr", "Sa"][int(dt.strftime("%w"))])
+        l1.addWidget(QtWidgets.QLabel("<b>Pichhle 7 din (pages):</b>"))
+        l1.addWidget(SparkBars(last7, labels))
+        best_k, best_v = self._pstats_best_day()
+        ok, fail = t.get("scan_ok", 0), t.get("scan_fail", 0)
+        rate = ("%.0f%%" % (100.0 * ok / (ok + fail))) if (ok + fail) else "—"
+        types = sorted((st.get("types") or {}).items(), key=lambda kv: -kv[1])[:5]
+        tys = "<br>".join("&nbsp;&nbsp;%s: <b>%d</b>" % (k, n) for k, n in types) or "&nbsp;&nbsp;(abhi nahi)"
+        hours = st.get("hours") or {}
+        peak_h = max(hours.items(), key=lambda kv: kv[1])[0] + ":00 baje" if hours else "—"
+        info = QtWidgets.QLabel(
+            "📄 Aaj: <b>%d</b> pages &nbsp;|&nbsp; 🗓 Hafta: <b>%d</b> &nbsp;|&nbsp; "
+            "Mahina: <b>%d</b><br>"
+            "📚 Kul: <b>%s pages</b>, <b>%s PDFs</b><br>"
+            "🔥 Streak: <b>%d din</b> &nbsp;|&nbsp; 🏅 Best din: <b>%s (%d)</b><br>"
+            "📤 Share: <b>%d</b> &nbsp;|&nbsp; 🗜 Bachaya: <b>%.1f MB</b><br>"
+            "🩺 Scan success: <b>%s</b> &nbsp;|&nbsp; 🔤 OCR-naam mile: <b>%d</b><br>"
+            "⏰ Sabse busy waqt: <b>%s</b><br><br><b>Document types (top 5):</b><br>%s"
+            % (self._pstats_sum(1), self._pstats_sum(7), self._pstats_sum(30),
+               "{:,}".format(t.get("pages", 0)), "{:,}".format(t.get("pdfs", 0)),
+               self._pstats_streak(), best_k, best_v,
+               t.get("shared", 0), t.get("saved_bytes", 0) / 1048576.0,
+               rate, t.get("ocr_named", 0), peak_h, tys))
+        info.setTextFormat(QtCore.Qt.RichText)
+        info.setWordWrap(True)
+        l1.addWidget(info)
+        l1.addStretch(1)
+        bexp = QtWidgets.QPushButton("📥 Excel me export karo")
+        bexp.clicked.connect(self._export_pstats_excel)
+        l1.addWidget(bexp)
+        tabs.addTab(p1, "🙋 Meri Stats")
+
+        # --- Worldwide tab ---
+        p2 = QtWidgets.QWidget()
+        l2 = QtWidgets.QVBoxLayout(p2)
+        week = w.get("week") or []
+        try:
+            wvals = [int(x[1]) for x in week][-7:]
+            wlabs = [str(x[0])[-2:] for x in week][-7:]
+        except Exception:
+            wvals, wlabs = [], []
+        if wvals:
+            l2.addWidget(QtWidgets.QLabel("<b>Duniya bhar me — pichhle 7 din:</b>"))
+            l2.addWidget(SparkBars(wvals, wlabs, "#2563eb"))
+        def _fmt(x):
+            return "…" if x is None else ("{:,}".format(int(x)) if str(x).isdigit() or isinstance(x, int) else str(x))
+        vers = w.get("versions") or {}
+        vtxt = ", ".join("v%s: %s" % (k, n) for k, n in
+                         sorted(vers.items(), key=lambda kv: -int(kv[1]))[:4]) or "—"
+        ctry = w.get("countries") or {}
+        ctxt = ", ".join("%s: %s" % (k, n) for k, n in
+                         sorted(ctry.items(), key=lambda kv: -int(kv[1]))[:5]) or "—"
+        info2 = QtWidgets.QLabel(
+            "🌍 Total scans: <b>%s</b><br>📅 Aaj: <b>%s</b> &nbsp;|&nbsp; "
+            "🟢 Abhi online: <b>%s</b> &nbsp;|&nbsp; 📈 Aaj ka peak: <b>%s</b><br>"
+            "👥 Kul users (ab tak): <b>%s</b><br>⏱ Is ghante ke scans: <b>%s</b><br><br>"
+            "<b>Versions:</b> %s<br><b>Desh:</b> %s<br><br>"
+            "<span style='color:#64748b;'>Privacy: server par sirf GINTI jaati hai — "
+            "kabhi koi document, naam ya file nahi.</span>"
+            % (_fmt(w.get("total")), _fmt(w.get("today")), _fmt(w.get("online")),
+               _fmt(w.get("peak")), _fmt(w.get("users")), _fmt(w.get("hour")),
+               vtxt, ctxt))
+        info2.setTextFormat(QtCore.Qt.RichText)
+        info2.setWordWrap(True)
+        l2.addWidget(info2)
+        l2.addStretch(1)
+        tabs.addTab(p2, "🌍 Worldwide")
+
+        bcl = QtWidgets.QPushButton("Band karo")
+        bcl.clicked.connect(dlg.accept)
+        v.addWidget(bcl)
+        self._refresh_stats("ping")   # taaza worldwide numbers
+        dlg.exec_()
+
+    def _export_pstats_excel(self):
+        if not HAS_XLSX:
+            self._warn("openpyxl install nahi hai."); return
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Stats export", os.path.join(os.path.expanduser("~"), "apnescan_stats.xlsx"),
+            "Excel (*.xlsx)")
+        if not out:
+            return
+        try:
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.append(["Date", "Pages", "PDFs", "Shared"])
+            for k in sorted(self._pstats().get("days", {})):
+                d = self._pstats()["days"][k]
+                ws.append([k, d.get("pages", 0), d.get("pdfs", 0), d.get("shared", 0)])
+            wb.save(out)
+        except Exception as exc:
+            self._warn("Export fail: %s" % exc); return
+        QtWidgets.QMessageBox.information(self, "Ho gaya", "Stats export:\n%s" % out)
 
     # ---- "Meri Files" right panel ----
     def _files_root(self):
@@ -6750,6 +7112,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     def _record_save(self, out, num_pages):
         claim = self.claim_edit.text().strip()
+        # personal stats (sirf aapke PC par)
+        try:
+            it0 = self.list.item(0)
+            dt = (it0.data(TITLE_ROLE) if it0 else "") or ""
+            dt = dt.split("_")[0] if dt else None
+        except Exception:
+            dt = None
+        self._pstats_bump(pages=num_pages, pdfs=1, doc_type=dt)
         # recent
         self._add_recent(out)
         # used claims (duplicate detection)
