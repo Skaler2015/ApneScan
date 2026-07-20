@@ -151,7 +151,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "19"
+VERSION = "20"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -353,6 +353,7 @@ DEFAULT_OPTIONS = {
     "touch_mode": False,         # bade buttons/font (touch / buzurg mode)
     "sign_image": "",            # sign/stamp wali image ka path
     "tags": {},                  # pdf path -> [tags]
+    "show_files_panel": True,    # daayan "Meri Files" panel
     "wia_device_id": None,
     "language": "hi",            # "hi" ya "en"
     "simple_mode": False,
@@ -3166,6 +3167,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.act_simple = self._ma(ms, tr("simple_on", self._lang), self.toggle_simple_mode, "हिन्दी: Simple mode: sirf zaroori buttons dikhein (naye users ke liye aasan).\nEnglish: Simple mode: show only the essential buttons.")
         self.act_simple.setCheckable(True)
         self.act_simple.setChecked(bool(self._opts.get("simple_mode")))
+        self.act_files_panel = self._ma(ms, "\"Meri Files\" panel dikhao/chhupao", self.toggle_files_panel, "हिन्दी: Daayin taraf ka folders-wala panel on/off karo.\nEnglish: Show/hide the right-side files panel.")
         self.act_touch = self._ma(ms, "Touch / bade-button mode", self.toggle_touch_mode, "हिन्दी: Buttons/likhai badi ho jayegi — touch screen ya buzurgon ke liye aasan.\nEnglish: Bigger buttons and text for touch screens or elderly users.")
         self.act_touch.setCheckable(True)
         self.act_touch.setChecked(bool(self._opts.get("touch_mode")))
@@ -3243,6 +3245,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if dlg.exec_() == QtWidgets.QDialog.Accepted:
             self._opts = dlg.get_opts(); self._save_opts(); self._update_status()
             self._apply_style(); self._refresh_page_numbers()
+            self._refresh_files_root()   # save-folder badla ho to panel bhi
 
     def _refresh_page_numbers(self):
         show = self._opts.get("show_page_numbers", True)
@@ -4703,6 +4706,48 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._list_context_menu)
         body.addWidget(self.list, 1)
+
+        # ---------- Right sidebar: "Meri Files" (folder list + save-here) ----------
+        self.files_panel = QtWidgets.QWidget()
+        self.files_panel.setObjectName("panel")
+        fp = QtWidgets.QVBoxLayout(self.files_panel)
+        fp.setContentsMargins(8, 8, 8, 8)
+        _hdr = QtWidgets.QLabel("📁 <b>Meri Files</b>")
+        _hdr.setTextFormat(QtCore.Qt.RichText)
+        _hdr.setToolTip("Save folder ke folders aur documents — yahin se naya folder "
+                        "banao aur scan ki PDF seedha usme save karo.")
+        fp.addWidget(_hdr)
+        _root = self._files_root()
+        self.files_model = QtWidgets.QFileSystemModel(self)
+        self.files_model.setRootPath(_root)
+        self.files_model.setNameFilters(["*.pdf", "*.jpg", "*.jpeg", "*.png",
+                                         "*.tif", "*.tiff", "*.docx", "*.xlsx"])
+        self.files_model.setNameFilterDisables(False)
+        self.files_tree = QtWidgets.QTreeView()
+        self.files_tree.setModel(self.files_model)
+        self.files_tree.setRootIndex(self.files_model.index(_root))
+        for _c in (1, 2, 3):
+            self.files_tree.hideColumn(_c)
+        self.files_tree.setHeaderHidden(True)
+        self.files_tree.setAnimated(True)
+        self.files_tree.doubleClicked.connect(self._files_tree_open)
+        self.files_tree.setToolTip("Folder par click karke 'Yahan save' dabao.\n"
+                                   "File par double-click = kholo.")
+        fp.addWidget(self.files_tree, 1)
+        _row = QtWidgets.QHBoxLayout()
+        _bnew = QtWidgets.QPushButton("➕ Naya folder")
+        _bnew.clicked.connect(self.new_library_folder)
+        _row.addWidget(_bnew)
+        fp.addLayout(_row)
+        self.btn_save_here = QtWidgets.QPushButton("💾 Yahan save karo")
+        self.btn_save_here.setObjectName("primary")
+        self.btn_save_here.setMinimumHeight(34)
+        self.btn_save_here.clicked.connect(self.save_into_selected_folder)
+        fp.addWidget(self.btn_save_here)
+        self.files_panel.setFixedWidth(235)
+        body.addWidget(self.files_panel)
+        if not self._opts.get("show_files_panel", True):
+            self.files_panel.hide()
         outer.addLayout(body, 1)
 
         # ---------- Status bar: connection ----------
@@ -5379,6 +5424,108 @@ class ScannerWindow(QtWidgets.QMainWindow):
         row.addWidget(b1); row.addWidget(b2); row.addStretch(1); row.addWidget(bc)
         v.addLayout(row)
         dlg.exec_()
+
+    # ---- "Meri Files" right panel ----
+    def _files_root(self):
+        root = (self._opts.get("save_folder")
+                or os.path.join(os.path.expanduser("~"), "Documents", "NobleScans"))
+        try:
+            os.makedirs(root, exist_ok=True)
+        except Exception:
+            pass
+        return root
+
+    def _refresh_files_root(self):
+        try:
+            root = self._files_root()
+            self.files_model.setRootPath(root)
+            self.files_tree.setRootIndex(self.files_model.index(root))
+        except Exception:
+            pass
+
+    def _files_tree_open(self, index):
+        try:
+            path = self.files_model.filePath(index)
+        except Exception:
+            return
+        if path and os.path.isfile(path):
+            self._open_path(path)
+
+    def _selected_library_folder(self):
+        try:
+            idx = self.files_tree.currentIndex()
+            if idx.isValid():
+                p = self.files_model.filePath(idx)
+                return p if os.path.isdir(p) else os.path.dirname(p)
+        except Exception:
+            pass
+        return self._files_root()
+
+    def new_library_folder(self):
+        base = self._selected_library_folder()
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, "Naya folder",
+            "Folder ka naam:\n(banega: '%s' ke andar)" % (os.path.basename(base) or "Meri Files"))
+        if not ok or not name.strip():
+            return
+        p = os.path.join(base, sanitize(underscore_name(name.strip())))
+        try:
+            os.makedirs(p, exist_ok=True)
+        except Exception as exc:
+            self._warn("Folder nahi bana:\n%s" % exc)
+            return
+        try:
+            self.files_tree.setCurrentIndex(self.files_model.index(p))
+            self.files_tree.expand(self.files_model.index(base))
+        except Exception:
+            pass
+        self.status.showMessage("Folder ban gaya: %s" % os.path.basename(p), 4000)
+
+    def save_into_selected_folder(self):
+        """Panel me chune folder me SEEDHA save — bas naam confirm karo, Enter."""
+        paths = self._ordered_paths()
+        if not paths:
+            self._warn(tr("scan_first", self._lang))
+            return
+        folder = self._selected_library_folder()
+        default = os.path.basename(self._build_filename(".pdf", paths=paths))
+        if default.lower().endswith(".pdf"):
+            default = default[:-4]
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, "Save karein",
+            "File ka naam:   (folder: %s)" % (os.path.basename(folder) or folder),
+            text=default)
+        if not ok or not name.strip():
+            return
+        base = sanitize(underscore_name(name.strip()))
+        out = os.path.join(folder, base + ".pdf")
+        n = 2
+        while os.path.exists(out):          # duplicate par khud numbering
+            out = os.path.join(folder, "%s_%d.pdf" % (base, n))
+            n += 1
+        if not self._validate_claim_ok() or not self._duplicate_ok():
+            return
+        try:
+            self._pages_as_pdf(paths, out)
+        except Exception:
+            self._warn("Save fail:\n%s" % traceback.format_exc())
+            return
+        self._remember_save_dir(out)
+        self._remember_doc_name(out)
+        self._record_save(out, len(paths))
+        self._dirty = False
+        self._after_save_action(out)
+        try:
+            self.files_tree.setCurrentIndex(self.files_model.index(out))
+        except Exception:
+            pass
+        self.status.showMessage("✔ Save ho gayi: %s" % out, 7000)
+
+    def toggle_files_panel(self):
+        vis = not self.files_panel.isVisible()
+        self.files_panel.setVisible(vis)
+        self._opts["show_files_panel"] = vis
+        self._save_opts()
 
     # ---- Tags + OCR search index ----
     INDEX_PATH = os.path.join(os.path.expanduser("~"), ".apnescan_index.json")
