@@ -1,0 +1,10 @@
+PyQt5
+Pillow
+pypdf
+pytesseract
+openpyxl
+numpy
+pyzbar
+pyinstaller
+pywin32
+# optional: PyMuPDF  (behtar PDF import ke liye)

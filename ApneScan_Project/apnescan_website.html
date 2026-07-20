@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ApneScan — Free Document Scanner &amp; PDF Tool</title>
+<style>
+  :root{
+    --teal:#0f766e; --teal-dark:#115e59; --mint:#5eead4;
+    --ink:#1f2933; --slate:#475569; --line:#e2e8f0; --bg:#f7faf9;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.55}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+
+  /* Nav */
+  header{position:sticky;top:0;background:rgba(247,250,249,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);z-index:10}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:66px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:22px}
+  .brand .a{color:var(--ink)} .brand .s{color:var(--teal)}
+  .badge{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--teal),var(--teal-dark));position:relative;flex:0 0 auto}
+  .badge:before{content:"";position:absolute;left:9px;top:7px;width:16px;height:22px;background:#fff;border-radius:3px}
+  .badge:after{content:"";position:absolute;left:7px;top:16px;width:24px;height:3px;border-radius:2px;background:var(--mint)}
+  nav a{color:var(--slate);font-weight:600;margin-left:22px;font-size:15px}
+  nav a:hover{color:var(--teal)}
+
+  /* Hero */
+  .hero{padding:72px 0 48px;text-align:center}
+  .pill{display:inline-block;background:#d1eae7;color:var(--teal-dark);font-weight:700;font-size:13px;padding:6px 14px;border-radius:999px;letter-spacing:.3px}
+  h1{font-size:52px;line-height:1.08;margin:18px 0 10px;letter-spacing:-1.5px}
+  h1 .s{color:var(--teal)}
+  .sub{font-size:20px;color:var(--slate);max-width:640px;margin:0 auto 28px}
+  .cta{display:inline-flex;align-items:center;gap:8px;background:var(--teal);color:#fff;font-weight:700;font-size:17px;padding:14px 26px;border-radius:12px;box-shadow:0 8px 20px rgba(15,118,110,.28)}
+  .cta:hover{background:var(--teal-dark)}
+  .cta.ghost{background:#fff;color:var(--teal);border:1px solid var(--line);box-shadow:none;margin-left:10px}
+  .free-note{margin-top:14px;color:var(--slate);font-size:14px}
+
+  /* Mock window */
+  .shot{margin:46px auto 0;max-width:820px;background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 24px 60px rgba(15,23,42,.10)}
+  .bar{display:flex;align-items:center;gap:7px;padding:12px 16px;border-bottom:1px solid var(--line);background:#f4f6f8}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .btn{border:1px solid var(--line);border-radius:8px;padding:7px 13px;font-size:13px;font-weight:600;color:var(--ink);background:#fff}
+  .btn.p{background:var(--teal);color:#fff;border-color:var(--teal)}
+  .grid-pages{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:18px 16px}
+  .page{aspect-ratio:3/4;border:1px solid var(--line);border-radius:8px;background:repeating-linear-gradient(#fff,#fff 14px,#f1f5f9 15px,#fff 16px)}
+  .conn{display:flex;align-items:center;gap:8px;padding:8px 16px;font-size:13px;color:var(--slate);border-bottom:1px solid var(--line)}
+  .green{width:10px;height:10px;border-radius:50%;background:#16a34a}
+
+  /* Sections */
+  section{padding:56px 0}
+  .eyebrow{color:var(--teal);font-weight:800;letter-spacing:1px;font-size:13px;text-transform:uppercase}
+  h2{font-size:34px;letter-spacing:-1px;margin:8px 0 6px}
+  .lead{color:var(--slate);font-size:17px;max-width:620px}
+  .features{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:34px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px}
+  .card .ic{width:42px;height:42px;border-radius:11px;background:#d1eae7;color:var(--teal-dark);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;margin-bottom:12px}
+  .card h3{font-size:18px;margin-bottom:6px}
+  .card p{color:var(--slate);font-size:14.5px}
+
+  .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:30px;counter-reset:s}
+  .step{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px}
+  .step:before{counter-increment:s;content:counter(s);display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:50%;background:var(--teal);color:#fff;font-weight:800;margin-bottom:10px}
+  .step h4{font-size:16px;margin-bottom:4px}
+  .step p{color:var(--slate);font-size:14px}
+
+  .band{background:linear-gradient(135deg,var(--teal),var(--teal-dark));color:#fff;border-radius:20px;padding:44px;text-align:center;margin:10px 0}
+  .band h2{color:#fff} .band p{color:#d1eae7;margin:8px 0 22px;font-size:17px}
+  .band .cta{background:#fff;color:var(--teal)}
+
+  footer{border-top:1px solid var(--line);padding:30px 0;color:var(--slate);font-size:14px;text-align:center}
+  .hi{color:var(--slate);font-size:15px;margin-top:6px}
+  @media(max-width:820px){
+    h1{font-size:38px}.features,.steps{grid-template-columns:1fr 1fr}
+    .grid-pages{grid-template-columns:repeat(3,1fr)}nav a{display:none}
+  }
+  @media(max-width:520px){.features,.steps{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <div class="brand"><span class="badge"></span><span><span class="a">Apne</span><span class="s">Scan</span></span></div>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#help">Help</a>
+      <a href="#download">Download</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- HERO -->
+  <div class="hero">
+    <span class="pill">100% Free · No ads · Works offline</span>
+    <h1>Scan documents to <span class="s">PDF</span>, the easy way.</h1>
+    <p class="sub">ApneScan turns any TWAIN or WIA scanner into a fast, one-click document tool — auto-save, OCR searchable PDF, and smart organizing built in.</p>
+    <a class="cta" href="#download">⬇ Download for Windows</a>
+    <a class="cta ghost" href="#how">See how it works</a>
+    <div class="free-note">हिंदी + English · किसी भी scanner पर चले · आपका data आपके PC पर ही रहता है</div>
+
+    <!-- App mock -->
+    <div class="shot" aria-hidden="true">
+      <div class="bar"><span class="dot" style="background:#f87171"></span><span class="dot" style="background:#fbbf24"></span><span class="dot" style="background:#34d399"></span></div>
+      <div class="conn"><span class="green"></span> Connected — scanner network par mil gaya (192.168.1.8)</div>
+      <div class="toolbar">
+        <span class="btn p">Scan</span><span class="btn">Profile ▾</span><span class="btn">Import</span>
+        <span class="btn">Save PDF</span><span class="btn">Save Images</span><span class="btn">OCR</span>
+      </div>
+      <div class="grid-pages">
+        <div class="page"></div><div class="page"></div><div class="page"></div><div class="page"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <section id="features">
+    <div class="eyebrow">Everything you need</div>
+    <h2>Powerful, but simple to use</h2>
+    <p class="lead">Built for clinics, hospitals and offices that scan a lot of paper every day.</p>
+    <div class="features">
+      <div class="card"><div class="ic">⚡</div><h3>One-click scan</h3><p>Save scanner settings as profiles. Pick a profile, hit Scan — the whole feeder in one go.</p></div>
+      <div class="card"><div class="ic">🔎</div><h3>Searchable PDF (OCR)</h3><p>Turn scans into PDFs whose text you can search and copy — Hindi + English.</p></div>
+      <div class="card"><div class="ic">🗂️</div><h3>Auto-organize</h3><p>Auto-save with date/number naming, year/month folders, and an Excel register of every scan.</p></div>
+      <div class="card"><div class="ic">🖨️</div><h3>Any scanner</h3><p>Works with TWAIN and WIA — Canon, HP, Epson, Brother and more, on USB or network.</p></div>
+      <div class="card"><div class="ic">✂️</div><h3>Clean up pages</h3><p>Auto-crop, deskew, remove blank pages, rotate, and enhance faded documents.</p></div>
+      <div class="card"><div class="ic">🔐</div><h3>Safe &amp; private</h3><p>Password-protect PDFs, keep daily backups, and nothing ever leaves your computer.</p></div>
+    </div>
+  </section>
+
+  <!-- HOW -->
+  <section id="how">
+    <div class="eyebrow">Get started in minutes</div>
+    <h2>From paper to PDF in 4 steps</h2>
+    <div class="steps">
+      <div class="step"><h4>Install</h4><p>Download and run the installer. No technical setup.</p></div>
+      <div class="step"><h4>Choose scanner</h4><p>The setup wizard finds your scanner (TWAIN or WIA).</p></div>
+      <div class="step"><h4>Scan</h4><p>Place your pages in the feeder and press Scan.</p></div>
+      <div class="step"><h4>Save PDF</h4><p>Save a clean, searchable PDF — or let it auto-save.</p></div>
+    </div>
+  </section>
+
+  <!-- HELP -->
+  <section id="help">
+    <div class="eyebrow">Help</div>
+    <h2>Common questions</h2>
+    <div class="features">
+      <div class="card"><h3>Scanner not showing?</h3><p>Open Settings → Scan method and try both TWAIN and WIA. Make sure your scanner's driver is installed and the device is on.</p></div>
+      <div class="card"><h3>Want faster scans?</h3><p>In your profile, set DPI to 200 and colour mode to Black &amp; White for text documents.</p></div>
+      <div class="card"><h3>Is my data safe?</h3><p>Yes. ApneScan runs fully on your PC. It has no ads, no tracking, and never uploads your files.</p></div>
+    </div>
+  </section>
+
+  <!-- DOWNLOAD -->
+  <section id="download">
+    <div class="band">
+      <h2>Download ApneScan — free</h2>
+      <p>Windows 10 &amp; 11 · लगभग किसी भी scanner पर चले</p>
+      <a class="cta" href="#">⬇ Download ApneScan Setup</a>
+      <div class="hi" style="color:#d1eae7">डाउनलोड करें और install करें — बिल्कुल मुफ़्त।</div>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="brand" style="justify-content:center;margin-bottom:8px"><span class="badge"></span><span><span class="a">Apne</span><span class="s">Scan</span></span></div>
+    Free document scanning &amp; PDF tool · © 2026 · Made for people who scan a lot of paper.
+    <div class="hi">यह एक मुफ़्त software है। आपका कोई भी data आपके PC से बाहर नहीं जाता।</div>
+  </div>
+</footer>
+
+</body>
+</html>
