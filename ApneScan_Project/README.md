@@ -127,6 +127,21 @@ patient data kabhi nahi.
   usi file me hai.
 - Har change ke baad `build.bat` se nayi .exe bana lena.
 
-Backlog (jo abhi banana baaki hai): installer ko bhi CI me banana, website ko
-GitHub Pages par host karna, code ko chhote modules me baantna, image-processing
-functions ke automatic tests.
+## v18 ke naye features (July 2026)
+
+- Bundle auto-split (blank separator), ulta page auto-seedha, auto colour-detect,
+  scanner auto-discovery, book mode, business-card → contacts, photo restore,
+  custom lambi parchi, scan history
+- PDF Tools: page editor, sign/stamp, page numbers, kisi bhi PDF par watermark,
+  password hatana, PDF→Word/Excel/JPG, folder→PDF, archival PDF
+- Page ka text copy + Hindi↔English translate
+- Tags, ek-baar OCR index → andar-ke-text ki TURANT search, naye filename
+  placeholders ({name} {year} {month} {day})
+- Poora auto-update (khud download + install), portable mode (exe ke paas
+  `portable.txt` rakh do), settings export/import, crash reporter, touch mode,
+  4 nayi bhashayein (partial)
+- Installer (`ApneScan-Setup.exe`) bhi CI me apne aap banta hai aur website par
+  milta hai
+
+Backlog: code ko chhote modules me baantna, image-processing ke automatic tests,
+poori translations.

@@ -73,6 +73,8 @@ jobs:
           fi
           echo "Exe build run: $RUN_ID"
           gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n ApneScan-exe -D _site/
+          # Installer bhi website par (na mile to koi baat nahi — purani builds me nahi tha)
+          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n ApneScan-Setup -D _site/ || true
           ls -la _site/
 
       - name: Configure GitHub Pages

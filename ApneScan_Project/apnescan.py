@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-ApneScan - v17  [speed: rename/import/thumbnails ab background me — UI kabhi nahi jamti;
-                 fix: eSCL B&W feeder-jam, backing-whitening pixel-accurate;
-                 naya: Share (WhatsApp/Email), PDF compress, photo import, ID split]
+ApneScan - v18  [31 naye public features: bundle auto-split, auto-orient, auto-colour,
+                 scanner discovery, book/business-card/photo-restore modes, PDF tools
+                 (editor, sign/stamp, Word/Excel/JPG, watermark, unlock, archival),
+                 tags + instant OCR-index search, self-installing auto-update,
+                 portable mode, settings export/import, crash reporter, touch mode,
+                 4 nayi bhashayein (partial)]
 =========================================================
 Run with 32-bit Python (HP TWAIN driver is 32-bit):
     py -3.12-32 scanner_app_v10.py
@@ -148,7 +151,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "17"
+VERSION = "18"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():

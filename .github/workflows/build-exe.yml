@@ -40,6 +40,20 @@ jobs:
           path: ApneScan_Project/dist/ApneScan.exe
           if-no-files-found: error
 
+      # One-click installer (Start menu + desktop icon ke saath)
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ApneScan_Project\ApneScan_installer_ci.iss
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApneScan-Setup
+          path: ApneScan_Project/Output/ApneScan-Setup.exe
+          if-no-files-found: error
+
       # Tag push (jaise v16) par exe seedha GitHub Releases page par chala jata
       # hai — public download link, login ki zaroorat nahi.
       - name: Create GitHub Release (tags only)
