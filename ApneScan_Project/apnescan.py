@@ -151,7 +151,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "18"
+VERSION = "19"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -966,12 +966,22 @@ class StatsWorker(QtCore.QThread):
 
 
 class UpdateChecker(QtCore.QThread):
-    """GitHub Releases se latest version ka pata karo (naya version aaya hai?)."""
-    result = QtCore.pyqtSignal(str, str)   # latest_tag ("v17"), download_url
+    """Latest version ka pata karo — pehle WEBSITE se (version.txt, jo har
+    deploy par apne aap banta hai), na mile to GitHub Releases se."""
+    result = QtCore.pyqtSignal(str, str)   # latest_tag ("v19"), download_url
 
     def run(self):
+        import urllib.request as U
         try:
-            import urllib.request as U
+            req = U.Request("https://apnescan.apnesoft.com/version.txt",
+                            headers={"User-Agent": "ApneScan"})
+            tag = U.urlopen(req, timeout=10).read().decode("utf-8", "ignore").strip()[:20]
+            if re.search(r"\d", tag or ""):
+                self.result.emit(tag, DOWNLOAD_PAGE)
+                return
+        except Exception:
+            pass
+        try:
             import json as J
             req = U.Request(UPDATE_API, headers={"User-Agent": "ApneScan"})
             data = J.loads(U.urlopen(req, timeout=10).read().decode("utf-8", "ignore"))
@@ -3651,17 +3661,45 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self._warn("Update check nahi ho paya. Internet chal raha hai?")
             return
         if _n(tag) > _n(VERSION):
-            r = QtWidgets.QMessageBox.question(
-                self, "Naya version aa gaya",
-                "ApneScan ka naya version %s aa gaya hai (aapke paas v%s hai).\n\n"
-                "Abhi download karke update kar dein? (App khud band hokar nayi khul jayegi)"
-                % (tag, VERSION),
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-            if r == QtWidgets.QMessageBox.Yes:
-                self._start_self_update()
+            # Sidebar me banner dikhao — wahi se EK click me update
+            self._show_update_banner(tag)
+            if not silent:
+                r = QtWidgets.QMessageBox.question(
+                    self, "Naya version aa gaya",
+                    "ApneScan ka naya version %s aa gaya hai (aapke paas v%s hai).\n\n"
+                    "Abhi download karke update kar dein? (App khud band hokar nayi khul jayegi)"
+                    % (tag, VERSION),
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+                if r == QtWidgets.QMessageBox.Yes:
+                    self._start_self_update()
         elif not silent:
             QtWidgets.QMessageBox.information(
                 self, "Update", "Aap latest version (v%s) par hi hain." % VERSION)
+
+    def _show_update_banner(self, tag):
+        self._latest_tag = tag
+        try:
+            self.update_box.setText("🔔 Naya update %s aa gaya!\n⬇ Ek click me update karo" % tag)
+            self.update_box.setEnabled(True)
+            self.update_box.show()
+        except Exception:
+            pass
+
+    def _sidebar_update_clicked(self):
+        try:
+            self.update_box.setEnabled(False)
+            self.update_box.setText("⬇ Download ho raha hai…\n(app istemal karte rahiye)")
+        except Exception:
+            pass
+        self._start_self_update()
+
+    def _reset_update_banner(self):
+        """Download fail hone par banner wapas clickable karo."""
+        try:
+            if getattr(self, "_latest_tag", ""):
+                self._show_update_banner(self._latest_tag)
+        except Exception:
+            pass
 
     def _start_self_update(self):
         """Naya version website se download karke KHUD install karo (feature 36)."""
@@ -3680,6 +3718,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
         def done(res):
             if isinstance(res, Exception):
+                self._reset_update_banner()
                 self._warn("Update download nahi ho paya:\n%s\n\n"
                            "Website se khud download kar lein: apnescan.apnesoft.com" % res)
                 try:
@@ -4609,6 +4648,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.cmb_depth = QtWidgets.QComboBox(); self.cmb_depth.addItems(["24-bit Colour", "Grayscale", "Black & White"]); self.cmb_depth.setCurrentText("Grayscale"); pl.addWidget(self.cmb_depth)
 
         pl.addStretch(1)
+        # UPDATE BANNER: naya version website par aate hi yahan dikhta hai —
+        # ek click me download + install + restart (chhupa rehta hai warna).
+        self.update_box = QtWidgets.QPushButton()
+        self.update_box.setObjectName("updatebox")
+        self.update_box.setStyleSheet(
+            "#updatebox{background:#f59e0b; color:#1f2937; font-weight:700;"
+            " border:none; border-radius:8px; padding:10px; font-size:12px;}"
+            "#updatebox:hover{background:#d97706; color:#fff;}"
+            "#updatebox:disabled{background:#fbbf24; color:#6b7280;}")
+        self.update_box.clicked.connect(self._sidebar_update_clicked)
+        self.update_box.hide()
+        pl.addWidget(self.update_box)
         self.stats_box = QtWidgets.QLabel()
         self.stats_box.setTextFormat(QtCore.Qt.RichText)
         self.stats_box.setObjectName("statsbox")
@@ -4672,8 +4723,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._stats_timer.timeout.connect(lambda: self._refresh_stats("ping"))
         self._stats_timer.start()
         QtCore.QTimer.singleShot(1500, lambda: self._refresh_stats("ping"))
-        # Naya version aaya ho to chupchaap check karke batao (sirf startup par)
+        # Naya version aaya ho to sidebar me banner dikhao — startup par aur
+        # phir har 6 ghante (lambi chalti app bhi update dekh legi)
         QtCore.QTimer.singleShot(4000, lambda: self.check_updates(True))
+        self._upd_timer = QtCore.QTimer(self)
+        self._upd_timer.setInterval(6 * 3600 * 1000)
+        self._upd_timer.timeout.connect(lambda: self.check_updates(True))
+        self._upd_timer.start()
         # kept (hidden) for the connection feature; IP set via Settings menu
         self.ip_field = QtWidgets.QLineEdit(self._config.get("scanner_ip", "")); self.ip_field.hide()
         self.btn_check = QtWidgets.QPushButton(); self.btn_check.hide()
