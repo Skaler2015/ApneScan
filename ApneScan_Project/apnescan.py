@@ -151,7 +151,23 @@ APP_NAME = "ApneScan"
 VERSION = "17"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
-CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".apnescan.json")
+def _portable_dir():
+    """PORTABLE MODE: exe ke saath 'portable.txt' naam ki khaali file rakh do —
+    saari settings wahi folder me rahengi (pen-drive se chalao, settings saath)."""
+    try:
+        base = os.path.dirname(sys.executable if getattr(sys, "frozen", False)
+                               else os.path.abspath(__file__))
+        if os.path.exists(os.path.join(base, "portable.txt")):
+            return base
+    except Exception:
+        pass
+    return None
+
+
+_PORTABLE = _portable_dir()
+CONFIG_PATH = (os.path.join(_PORTABLE, "apnescan_config.json") if _PORTABLE
+               else os.path.join(os.path.expanduser("~"), ".apnescan.json"))
+CRASH_PATH = os.path.join(os.path.expanduser("~"), "apnescan_crash.txt")
 _OLD_CONFIG = os.path.join(os.path.expanduser("~"), ".noble_doc_scanner.json")
 if not os.path.exists(CONFIG_PATH) and os.path.exists(_OLD_CONFIG):
     try:
@@ -1524,6 +1540,38 @@ T = {
     "save_sel": {"hi": "Selected pages ki PDF", "en": "Save selected pages (PDF)"},
     "no_selection": {"hi": "Koi page select nahi hai. Thumbnails me Ctrl/Shift se pages chuno.", "en": "No pages selected. Use Ctrl/Shift to select pages."},
 }
+
+# Aur bhashayein (adhuri — jo key translate nahi hui wo Hindi me dikhegi)
+_EXTRA_LANGS = {
+    "mr": {"up": "वर", "down": "खाली", "help_guide": "मदत / Guide", "whatsnew": "नवीन काय आहे",
+           "none_profile": "प्रोफाइल नाही", "checking": "कनेक्शन तपासत आहे...",
+           "select_first": "आधी एखादे पान निवडा.", "scan_first": "आधी पान scan/import करा.",
+           "save_all": "सर्व पानांची PDF", "save_sel": "निवडलेल्या पानांची PDF",
+           "pages_hint": "Pages (क्रम बदलण्यासाठी drag करा)",
+           "no_selection": "कोणतेही पान निवडलेले नाही. Ctrl/Shift ने निवडा."},
+    "gu": {"up": "ઉપર", "down": "નીચે", "help_guide": "મદદ / Guide", "whatsnew": "નવું શું છે",
+           "none_profile": "કોઈ પ્રોફાઇલ નથી", "checking": "કનેક્શન તપાસી રહ્યાં છીએ...",
+           "select_first": "પહેલા કોઈ પાનું પસંદ કરો.", "scan_first": "પહેલા પાનું scan/import કરો.",
+           "save_all": "બધા પાનાની PDF", "save_sel": "પસંદ કરેલા પાનાની PDF",
+           "pages_hint": "Pages (ક્રમ બદલવા drag કરો)",
+           "no_selection": "કોઈ પાનું પસંદ નથી. Ctrl/Shift થી પસંદ કરો."},
+    "pa": {"up": "ਉੱਪਰ", "down": "ਹੇਠਾਂ", "help_guide": "ਮਦਦ / Guide", "whatsnew": "ਨਵਾਂ ਕੀ ਹੈ",
+           "none_profile": "ਕੋਈ ਪ੍ਰੋਫਾਈਲ ਨਹੀਂ", "checking": "ਕਨੈਕਸ਼ਨ ਚੈੱਕ ਹੋ ਰਿਹਾ ਹੈ...",
+           "select_first": "ਪਹਿਲਾਂ ਕੋਈ ਪੰਨਾ ਚੁਣੋ।", "scan_first": "ਪਹਿਲਾਂ ਪੰਨਾ scan/import ਕਰੋ।",
+           "save_all": "ਸਾਰੇ ਪੰਨਿਆਂ ਦੀ PDF", "save_sel": "ਚੁਣੇ ਪੰਨਿਆਂ ਦੀ PDF",
+           "pages_hint": "Pages (ਕ੍ਰਮ ਬਦਲਣ ਲਈ drag ਕਰੋ)",
+           "no_selection": "ਕੋਈ ਪੰਨਾ ਨਹੀਂ ਚੁਣਿਆ। Ctrl/Shift ਨਾਲ ਚੁਣੋ।"},
+    "ta": {"up": "மேலே", "down": "கீழே", "help_guide": "உதவி / Guide", "whatsnew": "புதிதாக என்ன",
+           "none_profile": "சுயவிவரம் இல்லை", "checking": "இணைப்பு சரிபார்க்கப்படுகிறது...",
+           "select_first": "முதலில் ஒரு பக்கத்தைத் தேர்வு செய்யவும்.",
+           "scan_first": "முதலில் பக்கத்தை scan/import செய்யவும்.",
+           "save_all": "எல்லா பக்கங்களின் PDF", "save_sel": "தேர்ந்த பக்கங்களின் PDF",
+           "pages_hint": "Pages (வரிசை மாற்ற drag)",
+           "no_selection": "எந்தப் பக்கமும் தேர்வில்லை. Ctrl/Shift பயன்படுத்தவும்."},
+}
+for _lc, _tab in _EXTRA_LANGS.items():
+    for _k, _v in _tab.items():
+        T.setdefault(_k, {})[_lc] = _v
 
 
 def tr(key, lang="hi"):
@@ -3105,6 +3153,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.act_simple = self._ma(ms, tr("simple_on", self._lang), self.toggle_simple_mode, "हिन्दी: Simple mode: sirf zaroori buttons dikhein (naye users ke liye aasan).\nEnglish: Simple mode: show only the essential buttons.")
         self.act_simple.setCheckable(True)
         self.act_simple.setChecked(bool(self._opts.get("simple_mode")))
+        self.act_touch = self._ma(ms, "Touch / bade-button mode", self.toggle_touch_mode, "हिन्दी: Buttons/likhai badi ho jayegi — touch screen ya buzurgon ke liye aasan.\nEnglish: Bigger buttons and text for touch screens or elderly users.")
+        self.act_touch.setCheckable(True)
+        self.act_touch.setChecked(bool(self._opts.get("touch_mode")))
+        ms.addSeparator()
+        self._ma(ms, "Settings export karo…", self.export_settings, "हिन्दी: Saari settings ek file me — naye PC par le jaane ke liye.\nEnglish: Export all settings to a file for another PC.")
+        self._ma(ms, "Settings import karo…", self.import_settings, "हिन्दी: Export ki hui settings file se sab wapas le aao.\nEnglish: Import settings from an exported file.")
 
         mh = mb.addMenu(tr("menu_help", self._lang)); mh.setToolTipsVisible(True)
         self._ma(mh, tr("help_guide", self._lang), self.show_help, "हिन्दी: App istemal karne ki guide.\nEnglish: How-to guide.")
@@ -3113,7 +3167,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mh, "Test / Diagnostics", self.run_diagnostics, "हिन्दी: Scanner/app ki jaankari + error report (share karne ke liye).\nEnglish: Scanner/app info + error report.")
         self._ma(mh, "Duplex Test (both-side)", self.run_duplex_test, "हिन्दी: Jaancho ki dono taraf (duplex) scan ho raha hai ya nahi.\nEnglish: Test whether both-side (duplex) scanning works.")
         self._ma(mh, "eSCL Test (network scan jaanch)", self.run_escl_test, "हिन्दी: Network scan (eSCL) ko step-by-step jaanch kar asli problem batata hai (connect / status / job).\nEnglish: Step-by-step eSCL network-scan test that shows the real problem.")
-        self._ma(mh, "Update check karo…", lambda: self.check_updates(False), "हिन्दी: Dekho ki ApneScan ka naya version aaya hai ya nahi.\nEnglish: Check whether a newer ApneScan version is available.")
+        self._ma(mh, "Update check karo…", lambda: self.check_updates(False), "हिन्दी: Naya version aaya ho to app use khud download karke install kar legi.\nEnglish: If a newer version exists the app downloads and installs it itself.")
+        self._ma(mh, "Error report dekho…", self.open_crash_report, "हिन्दी: Agar app kabhi crash hui ho to uski report kholo (feedback me bhejne ke liye).\nEnglish: Open the saved crash report, if any.")
         self._ma(mh, tr("feedback", self._lang), self.send_feedback, "हिन्दी: Sujhav/shikayat bhejo.\nEnglish: Send feedback.")
         self._ma(mh, tr("about", self._lang), self.show_about, "हिन्दी: App ke baare me.\nEnglish: About this app.")
 
@@ -3596,17 +3651,118 @@ class ScannerWindow(QtWidgets.QMainWindow):
             r = QtWidgets.QMessageBox.question(
                 self, "Naya version aa gaya",
                 "ApneScan ka naya version %s aa gaya hai (aapke paas v%s hai).\n\n"
-                "Download page kholein?" % (tag, VERSION),
+                "Abhi download karke update kar dein? (App khud band hokar nayi khul jayegi)"
+                % (tag, VERSION),
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
             if r == QtWidgets.QMessageBox.Yes:
-                try:
-                    import webbrowser
-                    webbrowser.open(url or DOWNLOAD_PAGE)
-                except Exception:
-                    pass
+                self._start_self_update()
         elif not silent:
             QtWidgets.QMessageBox.information(
                 self, "Update", "Aap latest version (v%s) par hi hain." % VERSION)
+
+    def _start_self_update(self):
+        """Naya version website se download karke KHUD install karo (feature 36)."""
+        url = "https://apnescan.apnesoft.com/ApneScan.exe"
+
+        def job():
+            import urllib.request as U
+            fd, tmp = tempfile.mkstemp(suffix=".exe")
+            os.close(fd)
+            req = U.Request(url, headers={"User-Agent": "ApneScan"})
+            with U.urlopen(req, timeout=180) as r, open(tmp, "wb") as fh:
+                shutil.copyfileobj(r, fh)
+            if os.path.getsize(tmp) < 5_000_000:
+                raise RuntimeError("Download adhoora laga (%d bytes)" % os.path.getsize(tmp))
+            return tmp
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn("Update download nahi ho paya:\n%s\n\n"
+                           "Website se khud download kar lein: apnescan.apnesoft.com" % res)
+                try:
+                    import webbrowser
+                    webbrowser.open(DOWNLOAD_PAGE)
+                except Exception:
+                    pass
+                return
+            self._apply_downloaded_update(res)
+        self._run_bg(job, done, "Naya version download ho raha hai… (app chalti rahegi)")
+
+    def _apply_downloaded_update(self, tmp_exe):
+        if not getattr(sys, "frozen", False):
+            self._reveal_in_explorer(tmp_exe)
+            QtWidgets.QMessageBox.information(
+                self, "Download ho gaya", "Nayi exe yahan hai:\n%s" % tmp_exe)
+            return
+        cur = os.path.abspath(sys.executable)
+        bat = os.path.join(tempfile.gettempdir(), "apnescan_update.bat")
+        try:
+            with open(bat, "w") as fh:
+                fh.write('@echo off\r\n'
+                         'ping 127.0.0.1 -n 4 > nul\r\n'
+                         'copy /y "%s" "%s" > nul\r\n'
+                         'start "" "%s"\r\n'
+                         'del "%%~f0"\r\n' % (tmp_exe, cur, cur))
+        except Exception as exc:
+            self._warn("Update script fail: %s" % exc)
+            return
+        r = QtWidgets.QMessageBox.question(
+            self, "Update taiyar",
+            "Naya version download ho gaya.\n\nApp ab band hogi aur nayi version "
+            "khud khul jayegi. Theek?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if r == QtWidgets.QMessageBox.Yes:
+            try:
+                os.startfile(bat)
+            except Exception as exc:
+                self._warn("Update start nahi hua: %s" % exc)
+                return
+            QtWidgets.QApplication.quit()
+
+    def export_settings(self):
+        """Saari settings ek file me — naye PC par le jaane ke liye."""
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Settings export karein",
+            os.path.join(os.path.expanduser("~"), "apnescan_settings.json"),
+            "Settings (*.json)")
+        if not out:
+            return
+        try:
+            shutil.copy2(CONFIG_PATH, out)
+        except Exception as exc:
+            self._warn("Export fail: %s" % exc); return
+        QtWidgets.QMessageBox.information(
+            self, "Ho gaya", "Settings export ho gayi:\n%s\n\nNaye PC par: Settings → "
+            "Import settings… se wapas le aana." % out)
+
+    def import_settings(self):
+        f, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Settings file chuno", os.path.expanduser("~"), "Settings (*.json)")
+        if not f:
+            return
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                json.load(fh)          # valid json hai?
+            shutil.copy2(f, CONFIG_PATH)
+        except Exception as exc:
+            self._warn("Import fail (file sahi nahi lagti): %s" % exc); return
+        QtWidgets.QMessageBox.information(
+            self, "Ho gaya", "Settings aa gayi. App band karke dobara kholein.")
+
+    def toggle_touch_mode(self):
+        self._opts["touch_mode"] = bool(self.act_touch.isChecked())
+        self._save_opts()
+        self._apply_style()
+        self.status.showMessage(
+            "Touch mode %s — poora asar app dobara kholne par." %
+            ("ON" if self._opts["touch_mode"] else "OFF"), 5000)
+
+    def open_crash_report(self):
+        if os.path.exists(CRASH_PATH):
+            self._open_path(CRASH_PATH)
+        else:
+            QtWidgets.QMessageBox.information(
+                self, "Report", "Koi error report nahi hai — sab theek chal raha hai! 🙂")
 
     # ---- Share (WhatsApp / Email) ----
     def _pick_share_pdf(self):
@@ -3878,12 +4034,15 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     def choose_language(self):
         cur = self._opts.get("language", "hi")
+        LANGS = [("Hindi", "hi"), ("English", "en"),
+                 ("मराठी Marathi (adhuri)", "mr"), ("ગુજરાતી Gujarati (adhuri)", "gu"),
+                 ("ਪੰਜਾਬੀ Punjabi (adhuri)", "pa"), ("தமிழ் Tamil (adhuri)", "ta")]
+        idx = next((i for i, (_n, c) in enumerate(LANGS) if c == cur), 0)
         lang, ok = QtWidgets.QInputDialog.getItem(
-            self, "Language", "Bhasha / Language:", ["Hindi", "English"],
-            0 if cur == "hi" else 1, False)
+            self, "Language", "Bhasha / Language:", [n for n, _c in LANGS], idx, False)
         if not ok:
             return
-        self._opts["language"] = "hi" if lang == "Hindi" else "en"
+        self._opts["language"] = dict((n, c) for n, c in LANGS).get(lang, "hi")
         self._save_opts()
         QtWidgets.QMessageBox.information(
             self, "Language",
@@ -4519,6 +4678,21 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
 
     def _apply_style(self):
+        self._apply_base_style()
+        # Touch / buzurg mode: sab kuch bada — buttons, text, thumbnails
+        if self._opts.get("touch_mode"):
+            self.setStyleSheet(self.styleSheet() + """
+                QToolButton { font-size:14px; padding:10px 12px; }
+                QPushButton { font-size:15px; padding:12px 18px; }
+                QMenuBar, QMenu, QLabel, QLineEdit, QComboBox, QSpinBox { font-size:14px; }
+                QListWidget { font-size:14px; }
+            """)
+            try:
+                self.list.setIconSize(QtCore.QSize(190, 250))
+            except Exception:
+                pass
+
+    def _apply_base_style(self):
         if self._opts.get("theme") == "dark":
             self.setStyleSheet("""
                 QMainWindow, QWidget { background:#0f172a; color:#e2e8f0; }
@@ -6580,6 +6754,24 @@ def main():
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("NobleCare.ApneScan")
     except Exception:
         pass
+    # CRASH REPORTER: koi bhi anhoni error file me save ho jaati hai taaki
+    # report bhej kar agli update me fix ho sake.
+    def _crash_hook(t, v, tb):
+        try:
+            with open(CRASH_PATH, "a", encoding="utf-8") as fh:
+                fh.write("\n\n==== %s | ApneScan v%s ====\n" % (datetime.datetime.now(), VERSION))
+                fh.write("".join(traceback.format_exception(t, v, tb)))
+        except Exception:
+            pass
+        try:
+            QtWidgets.QMessageBox.critical(
+                None, "ApneScan — error",
+                "App me ek error aa gayi. Report yahan save ho gayi:\n%s\n\n"
+                "Ye file feedback me bhej dein — agli update me fix ho jayega." % CRASH_PATH)
+        except Exception:
+            pass
+    sys.excepthook = _crash_hook
+
     app = QtWidgets.QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setWindowIcon(app_icon())
