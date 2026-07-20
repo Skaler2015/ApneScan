@@ -68,11 +68,30 @@ py -3.12-32 -m PyInstaller --noconfirm --clean --onefile --windowed ^
 
 ---
 
+## GitHub se automatic .exe build (naya!)
+
+Ab har `git push` par GitHub Actions ka **Windows server** khud .exe bana deta hai:
+- Har push: https://github.com/Skaler2015/ApneScan/actions → run kholo → neeche
+  **Artifacts** me `ApneScan-exe` (ZIP me ApneScan.exe).
+- **Release nikalna ho** (public download link ke liye): ek tag push karo, jaise
+  `git tag v17 && git push origin v17` → exe apne aap
+  https://github.com/Skaler2015/ApneScan/releases par aa jayegi.
+- App me **Help → Update check karo** isi Releases page se naya version batata hai
+  (startup par bhi chupchaap check hota hai).
+
+---
+
 ## Worldwide Stats (already live)
 
 `ApneScan_Stats.gs` Google Apps Script par deploy hai; app me URL already daala hua
 hai. Sidebar me total/aaj/online dikhta hai. Sirf GINTI jaati hai — koi document ya
 patient data kabhi nahi.
+
+> **Zaroori (July 2026 fix):** "Aaj (today): 0" wala bug .gs code me fix hua hai.
+> Naya code lagane ke liye: Google Sheet → Extensions → Apps Script → poora code
+> is file ke naye code se REPLACE karo → Save → **Deploy → Manage deployments →
+> (pencil) Edit → Version: New version → Deploy.** URL wahi rahega, app me kuch
+> nahi badalna.
 
 ---
 
@@ -87,6 +106,17 @@ patient data kabhi nahi.
 - Profiles (per-profile page size), keyboard shortcuts (Scan=Enter, Save selected=Space)
 - Hindi/English, light/dark theme, bilingual help everywhere
 - Excel register, backup, barcode claim autofill, merge/split PDF, search old PDFs
+  (naam se AUR PDF ke andar ke text se)
+- **Share**: saved PDF ko WhatsApp/Email se bhejo (File → Share/Bhejo)
+- **PDF compress tool**: kisi bhi PDF ko 200KB/500KB/1MB/2MB tak chhota karo
+  (Tools → PDF chhota karo) — portal upload limits ke liye
+- **Phone-photo se PDF**: phone ki document-photo import karo — shadow hat kar
+  scan-jaisi saaf (Tools → Phone-photo se PDF)
+- **ID cards alag karo**: ek page par 2-3 cards scan karke unhe alag-alag pages
+  me kaato (Tools menu)
+- **Update check**: Help → Update check karo (GitHub Releases se)
+- **TWAIN continuous feed (experimental)**: Settings me on karo to ADF bina ruke
+  chalta hai (support na ho to khud purane tareeke par aa jata hai)
 
 ---
 
@@ -97,6 +127,6 @@ patient data kabhi nahi.
   usi file me hai.
 - Har change ke baad `build.bat` se nayi .exe bana lena.
 
-Backlog (jo abhi banana baaki hai): WhatsApp/Email se PDF bhejna, phone-photo se PDF,
-purane files me naam/word search, ID/passport auto-crop, 2-in-1 multiple IDs, tedha
-page auto-seedha.
+Backlog (jo abhi banana baaki hai): installer ko bhi CI me banana, website ko
+GitHub Pages par host karna, code ko chhote modules me baantna, image-processing
+functions ke automatic tests.

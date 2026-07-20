@@ -147,7 +147,9 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "1.0"
+VERSION = "16"
+UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
+DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".apnescan.json")
 _OLD_CONFIG = os.path.join(os.path.expanduser("~"), ".noble_doc_scanner.json")
 if not os.path.exists(CONFIG_PATH) and os.path.exists(_OLD_CONFIG):
@@ -501,6 +503,96 @@ def auto_enhance(img):
         return img
 
 
+def flatten_photo_shadows(img):
+    """Phone-photo ke shadow / roshni ke dabbe hatao: background ko blur karke
+    usse divide karo — paper flat white ho jata hai, text/stamp waise hi rehte
+    hain. numpy na ho to sirf autocontrast."""
+    if not HAS_NUMPY:
+        return ImageOps.autocontrast(img.convert("RGB"), cutoff=1)
+    try:
+        import numpy as _np
+        rgb = img.convert("RGB")
+        bg = rgb.convert("L").filter(ImageFilter.GaussianBlur(radius=40))
+        b = _np.asarray(bg, dtype=_np.float32)
+        b[b < 1] = 1
+        a = _np.asarray(rgb, dtype=_np.float32)
+        flat = _np.clip(a / b[..., None] * 230.0, 0, 255).astype("uint8")
+        out = Image.fromarray(flat, "RGB")
+        return ImageOps.autocontrast(out, cutoff=1)
+    except Exception:
+        return img
+
+
+def clean_photo(img):
+    """Phone se kheenchi photo ko scan-jaisa banao: EXIF ke hisaab se seedha,
+    bahut badi ho to chhota, shadow hatao."""
+    try:
+        img = ImageOps.exif_transpose(img)
+    except Exception:
+        pass
+    img = img.convert("RGB")
+    m = max(img.width, img.height)
+    if m > 2600:
+        s = 2600.0 / m
+        img = img.resize((max(1, int(img.width * s)), max(1, int(img.height * s))),
+                         Image.LANCZOS)
+    return flatten_photo_shadows(img)
+
+
+def _largest_gap(flags, min_gap):
+    """Bool array me sabse badi False-run (start,end) jo kinaron ko na chhue."""
+    best = None
+    run = 0
+    for i, v in enumerate(flags):
+        if not v:
+            run += 1
+        else:
+            if run >= min_gap and i - run > 0:
+                if best is None or run > (best[1] - best[0]):
+                    best = (i - run, i)
+            run = 0
+    return best
+
+
+def detect_content_boxes(img, bg_thresh=235):
+    """White background par rakhe alag-alag cards/documents ke boxes dhoondo
+    (2-3 ID ek saath scan karne par). Bade khaali gap par recursively todta hai."""
+    if not HAS_NUMPY:
+        return [(0, 0, img.width, img.height)]
+    import numpy as _np
+    g = _np.asarray(img.convert("L"))
+    mask = g < bg_thresh
+    boxes = []
+
+    def _split(t, b, l, r, depth):
+        sub = mask[t:b, l:r]
+        if sub.size == 0 or not sub.any():
+            return
+        rows = sub.any(axis=1)
+        cols = sub.any(axis=0)
+        t2 = t + int(_np.argmax(rows))
+        b2 = b - int(_np.argmax(rows[::-1]))
+        l2 = l + int(_np.argmax(cols))
+        r2 = r - int(_np.argmax(cols[::-1]))
+        if depth < 6:
+            rows2 = mask[t2:b2, l2:r2].any(axis=1)
+            gap = _largest_gap(rows2, max(14, (b2 - t2) // 20))
+            if gap:
+                _split(t2, t2 + gap[0], l2, r2, depth + 1)
+                _split(t2 + gap[1], b2, l2, r2, depth + 1)
+                return
+            cols2 = mask[t2:b2, l2:r2].any(axis=0)
+            gap = _largest_gap(cols2, max(14, (r2 - l2) // 20))
+            if gap:
+                _split(t2, b2, l2, l2 + gap[0], depth + 1)
+                _split(t2, b2, l2 + gap[1], r2, depth + 1)
+                return
+        boxes.append((l2, t2, r2, b2))
+
+    _split(0, 0 + mask.shape[0], 0, mask.shape[1], 0)
+    return boxes
+
+
 def apply_watermark(img, text):
     try:
         base = img.convert("RGBA")
@@ -787,6 +879,22 @@ class StatsWorker(QtCore.QThread):
                 self.failed.emit()
         except Exception:
             self.failed.emit()
+
+
+class UpdateChecker(QtCore.QThread):
+    """GitHub Releases se latest version ka pata karo (naya version aaya hai?)."""
+    result = QtCore.pyqtSignal(str, str)   # latest_tag ("v17"), download_url
+
+    def run(self):
+        try:
+            import urllib.request as U
+            import json as J
+            req = U.Request(UPDATE_API, headers={"User-Agent": "ApneScan"})
+            data = J.loads(U.urlopen(req, timeout=10).read().decode("utf-8", "ignore"))
+            self.result.emit(str(data.get("tag_name") or ""),
+                             str(data.get("html_url") or DOWNLOAD_PAGE))
+        except Exception:
+            self.result.emit("", "")
 
 
 class ScannerError(Exception):
@@ -2719,7 +2827,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(me, "Clear all", self.clear_all, "हिन्दी: Saare pages hatao (khaali karo).\nEnglish: Remove all pages.")
 
         mt = mb.addMenu(tr("menu_tools", self._lang)); mt.setToolTipsVisible(True)
-        self._ma(mt, "Search past PDFs…", self.search_pdfs, "हिन्दी: Purani save ki hui PDF dhoondo (claim/naam se).\nEnglish: Search your saved PDFs.", "Ctrl+F")
+        self._ma(mt, "Phone-photo se PDF (photo import)…", self.import_photos, "हिन्दी: Phone se kheenchi document-photos ko saaf karke pages banao (shadow hatana, seedha karna) — phir PDF save karo.\nEnglish: Clean up phone photos of documents (remove shadows, straighten) and add them as pages.")
+        self._ma(mt, "ID cards alag karo (is page se)…", self.split_id_cards, "हिन्दी: Ek page par 2-3 ID cards scan kiye hain? Ye unhe alag-alag pages me kaat dega.\nEnglish: Scanned 2-3 ID cards on one page? This splits them into separate pages.")
+        self._ma(mt, "Search past PDFs…", self.search_pdfs, "हिन्दी: Purani save ki hui PDF dhoondo (claim/naam se, ya PDF ke andar ke text se).\nEnglish: Search your saved PDFs by name or text content.", "Ctrl+F")
         self._ma(mt, "Merge PDFs…", self.merge_pdfs, "हिन्दी: Kai PDF ko jodkar ek PDF banao.\nEnglish: Merge several PDFs into one.")
         self._ma(mt, "Split into multiple PDFs…", self.split_pdfs, "हिन्दी: Ek scan ko kai alag PDF me baanto.\nEnglish: Split into multiple PDFs.")
         self._ma(mt, "PDF chhota karo (compress)…", self.compress_pdf_tool, "हिन्दी: Abhi ke pages ya koi purani PDF ko 200KB/500KB/1MB/2MB tak chhota karo (portal upload ke liye).\nEnglish: Shrink current pages or any PDF to a 200KB/500KB/1MB/2MB target for portal uploads.")
@@ -2746,6 +2856,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mh, "Test / Diagnostics", self.run_diagnostics, "हिन्दी: Scanner/app ki jaankari + error report (share karne ke liye).\nEnglish: Scanner/app info + error report.")
         self._ma(mh, "Duplex Test (both-side)", self.run_duplex_test, "हिन्दी: Jaancho ki dono taraf (duplex) scan ho raha hai ya nahi.\nEnglish: Test whether both-side (duplex) scanning works.")
         self._ma(mh, "eSCL Test (network scan jaanch)", self.run_escl_test, "हिन्दी: Network scan (eSCL) ko step-by-step jaanch kar asli problem batata hai (connect / status / job).\nEnglish: Step-by-step eSCL network-scan test that shows the real problem.")
+        self._ma(mh, "Update check karo…", lambda: self.check_updates(False), "हिन्दी: Dekho ki ApneScan ka naya version aaya hai ya nahi.\nEnglish: Check whether a newer ApneScan version is available.")
         self._ma(mh, tr("feedback", self._lang), self.send_feedback, "हिन्दी: Sujhav/shikayat bhejo.\nEnglish: Send feedback.")
         self._ma(mh, tr("about", self._lang), self.show_about, "हिन्दी: App ke baare me.\nEnglish: About this app.")
 
@@ -3213,6 +3324,37 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 os.startfile(os.path.dirname(out))
         except Exception:
             pass
+
+    # ---- Update check ----
+    def check_updates(self, silent=False):
+        self._upd_worker = UpdateChecker()
+        self._upd_worker.result.connect(
+            lambda tag, url, s=silent: self._on_update_result(tag, url, s))
+        self._upd_worker.start()
+
+    def _on_update_result(self, tag, url, silent):
+        def _n(s):
+            m = re.findall(r"\d+", s or "")
+            return int(m[0]) if m else -1
+        if not tag:
+            if not silent:
+                self._warn("Update check nahi ho paya. Internet chal raha hai?")
+            return
+        if _n(tag) > _n(VERSION):
+            r = QtWidgets.QMessageBox.question(
+                self, "Naya version aa gaya",
+                "ApneScan ka naya version %s aa gaya hai (aapke paas v%s hai).\n\n"
+                "Download page kholein?" % (tag, VERSION),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            if r == QtWidgets.QMessageBox.Yes:
+                try:
+                    import webbrowser
+                    webbrowser.open(url or DOWNLOAD_PAGE)
+                except Exception:
+                    pass
+        elif not silent:
+            QtWidgets.QMessageBox.information(
+                self, "Update", "Aap latest version (v%s) par hi hain." % VERSION)
 
     # ---- Share (WhatsApp / Email) ----
     def _pick_share_pdf(self):
@@ -4116,6 +4258,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._stats_timer.timeout.connect(lambda: self._refresh_stats("ping"))
         self._stats_timer.start()
         QtCore.QTimer.singleShot(1500, lambda: self._refresh_stats("ping"))
+        # Naya version aaya ho to chupchaap check karke batao (sirf startup par)
+        QtCore.QTimer.singleShot(4000, lambda: self.check_updates(True))
         # kept (hidden) for the connection feature; IP set via Settings menu
         self.ip_field = QtWidgets.QLineEdit(self._config.get("scanner_ip", "")); self.ip_field.hide()
         self.btn_check = QtWidgets.QPushButton(); self.btn_check.hide()
@@ -4429,6 +4573,84 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
         return added
+
+    def import_photos(self):
+        """Phone se kheenchi photos ko saaf karke pages banao (shadow hatana,
+        seedha karna, chhota karna) — phir normal PDF save."""
+        start = self._config.get("last_import_dir") or ""
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self, "Phone-photos chuno", start,
+            "Photos (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp)")
+        if not files:
+            return
+        count = 0
+        for f in files:
+            try:
+                with Image.open(f) as im:
+                    img = clean_photo(im)
+                fd, png = tempfile.mkstemp(suffix=".jpg", dir=self._tmpdir)
+                os.close(fd)
+                img.save(png, "JPEG", quality=90)
+                self._add_item_for_path(png)
+                count += 1
+            except Exception:
+                pass
+        if files:
+            try:
+                self._config["last_import_dir"] = os.path.dirname(files[0])
+                save_config(self._config)
+            except Exception:
+                pass
+        if count:
+            self.status.showMessage("%d photo saaf karke import ho gayi." % count, 4000)
+            if tesseract_available():
+                self.auto_name_pages()
+        else:
+            self._warn("Photo import nahi ho payi.")
+
+    def split_id_cards(self):
+        """Selected page par rakhe 2-3 ID cards ko alag-alag pages me kaato."""
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        if not HAS_NUMPY:
+            self._warn("Is feature ke liye numpy chahiye (pip install numpy).")
+            return
+        path = item.data(QtCore.Qt.UserRole)
+        try:
+            with Image.open(path) as im:
+                img = im.convert("RGB").copy()
+        except Exception as exc:
+            self._warn("Page nahi khula:\n%s" % exc)
+            return
+        boxes = detect_content_boxes(img)
+        area = img.width * img.height
+        keep = []
+        for (l, t, r, b) in boxes:
+            if (r - l) * (b - t) >= area * 0.01 and (r - l) > 60 and (b - t) > 60:
+                keep.append((max(0, l - 10), max(0, t - 10),
+                             min(img.width, r + 10), min(img.height, b + 10)))
+        keep.sort(key=lambda x: (x[1], x[0]))
+        if not keep:
+            self._warn("Is page par alag-alag cards nahi mile.")
+            return
+        added = 0
+        for box in keep:
+            try:
+                card = img.crop(box)
+                fd, png = tempfile.mkstemp(suffix=".png", dir=self._tmpdir)
+                os.close(fd)
+                card.save(png, "PNG")
+                self._add_item_for_path(png)
+                added += 1
+            except Exception:
+                pass
+        if added:
+            self._dirty = True
+            QtWidgets.QMessageBox.information(
+                self, "Ho gaya",
+                "%d card/hissa alag karke aage add kar diye.\n(Original page waise hi hai — "
+                "chahiye na ho to Delete kar dein.)" % added)
 
     # ---- page edit ----
     def _current_item_or_warn(self):
@@ -4977,20 +5199,60 @@ class ScannerWindow(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.information(self, "Ho gaya", "Merged PDF ban gayi:\n%s" % out)
 
     def search_pdfs(self):
-        q, ok = QtWidgets.QInputDialog.getText(self, "Search", "Claim number / naam ka koi hissa:")
-        if not ok or not q.strip():
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Search past PDFs")
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel("Claim number / naam / koi shabd:"))
+        ed = QtWidgets.QLineEdit()
+        v.addWidget(ed)
+        chk = QtWidgets.QCheckBox("PDF ke ANDAR ka text bhi dekho (dheema — sirf OCR-wali PDFs me chalega)")
+        v.addWidget(chk)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+        ed.setFocus()
+        if dlg.exec_() != QtWidgets.QDialog.Accepted or not ed.text().strip():
             return
+        q = ed.text().strip().lower()
         root = self._opts.get("save_folder", os.path.expanduser("~"))
-        matches = []
+        pdfs = []
         try:
             for dp, _dn, fn in os.walk(root):
                 for f in fn:
-                    if f.lower().endswith(".pdf") and q.lower() in f.lower():
-                        matches.append(os.path.join(dp, f))
+                    if f.lower().endswith(".pdf"):
+                        pdfs.append(os.path.join(dp, f))
         except Exception:
             pass
+        matches = [p for p in pdfs if q in os.path.basename(p).lower()]
+        if chk.isChecked() and HAS_OCR_LIBS:
+            todo = [p for p in pdfs if p not in matches]
+            prog = QtWidgets.QProgressDialog(
+                "PDF ke andar dhoondh rahe hain… (%d files)" % len(todo), "Cancel", 0, len(todo), self)
+            prog.setWindowModality(QtCore.Qt.WindowModal)
+            prog.setMinimumDuration(400)
+            for i, p in enumerate(todo):
+                prog.setValue(i)
+                QtWidgets.QApplication.processEvents()
+                if prog.wasCanceled():
+                    break
+                try:
+                    reader = PdfReader(p)
+                    text = ""
+                    for pg in reader.pages[:5]:
+                        text += (pg.extract_text() or "").lower()
+                        if q in text:
+                            matches.append(p)
+                            break
+                except Exception:
+                    pass
+            prog.setValue(len(todo))
         if not matches:
-            QtWidgets.QMessageBox.information(self, "Search", "Kuch nahi mila."); return
+            QtWidgets.QMessageBox.information(
+                self, "Search",
+                "Kuch nahi mila.\n\nTip: PDF ke andar ke text me wahi PDF milti hai jo "
+                "'OCR (searchable)' tick karke save hui thi.")
+            return
         item, ok = QtWidgets.QInputDialog.getItem(
             self, "Search results", "%d file mili — kholne ke liye chuno:" % len(matches),
             matches, 0, False)
