@@ -380,48 +380,57 @@ def is_blank_page(img, dark_fraction_threshold=0.0008, dark_level=75):
         return False
 
 
-def whiten_dark_background(img, dark_pix=90, dark_frac=0.70):
-    """Paint the scanner's DARK backing bands (black/navy) at the EDGES of a scan
-    (top/bottom/left/right — e.g. around an ECG strip) to WHITE. A row/column at the
-    edge is treated as backing if MORE THAN dark_frac of its pixels are darker than
-    dark_pix (so uniform navy/black backing qualifies, but grey/white paper and text
-    do not). Only edge-contiguous bands are cleared; interior content is never
-    touched, and grey/low-contrast documents are left intact."""
+def whiten_dark_background(img, bright_thresh=160):
+    """Scanner ki DARK backing (kala / navy / GRAY — sab) jo page ke chaaron
+    taraf dikhti hai use WHITE karo — pixel-level par.
+
+    Har row/column me KINARE se shuru karke pehle BRIGHT (paper) pixel tak ke
+    pixels hi white hote hain. Isliye:
+      - tedha page ho to bhi uska kona/kinara kabhi nahi 'katta' (purana code
+        poori patti white pot deta tha jisme page ka kinara bhi chala jata
+        tha — 'side se kata hua' wala bug),
+      - gray backing bhi pakdi jaati hai (purana threshold sirf <90 tha,
+        gray 90-160 wali backing reh jaati thi),
+      - page ke ANDAR ka content (text, X-ray, stamp) kabhi nahi chhedha
+        jaata — run pehle bright pixel par ruk jaata hai."""
     try:
         import numpy as _np
         g = _np.asarray(img.convert("L"))
-        # fast early-out: if all four edges are already bright, there's no dark
-        # backing to remove — skip the work (keeps normal pages superfast).
+        # fast early-out: kinare pehle se bright hain to backing hai hi nahi
         if (g[0].mean() > 150 and g[-1].mean() > 150
                 and g[:, 0].mean() > 150 and g[:, -1].mean() > 150):
             return img
-        rgb = img.convert("RGB")
-        arr = _np.asarray(rgb).copy()
-        darkish = g < dark_pix
-        col_back = darkish.mean(axis=0) > dark_frac
-        row_back = darkish.mean(axis=1) > dark_frac
+        bright = g >= bright_thresh
         H, W = g.shape
-        l = 0
-        while l < W and col_back[l]:
-            l += 1
-        r = W - 1
-        while r >= 0 and col_back[r]:
-            r -= 1
-        t = 0
-        while t < H and row_back[t]:
-            t += 1
-        b = H - 1
-        while b >= 0 and row_back[b]:
-            b -= 1
-        if l > 0:
-            arr[:, :l] = 255
-        if r < W - 1:
-            arr[:, r + 1:] = 255
-        if t > 0:
-            arr[:t, :] = 255
-        if b < H - 1:
-            arr[b + 1:, :] = 255
-        return Image.fromarray(arr.astype("uint8"))
+        arr = _np.asarray(img.convert("RGB")).copy()
+        cols = _np.arange(W)[None, :]
+        rows = _np.arange(H)[:, None]
+        # Left/Right: har row me pehla/aakhri bright pixel — uske bahar sab white.
+        any_row = bright.any(axis=1)
+        first = _np.where(any_row, bright.argmax(axis=1), W).astype(_np.int64)[:, None]
+        last = _np.where(any_row, W - 1 - bright[:, ::-1].argmax(axis=1), -1).astype(_np.int64)[:, None]
+        mask = (cols < first) | (cols > last)
+        # Poori-dark rows (koi bright pixel nahi) sirf tab white hon jab wo
+        # upar/neeche ke KINARE se lagatar judi hon (backing band). Beech ki
+        # dark rows (jaise X-ray film) kabhi nahi.
+        no_bright_row = ~any_row
+        top_run = _np.cumprod(no_bright_row).astype(bool)
+        bot_run = _np.cumprod(no_bright_row[::-1]).astype(bool)[::-1]
+        interior_dark_rows = no_bright_row & ~top_run & ~bot_run
+        mask[interior_dark_rows, :] = False
+        # Top/Bottom: har column me bhi wahi — kinare se pehle bright pixel tak.
+        any_col = bright.any(axis=0)
+        firstc = _np.where(any_col, bright.argmax(axis=0), H).astype(_np.int64)[None, :]
+        lastc = _np.where(any_col, H - 1 - bright[::-1, :].argmax(axis=0), -1).astype(_np.int64)[None, :]
+        cmask = (rows < firstc) | (rows > lastc)
+        no_bright_col = ~any_col
+        left_run = _np.cumprod(no_bright_col).astype(bool)
+        right_run = _np.cumprod(no_bright_col[::-1]).astype(bool)[::-1]
+        interior_dark_cols = no_bright_col & ~left_run & ~right_run
+        cmask[:, interior_dark_cols] = False
+        mask |= cmask
+        arr[mask] = 255
+        return Image.fromarray(arr)
     except Exception:
         return img
 
@@ -455,7 +464,7 @@ def trim_dark_borders(img, bright_thresh=120, min_paper_frac=0.04, pad=6):
         return img
 
 
-def autocrop(img, border=12):
+def autocrop(img, border=20):
     try:
         rgb = img.convert("RGB")
         bg = Image.new("RGB", rgb.size, (255, 255, 255))
@@ -2004,10 +2013,10 @@ class ScanWorker(QtCore.QThread):
                         if is_blank_page(img, _thr):
                             self.skipped += 1
                             continue
-                    # Always trim wide black backing (e.g. around a narrow ECG strip
-                    # in Auto page-size mode). Safe on normal/blank pages.
-                    if self.opts.get("page_size", "auto").startswith("auto"):
-                        img = whiten_dark_background(img)
+                    # Backing (kala/navy/gray) HAMESHA white karo — kisi bhi page
+                    # size me sheet chhoti ho to backing dikhti hai; print me
+                    # kala bilkul nahi aana chahiye.
+                    img = whiten_dark_background(img)
                     if self.opts.get("auto_crop"):
                         img = autocrop(img)
                     if self.opts.get("deskew"):
