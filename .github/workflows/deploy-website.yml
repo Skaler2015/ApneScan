@@ -49,6 +49,8 @@ jobs:
           # SEO/GEO files: robots.txt (AI crawlers allowed), llms.txt, sitemap
           cp ApneScan_Project/website_extras/robots.txt _site/ 2>/dev/null || true
           cp ApneScan_Project/website_extras/llms.txt _site/ 2>/dev/null || true
+          # Google Search Console ownership verification
+          cp ApneScan_Project/website_extras/google*.html _site/ 2>/dev/null || true
           TODAY=$(date -u +%Y-%m-%d)
           cat > _site/sitemap.xml <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
