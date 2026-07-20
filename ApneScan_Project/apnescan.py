@@ -151,7 +151,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "22"
+VERSION = "23"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -355,6 +355,7 @@ DEFAULT_OPTIONS = {
     "sign_image": "",            # sign/stamp wali image ka path
     "tags": {},                  # pdf path -> [tags]
     "show_files_panel": True,    # daayan "Meri Files" panel
+    "show_left_panel": True,     # baayan scan-settings panel
     "fav_folders": [],           # panel ke ⭐ favourite folders
     "sidebar_stats": [],         # khaali = default set dikhega
     "wia_device_id": None,
@@ -3255,7 +3256,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.act_simple = self._ma(ms, tr("simple_on", self._lang), self.toggle_simple_mode, "हिन्दी: Simple mode: sirf zaroori buttons dikhein (naye users ke liye aasan).\nEnglish: Simple mode: show only the essential buttons.")
         self.act_simple.setCheckable(True)
         self.act_simple.setChecked(bool(self._opts.get("simple_mode")))
-        self.act_files_panel = self._ma(ms, "\"Meri Files\" panel dikhao/chhupao", self.toggle_files_panel, "हिन्दी: Daayin taraf ka folders-wala panel on/off karo.\nEnglish: Show/hide the right-side files panel.")
+        self._ma(ms, self.L("Left sidebar dikhao/chhupao", "Show/hide left sidebar"), self.toggle_left_panel, "हिन्दी: Baayin taraf ka scan-settings panel on/off (zyada jagah ke liye).\nEnglish: Show/hide the left scan-settings sidebar for more space.", "F9")
+        self.act_files_panel = self._ma(ms, self.L("Right sidebar (Meri Files) dikhao/chhupao", "Show/hide right sidebar (My Files)"), self.toggle_files_panel, "हिन्दी: Daayin taraf ka folders-wala panel on/off karo.\nEnglish: Show/hide the right-side files panel.", "F10")
         self._ma(ms, "Sidebar stats chuno…", self.choose_sidebar_stats, "हिन्दी: Sidebar ke stats-box me kaun-kaun si ginti dikhe — aap khud chuno (worldwide + personal).\nEnglish: Choose which stats appear in the sidebar box.")
         self.act_touch = self._ma(ms, "Touch / bade-button mode", self.toggle_touch_mode, "हिन्दी: Buttons/likhai badi ho jayegi — touch screen ya buzurgon ke liye aasan.\nEnglish: Bigger buttons and text for touch screens or elderly users.")
         self.act_touch.setCheckable(True)
@@ -3761,7 +3763,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _show_update_banner(self, tag):
         self._latest_tag = tag
         try:
-            self.update_box.setText("🔔 Naya update %s aa gaya!\n⬇ Ek click me update karo" % tag)
+            self.update_box.setText(self.L(
+                "🔔 Naya update %s aa gaya!\n⬇ Ek click me update karo" % tag,
+                "🔔 Update %s is available!\n⬇ One-click update" % tag))
             self.update_box.setEnabled(True)
             self.update_box.show()
         except Exception:
@@ -4708,6 +4712,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # ---------- Body: left settings panel | thumbnails ----------
         body = QtWidgets.QHBoxLayout(); body.setContentsMargins(0, 0, 0, 0); body.setSpacing(0)
         panel = QtWidgets.QWidget(); panel.setObjectName("panel"); panel.setFixedWidth(252)
+        self.left_panel = panel
+        if not self._opts.get("show_left_panel", True):
+            panel.hide()
         pl = QtWidgets.QVBoxLayout(panel); pl.setContentsMargins(14, 14, 14, 14); pl.setSpacing(5)
 
         pl.addWidget(QtWidgets.QLabel(tr("profile", self._lang)))
@@ -4806,7 +4813,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.files_panel.setObjectName("panel")
         fp = QtWidgets.QVBoxLayout(self.files_panel)
         fp.setContentsMargins(8, 8, 8, 8)
-        _hdr = QtWidgets.QLabel("📁 <b>Meri Files</b>")
+        _hdr = QtWidgets.QLabel(self.L("📁 <b>Meri Files</b>", "📁 <b>My Files</b>"))
         _hdr.setTextFormat(QtCore.Qt.RichText)
         _hdr.setToolTip("Save folder ke folders aur documents — yahin se naya folder "
                         "banao aur scan ki PDF seedha usme save karo.")
@@ -4814,7 +4821,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # Search: kisi bhi folder ke andar naam se dhoondo (folder chuna ho to
         # usi ke andar, warna poore save-folder me)
         self.files_search = QtWidgets.QLineEdit()
-        self.files_search.setPlaceholderText("🔍 Dhoondo… (chune folder ke andar)")
+        self.files_search.setPlaceholderText(
+            self.L("🔍 Dhoondo… (chune folder ke andar)", "🔍 Search… (inside selected folder)"))
         self.files_search.setClearButtonEnabled(True)
         fp.addWidget(self.files_search)
         self.fav_bar = QtWidgets.QHBoxLayout()
@@ -4855,11 +4863,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.files_search.textChanged.connect(lambda _t: self._files_search_timer.start())
         self._rebuild_fav_bar()
         _row = QtWidgets.QHBoxLayout()
-        _bnew = QtWidgets.QPushButton("➕ Naya folder")
+        _bnew = QtWidgets.QPushButton(self.L("➕ Naya folder", "➕ New folder"))
         _bnew.clicked.connect(self.new_library_folder)
         _row.addWidget(_bnew)
         fp.addLayout(_row)
-        self.btn_save_here = QtWidgets.QPushButton("💾 Yahan save karo")
+        self.btn_save_here = QtWidgets.QPushButton(self.L("💾 Yahan save karo", "💾 Save here"))
         self.btn_save_here.setObjectName("primary")
         self.btn_save_here.setMinimumHeight(34)
         self.btn_save_here.clicked.connect(self.save_into_selected_folder)
@@ -5672,19 +5680,21 @@ class ScannerWindow(QtWidgets.QMainWindow):
         st = self._pstats()
         t = st.get("totals", {})
         day = (st.get("days") or {}).get(datetime.datetime.now().strftime("%Y-%m-%d"), {})
+        L = self.L
         return [
-            ("world_total", "🌍 Total scans (world)", w.get("total")),
-            ("world_today", "📅 Aaj (world)", w.get("today")),
-            ("world_online", "🟢 Abhi online", w.get("online")),
-            ("world_users", "👥 Kul users (world)", w.get("users")),
-            ("my_today", "📄 Mere aaj ke pages", day.get("pages", 0)),
-            ("my_today_pdfs", "🗂 Meri aaj ki PDFs", day.get("pdfs", 0)),
-            ("my_week", "🗓 Is hafte (pages)", self._pstats_sum(7, "pages")),
-            ("my_total", "📚 Mere kul pages", t.get("pages", 0)),
-            ("my_pdfs", "🗂 Meri kul PDFs", t.get("pdfs", 0)),
-            ("streak", "🔥 Streak (din)", self._pstats_streak()),
-            ("shared", "📤 Share ki hui", t.get("shared", 0)),
-            ("saved_mb", "🗜 Compress se bachaya (MB)", int(t.get("saved_bytes", 0) / 1048576)),
+            ("world_total", L("🌍 Total scans (world)", "🌍 Total scans (world)"), w.get("total")),
+            ("world_today", L("📅 Aaj (world)", "📅 Today (world)"), w.get("today")),
+            ("world_online", L("🟢 Abhi online", "🟢 Online now"), w.get("online")),
+            ("world_users", L("👥 Kul users (world)", "👥 Total users (world)"), w.get("users")),
+            ("my_today", L("📄 Mere aaj ke pages", "📄 My pages today"), day.get("pages", 0)),
+            ("my_today_pdfs", L("🗂 Meri aaj ki PDFs", "🗂 My PDFs today"), day.get("pdfs", 0)),
+            ("my_week", L("🗓 Is hafte (pages)", "🗓 This week (pages)"), self._pstats_sum(7, "pages")),
+            ("my_total", L("📚 Mere kul pages", "📚 My total pages"), t.get("pages", 0)),
+            ("my_pdfs", L("🗂 Meri kul PDFs", "🗂 My total PDFs"), t.get("pdfs", 0)),
+            ("streak", L("🔥 Streak (din)", "🔥 Streak (days)"), self._pstats_streak()),
+            ("shared", L("📤 Share ki hui", "📤 Shared"), t.get("shared", 0)),
+            ("saved_mb", L("🗜 Compress se bachaya (MB)", "🗜 Saved by compress (MB)"),
+             int(t.get("saved_bytes", 0) / 1048576)),
         ]
 
     DEFAULT_SIDEBAR_STATS = ["world_total", "world_today", "world_online",
@@ -6174,6 +6184,19 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.files_panel.setVisible(vis)
         self._opts["show_files_panel"] = vis
         self._save_opts()
+
+    def toggle_left_panel(self):
+        vis = not self.left_panel.isVisible()
+        self.left_panel.setVisible(vis)
+        self._opts["show_left_panel"] = vis
+        self._save_opts()
+        self.status.showMessage(
+            self.L("Left sidebar %s (F9 se wapas)" % ("ON" if vis else "OFF"),
+                   "Left sidebar %s (press F9 to toggle)" % ("ON" if vis else "OFF")), 4000)
+
+    def L(self, hi, en):
+        """Chhota helper: language ke hisaab se Hindi/English text."""
+        return en if self._lang == "en" else hi
 
     # ---- Tags + OCR search index ----
     INDEX_PATH = os.path.join(os.path.expanduser("~"), ".apnescan_index.json")
