@@ -10,8 +10,7 @@ claims ke liye aur public release ke liye.
 
 | File | Kya hai |
 |------|---------|
-| `apnescan.py` | **MAIN code** (yahi build karna hai). Stable version. |
-| `apnescan_experimental.py` | Same + ek experimental TWAIN file-transfer scan path (optional). |
+| `apnescan.py` | **MAIN code** (yahi build karna hai). TWAIN file-transfer (continuous feed) ab isi me hai — Settings me "TWAIN continuous feed (experimental)" se on hota hai. |
 | `apnescan.ico` | App ka icon (build me `--icon` ke liye). |
 | `build.bat` | **Double-click** karke .exe bana sakte ho (aasaan tareeka). |
 | `requirements.txt` | Zaroori Python libraries. |

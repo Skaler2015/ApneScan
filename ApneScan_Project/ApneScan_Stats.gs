@@ -59,15 +59,39 @@ function _setTotal(n) {
   sh.getRange("B1").setValue(n);
 }
 
+// Sheet me date likhte hi Google use TEXT se DATE bana deta hai, isliye seedha
+// String(cell) === "2026-07-20" kabhi match nahi hota tha — har scan par nayi
+// row banti thi aur "Aaj (today)" hamesha 0 dikhta tha. Ye helper dono ko
+// yyyy-MM-dd me laakar sahi compare karta hai.
+function _cellDay(v) {
+  if (v instanceof Date) {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  return String(v);
+}
+
 function _getToday() {
   var sh = _sheet("daily", ["date", "count"]);
   var day = _today();
   var data = sh.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === day) return { row: i + 1, count: Number(data[i][1]) || 0 };
+    if (_cellDay(data[i][0]) === day) return { row: i + 1, count: Number(data[i][1]) || 0 };
   }
   sh.appendRow([day, 0]);
   return { row: sh.getLastRow(), count: 0 };
+}
+
+// Aaj ka TOTAL — purane bug ki wajah se ek hi din ki kai rows ban gayi hain,
+// isliye sab matching rows ko jod kar dikhao (data waapas sahi dikhega).
+function _todayCount() {
+  var sh = _sheet("daily", ["date", "count"]);
+  var day = _today();
+  var data = sh.getDataRange().getValues();
+  var sum = 0;
+  for (var i = 1; i < data.length; i++) {
+    if (_cellDay(data[i][0]) === day) sum += Number(data[i][1]) || 0;
+  }
+  return sum;
 }
 
 function _addToday(inc) {
@@ -119,7 +143,7 @@ function _stats() {
   return {
     ok: true,
     total: _getTotal(),
-    today: _getToday().count,
+    today: _todayCount(),
     online: _onlineCount()
   };
 }

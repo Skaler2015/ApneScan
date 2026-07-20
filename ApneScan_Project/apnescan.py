@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-ApneScan - v14  [usability: tooltips, empty-state, undo, drag-drop, unsaved warning, after-save]
+ApneScan - v16  [fix: eSCL B&W feeder-jam + sahi error messages; naya: Share (WhatsApp/Email),
+                 PDF compress tool, TWAIN continuous-feed (experimental, Settings se)]
 =========================================================
 Run with 32-bit Python (HP TWAIN driver is 32-bit):
     py -3.12-32 scanner_app_v10.py
@@ -323,6 +324,7 @@ DEFAULT_OPTIONS = {
     "backup": False,
     "backup_folder": os.path.join(os.path.expanduser("~"), "Documents", "NobleScans_Backup"),
     "scanner_method": "twain",   # "twain" ya "wia"
+    "twain_file_xfer": False,    # experimental: continuous ADF feed (TWAIN file transfer)
     "wia_device_id": None,
     "language": "hi",            # "hi" ya "en"
     "simple_mode": False,
@@ -810,7 +812,150 @@ def list_sources(hwnd):
                 pass
 
 
-def scan_pages(hwnd, source_name, dpi, pixel_type, duplex, on_page=None, should_stop=None):
+class _FileXferUnsupported(Exception):
+    pass
+
+
+def _open_twain_source(sm, source_name):
+    try:
+        src = sm.open_source(source_name) if source_name else sm.open_source()
+    except Exception:
+        try:
+            src = sm.OpenSource(source_name) if source_name else sm.OpenSource()
+        except Exception:
+            src = None
+    if src is None:
+        try:
+            src = sm.open_source()
+        except Exception:
+            try:
+                src = sm.OpenSource()
+            except Exception:
+                src = None
+    return src
+
+
+def _common_caps(src, dpi, pixel_type, duplex):
+    def _try(fn):
+        try:
+            fn()
+        except Exception:
+            pass
+    _try(lambda: src.set_capability(twain.ICAP_XRESOLUTION, twain.TWTY_FIX32, float(dpi)))
+    _try(lambda: src.set_capability(twain.ICAP_YRESOLUTION, twain.TWTY_FIX32, float(dpi)))
+    pt = {"color": twain.TWPT_RGB, "gray": twain.TWPT_GRAY, "bw": twain.TWPT_BW}[pixel_type]
+    _try(lambda: src.set_capability(twain.ICAP_PIXELTYPE, twain.TWTY_UINT16, pt))
+    _try(lambda: src.set_capability(twain.CAP_FEEDERENABLED, twain.TWTY_BOOL, True))
+    _try(lambda: src.set_capability(twain.CAP_AUTOFEED, twain.TWTY_BOOL, True))
+    _try(lambda: src.set_capability(twain.CAP_AUTOSCAN, twain.TWTY_BOOL, True))
+    _try(lambda: src.set_capability(twain.CAP_XFERCOUNT, twain.TWTY_INT16, -1))
+    _try(lambda: src.set_capability(twain.CAP_DUPLEXENABLED, twain.TWTY_BOOL, bool(duplex)))
+
+
+def _scan_file(hwnd, source_name, dpi, pixel_type, duplex, on_page=None, should_stop=None):
+    """File-transfer acquire: the driver writes each page to a file and (on most
+    ADF scanners) keeps the feeder moving continuously. If the source doesn't
+    support it, raises _FileXferUnsupported so the caller falls back to native.
+    Only raises _FileXferUnsupported when ZERO pages were produced (so we never
+    double-feed paper)."""
+    count = 0
+    MAX_PAGES = 1000   # hard guard: never loop forever
+    sm = twain.SourceManager(hwnd)
+    src = None
+    try:
+        src = _open_twain_source(sm, source_name)
+        if src is None:
+            raise _FileXferUnsupported()
+        _common_caps(src, dpi, pixel_type, duplex)
+        # Switch to FILE transfer mechanism. If unsupported -> fall back.
+        try:
+            src.set_capability(twain.ICAP_XFERMECH, twain.TWTY_UINT16, twain.TWSX_FILE)
+        except Exception:
+            raise _FileXferUnsupported()
+        try:
+            src.request_acquire(show_ui=False, modal_ui=False)
+        except Exception:
+            raise _FileXferUnsupported()
+
+        while count < MAX_PAGES:
+            if should_stop and should_stop():
+                break
+            fd, bmp = tempfile.mkstemp(suffix=".bmp")
+            os.close(fd)
+            try:
+                os.remove(bmp)
+            except Exception:
+                pass
+            # point the driver at our file
+            try:
+                src.file_xfer_params(bmp, twain.TWFF_BMP)
+            except Exception:
+                if count == 0:
+                    raise _FileXferUnsupported()
+                break
+            # transfer one page to the file
+            try:
+                more = src.xfer_image_by_file()
+            except Exception:
+                # feeder empty / done (or unsupported on first try)
+                if count == 0:
+                    raise _FileXferUnsupported()
+                break
+            if not os.path.exists(bmp):
+                if count == 0:
+                    raise _FileXferUnsupported()
+                break
+            try:
+                with Image.open(bmp) as im:
+                    img = im.convert("RGB").copy()
+            finally:
+                try:
+                    os.remove(bmp)
+                except Exception:
+                    pass
+            count += 1
+            if on_page:
+                on_page(img)
+            # 'more' may be a bool/int/pending-count depending on pytwain; stop when falsy
+            if more in (None, 0, False):
+                break
+        return count
+    finally:
+        try:
+            if src is not None:
+                src.close()
+        except Exception:
+            pass
+        try:
+            sm.close()
+        except Exception:
+            try:
+                sm.destroy()
+            except Exception:
+                pass
+
+
+def scan_pages(hwnd, source_name, dpi, pixel_type, duplex, on_page=None, should_stop=None,
+               file_xfer=False):
+    """TWAIN scan. When file_xfer=True (Settings -> experimental continuous ADF
+    feed) try the file-transfer path first and fall back to the proven native
+    path only when zero pages were produced."""
+    if file_xfer:
+        try:
+            n = _scan_file(hwnd, source_name, dpi, pixel_type, duplex, on_page, should_stop)
+            if n > 0:
+                return n
+            raise _FileXferUnsupported()
+        except _FileXferUnsupported:
+            pass
+        except ScannerError:
+            raise
+        except Exception:
+            pass
+    return _scan_native(hwnd, source_name, dpi, pixel_type, duplex, on_page, should_stop)
+
+
+def _scan_native(hwnd, source_name, dpi, pixel_type, duplex, on_page=None, should_stop=None):
     if not HAS_TWAIN:
         raise ScannerError("TWAIN (pytwain) install nahi hai.")
     count = 0
@@ -1307,7 +1452,12 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
         raise ScannerError("Scanner IP set nahi hai. Settings \u2192 Scanner IP me IP daalo (jaise 192.168.1.8).")
     ip = ip.strip()
     base = "http://%s/eSCL" % ip
-    cmode = {"color": "RGB24", "gray": "Grayscale8", "bw": "BlackAndWhite1"}.get(color, "RGB24")
+    # NOTE: "BlackAndWhite1" + image/jpeg ek saath kaam NAHI karta (JPEG 1-bit
+    # ho hi nahi sakta). HP N4000 aisi job me pages kheenchta rehta hai par data
+    # kabhi taiyar nahi karta — page feeder me atak jata tha aur app ko 0 page
+    # milte the (Fast/B&W mode ka jam wala bug). Isliye B&W bhi Grayscale8 me
+    # scan hota hai; asli 1-bit conversion app me hota hai (ScanWorker save step).
+    cmode = {"color": "RGB24", "gray": "Grayscale8", "bw": "Grayscale8"}.get(color, "RGB24")
 
     # eSCL region units are 1/300 inch. Fixed sizes request that exact sheet.
     # "auto" requests the FULL BED WIDTH (so sides are never cut) with a Legal-length
@@ -1426,6 +1576,7 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
 
     count = 0
     empties = 0
+    hiccups = 0
     try:
         while True:
             if should_stop and should_stop():
@@ -1442,7 +1593,13 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
                     continue
                 break
             except Exception:
-                break
+                # network hiccup (timeout/reset) — turant give-up mat karo, warna
+                # job DELETE ho jata hai aur beech ka page feeder me atak jata hai
+                hiccups += 1
+                if hiccups > 3:
+                    break
+                _t.sleep(1.0)
+                continue
             data = r.read()
             if not data:
                 break
@@ -1452,6 +1609,8 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
             except Exception:
                 break
             count += 1
+            empties = 0
+            hiccups = 0
             if on_page:
                 on_page(img)
     finally:
@@ -1463,7 +1622,23 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
             pass
 
     if count == 0:
-        raise ScannerError("eSCL se koi page nahi aaya. Feeder me kaagaz hai? Scanner ON hai?")
+        # Sach-sach batao kya hua: jam / khaali feeder / kuch aur. (Pehle har
+        # zero-page case par "feeder khaali" dikhta tha — jam me bhi.)
+        st = ""
+        try:
+            rr = _u.urlopen(base + "/ScannerStatus", timeout=8)
+            st = rr.read().decode("utf-8", "ignore").lower()
+        except Exception:
+            pass
+        if "jam" in st:
+            raise ScannerError(
+                "Paper jam: ek page scanner ke andar atka hai. Use aaram se nikaalein, "
+                "feeder me pages seedhe lagayein, phir dobara scan karein.")
+        if "adfempty" in st.replace(" ", ""):
+            raise ScannerError("PAPER_EMPTY: feeder khaali hai.")
+        raise ScannerError(
+            "eSCL: scanner ne koi page taiyar nahi kiya. Scanner ko ek baar off/on "
+            "karke dobara try karein; problem rahe to Help > eSCL Test chalayein.")
     return count
 
 
@@ -1736,6 +1911,14 @@ class ScanWorker(QtCore.QThread):
                     if self.pixel_type == "bw":
                         fd, out = tempfile.mkstemp(suffix=".png", dir=self.tmpdir)
                         os.close(fd)
+                        # eSCL me B&W ab grayscale me aata hai (BlackAndWhite1+JPEG
+                        # scanner par jam karta tha) — asli 1-bit yahan banao.
+                        try:
+                            if img.mode != "1":
+                                img = img.convert("L").point(
+                                    lambda v: 255 if v >= 160 else 0, mode="1")
+                        except Exception:
+                            pass
                         try:
                             img.save(out, "PNG", compress_level=1)
                         except Exception:
@@ -1791,7 +1974,8 @@ class ScanWorker(QtCore.QThread):
             else:
                 scan_pages(self.hwnd, self.source_name, self.dpi,
                            self.pixel_type, self.duplex, _on_page,
-                           should_stop=self.isInterruptionRequested)
+                           should_stop=self.isInterruptionRequested,
+                           file_xfer=bool(self.opts.get("twain_file_xfer")))
         except ScannerError as exc:
             err = str(exc)
         except Exception:
@@ -2005,6 +2189,9 @@ class OptionsDialog(QtWidgets.QDialog):
         form.addRow(chkrow(self.chk_deskew, 'हिन्दी: ON: tedha scan hua page apne aap seedha ho jayega.\nEnglish: ON: straightens a tilted/skewed page automatically.'))
         self.chk_enhance = QtWidgets.QCheckBox("Quality auto-sudhar (faded documents saaf)")
         self.chk_enhance.setChecked(self.opts["quality_enhance"]); form.addRow(chkrow(self.chk_enhance, 'हिन्दी: ON: feeke/halke documents saaf aur gehre dikhenge.\nEnglish: ON: brightens & sharpens faded documents.'))
+        self.chk_filexfer = QtWidgets.QCheckBox("TWAIN continuous feed (experimental)")
+        self.chk_filexfer.setChecked(bool(self.opts.get("twain_file_xfer")))
+        form.addRow(chkrow(self.chk_filexfer, 'हिन्दी: ON (sirf TWAIN method me): scanner ka feeder bina ruke chalta rahega (file-transfer mode). Agar scanner support na kare to app khud purane tareeke par aa jayegi.\nEnglish: ON (TWAIN method only): keeps the ADF feeding continuously via file-transfer mode; falls back to the normal path automatically if unsupported.'))
 
         header("Output")
         self.chk_compress = QtWidgets.QCheckBox("PDF compress (chhoti file)")
@@ -2081,6 +2268,7 @@ class OptionsDialog(QtWidgets.QDialog):
         o["auto_crop"] = self.chk_crop.isChecked()
         o["deskew"] = self.chk_deskew.isChecked()
         o["quality_enhance"] = self.chk_enhance.isChecked()
+        o["twain_file_xfer"] = self.chk_filexfer.isChecked()
         o["compress"] = self.chk_compress.isChecked()
         o["jpeg_quality"] = int(self.q_spin.value())
         o["watermark"] = self.chk_wm.isChecked()
@@ -2510,6 +2698,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
         pmenu.addAction("Selected print (chune hue)", self.print_selected)
         pmenu.addAction("ID print (2 ID ek page par)", self.print_ids)
         pmenu.addAction("ID print - sirf selected", self.print_ids_selected)
+        shmenu = mf.addMenu("Share / Bhejo")
+        shmenu.setToolTipsVisible(True)
+        shmenu.addAction("WhatsApp par bhejo…", self.share_whatsapp)
+        shmenu.addAction("Email se bhejo…", self.share_email)
         self.recent_menu = mf.addMenu("Recent PDFs")
         mf.addSeparator(); mf.addAction("Exit", self.close)
 
@@ -2530,6 +2722,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "Search past PDFs…", self.search_pdfs, "हिन्दी: Purani save ki hui PDF dhoondo (claim/naam se).\nEnglish: Search your saved PDFs.", "Ctrl+F")
         self._ma(mt, "Merge PDFs…", self.merge_pdfs, "हिन्दी: Kai PDF ko jodkar ek PDF banao.\nEnglish: Merge several PDFs into one.")
         self._ma(mt, "Split into multiple PDFs…", self.split_pdfs, "हिन्दी: Ek scan ko kai alag PDF me baanto.\nEnglish: Split into multiple PDFs.")
+        self._ma(mt, "PDF chhota karo (compress)…", self.compress_pdf_tool, "हिन्दी: Abhi ke pages ya koi purani PDF ko 200KB/500KB/1MB/2MB tak chhota karo (portal upload ke liye).\nEnglish: Shrink current pages or any PDF to a 200KB/500KB/1MB/2MB target for portal uploads.")
         self._ma(mt, "Monthly report…", self.monthly_report, "हिन्दी: Mahine ka scan/claim report banao.\nEnglish: Generate a monthly report.")
         self._ma(mt, "Create desktop shortcut…", self.create_shortcut, "हिन्दी: Desktop par ek-click scan ka shortcut banao.\nEnglish: Make a one-click desktop scan shortcut.")
         self._ma(mt, "Auto-name pages (document ka naam)", self.auto_name_pages, "हिन्दी: Har page ko padh kar uska naam (jaise DISCHARGE SUMMARY, RECEIPT) thumbnail ke neeche likhe. 'Page 1,2' ke bajay asli naam.\nEnglish: Read each page and label it with its document title instead of 'Page 1,2'.")
@@ -3020,6 +3213,183 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 os.startfile(os.path.dirname(out))
         except Exception:
             pass
+
+    # ---- Share (WhatsApp / Email) ----
+    def _pick_share_pdf(self):
+        """Sabse aakhri saved PDF; koi na ho to user se file chunwao."""
+        for p in (self._recent or []):
+            if p and os.path.exists(p):
+                return p
+        start = self._opts.get("save_folder", os.path.expanduser("~"))
+        f, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Kaunsi PDF bhejni hai?", start, "PDF (*.pdf)")
+        return f or None
+
+    def _reveal_in_explorer(self, path):
+        try:
+            import subprocess
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+        except Exception:
+            try:
+                os.startfile(os.path.dirname(path))
+            except Exception:
+                pass
+
+    def _copy_file_to_clipboard(self, path):
+        """File ko clipboard par daalo taaki WhatsApp/Email me Ctrl+V se attach ho."""
+        try:
+            md = QtCore.QMimeData()
+            md.setUrls([QtCore.QUrl.fromLocalFile(os.path.abspath(path))])
+            QtWidgets.QApplication.clipboard().setMimeData(md)
+            return True
+        except Exception:
+            return False
+
+    def share_whatsapp(self):
+        pdf = self._pick_share_pdf()
+        if not pdf:
+            return
+        copied = self._copy_file_to_clipboard(pdf)
+        self._reveal_in_explorer(pdf)
+        try:
+            import webbrowser
+            # WhatsApp Desktop installed ho to wahi khulega, warna web
+            webbrowser.open("https://wa.me/")
+        except Exception:
+            pass
+        steps = ("WhatsApp khul raha hai. Chat chuno, phir:\n\n"
+                 "1) Chat me Ctrl+V dabao (file copy ho chuki hai)%s\n"
+                 "2) Ya Explorer se PDF ko chat par kheench (drag) kar chhod do.\n\n"
+                 "File: %s") % ("" if copied else " (copy nahi ho payi)", pdf)
+        QtWidgets.QMessageBox.information(self, "WhatsApp par bhejo", steps)
+
+    def share_email(self):
+        pdf = self._pick_share_pdf()
+        if not pdf:
+            return
+        # Pehle Outlook try karo (attachment ke saath draft khulta hai)
+        if HAS_W32:
+            try:
+                _pythoncom.CoInitialize()
+                try:
+                    ol = _w32.Dispatch("Outlook.Application")
+                    mail = ol.CreateItem(0)
+                    mail.Subject = os.path.splitext(os.path.basename(pdf))[0]
+                    mail.Attachments.Add(os.path.abspath(pdf))
+                    mail.Display(True)
+                    return
+                finally:
+                    try:
+                        _pythoncom.CoUninitialize()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        # Fallback: default mail app (mailto attachment support nahi karta,
+        # isliye file clipboard par + Explorer me dikha do)
+        self._copy_file_to_clipboard(pdf)
+        self._reveal_in_explorer(pdf)
+        try:
+            import webbrowser
+            import urllib.parse as _up
+            webbrowser.open("mailto:?subject=%s"
+                            % _up.quote(os.path.splitext(os.path.basename(pdf))[0]))
+        except Exception:
+            pass
+        QtWidgets.QMessageBox.information(
+            self, "Email se bhejo",
+            "Email draft khul raha hai. PDF attach karne ke liye:\n\n"
+            "1) Email me Ctrl+V dabao (file copy ho chuki hai)\n"
+            "2) Ya Explorer se PDF ko email par kheench kar chhod do.\n\n"
+            "File: %s" % pdf)
+
+    # ---- PDF compress tool ----
+    def compress_pdf_tool(self):
+        """Abhi ke pages (ya koi bhi purani PDF) ko chhota karke alag PDF banao —
+        portal ki 200KB/500KB/1MB/2MB limit ke hisaab se."""
+        paths = self._ordered_paths()
+        src_pdf = None
+        if not paths:
+            start = self._opts.get("save_folder", os.path.expanduser("~"))
+            src_pdf, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Kaunsi PDF chhoti karni hai?", start, "PDF (*.pdf)")
+            if not src_pdf:
+                return
+        targets = ["200 KB (portal upload)", "500 KB", "1 MB", "2 MB",
+                   "Sirf quality kam karo (size ki limit nahi)"]
+        choice, ok = QtWidgets.QInputDialog.getItem(
+            self, "PDF chhota karo", "Kitni chhoti file chahiye?", targets, 2, False)
+        if not ok:
+            return
+        idx = targets.index(choice)
+        limit = {0: 200 * 1024, 1: 500 * 1024, 2: 1024 * 1024, 3: 2 * 1024 * 1024}.get(idx)
+        if src_pdf:
+            pages = pdf_to_images(src_pdf, self._tmpdir)
+            if not pages:
+                self._warn("Is PDF se pages nahi nikle.\nBehtar result ke liye 'PyMuPDF' install karein:\n  py -3.12-32 -m pip install PyMuPDF")
+                return
+            default = os.path.splitext(src_pdf)[0] + "_small.pdf"
+        else:
+            pages = paths
+            base = self._build_filename(".pdf", paths=paths)
+            default = (base[:-4] if base.lower().endswith(".pdf") else base) + "_small.pdf"
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Chhoti PDF save karein", default, "PDF (*.pdf)")
+        if not out:
+            return
+        if not out.lower().endswith(".pdf"):
+            out += ".pdf"
+        try:
+            size = self._write_compressed_pdf(pages, out, limit)
+        except Exception:
+            self._warn("Compress fail:\n%s" % traceback.format_exc())
+            return
+        self._remember_save_dir(out)
+        kb = size / 1024.0
+        pretty = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024.0))
+        note = ""
+        if limit and size > limit:
+            note = "\n\n(Itni chhoti nahi ho payi — pages bahut hain. Kam pages chunein ya badi limit lein.)"
+        QtWidgets.QMessageBox.information(
+            self, "Ho gaya", "Chhoti PDF save ho gayi (%s):\n%s%s" % (pretty, out, note))
+
+    def _write_compressed_pdf(self, img_paths, out, limit_bytes=None):
+        """JPEG quality/size ghata-ghata kar PDF banao jab tak limit ke andar na aaye.
+        Returns final size in bytes."""
+        combos = [(75, 1.0), (60, 1.0), (45, 1.0), (60, 0.8), (45, 0.8),
+                  (35, 0.8), (45, 0.65), (35, 0.65), (30, 0.5), (25, 0.4)]
+        if limit_bytes is None:
+            combos = [(60, 1.0)]
+        data = None
+        for q, s in combos:
+            buf = io.BytesIO()
+            imgs = []
+            try:
+                for p in img_paths:
+                    im = Image.open(p).convert("RGB")
+                    if s < 1.0:
+                        im = im.resize((max(1, int(im.width * s)),
+                                        max(1, int(im.height * s))), Image.LANCZOS)
+                    b2 = io.BytesIO()
+                    im.save(b2, "JPEG", quality=q)
+                    im.close()
+                    b2.seek(0)
+                    im2 = Image.open(b2)
+                    im2.load()
+                    imgs.append(im2)
+                imgs[0].save(buf, "PDF", save_all=True, append_images=imgs[1:], resolution=200.0)
+            finally:
+                for im in imgs:
+                    try:
+                        im.close()
+                    except Exception:
+                        pass
+            data = buf.getvalue()
+            if limit_bytes is None or len(data) <= limit_bytes:
+                break
+        with open(out, "wb") as fh:
+            fh.write(data)
+        return len(data)
 
     def _run_wizard(self):
         wiz = SetupWizard(self, self._opts.get("language", "hi"))
