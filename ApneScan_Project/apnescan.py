@@ -328,6 +328,12 @@ DEFAULT_OPTIONS = {
     "backup_folder": os.path.join(os.path.expanduser("~"), "Documents", "NobleScans_Backup"),
     "scanner_method": "twain",   # "twain" ya "wia"
     "twain_file_xfer": False,    # experimental: continuous ADF feed (TWAIN file transfer)
+    "auto_orient": False,        # ulta page OCR se seedha karo
+    "auto_colour": False,        # rangeen page colour me, baki gray me (chhoti file)
+    "custom_page_mm": 600,       # "custom" page size ki lambai (mm)
+    "touch_mode": False,         # bade buttons/font (touch / buzurg mode)
+    "sign_image": "",            # sign/stamp wali image ka path
+    "tags": {},                  # pdf path -> [tags]
     "wia_device_id": None,
     "language": "hi",            # "hi" ya "en"
     "simple_mode": False,
@@ -601,6 +607,47 @@ def detect_content_boxes(img, bg_thresh=235):
 
     _split(0, 0 + mask.shape[0], 0, mask.shape[1], 0)
     return boxes
+
+
+def auto_orient(img):
+    """Ulta (90/180/270 ghuma hua) page OCR (Tesseract OSD) se pehchan kar
+    seedha karo. Tesseract na ho ya samajh na aaye to page waise hi rehta hai."""
+    try:
+        osd = pytesseract.image_to_osd(img.convert("RGB"))
+        m = re.search(r"Rotate:\s*(\d+)", osd or "")
+        rot = int(m.group(1)) if m else 0
+        if rot in (90, 180, 270):
+            return img.rotate(-rot, expand=True)
+    except Exception:
+        pass
+    return img
+
+
+def colorfulness(img):
+    """Page kitna rangeen hai (0 = pura B&W jaisa). Auto colour-detect ke liye."""
+    try:
+        import numpy as _np
+        small = img.convert("RGB").resize(
+            (max(1, img.width // 8), max(1, img.height // 8)))
+        a = _np.asarray(small, dtype=_np.int16)
+        rg = _np.abs(a[..., 0] - a[..., 1])
+        yb = _np.abs((a[..., 0] + a[..., 1]) // 2 - a[..., 2])
+        return float(rg.mean() + yb.mean())
+    except Exception:
+        return 999.0
+
+
+def restore_photo(img):
+    """Purani dhundhli/feeki photo ko sudharo: contrast, rang, sharpness."""
+    try:
+        rgb = img.convert("RGB")
+        rgb = rgb.filter(ImageFilter.MedianFilter(3))          # halka noise saaf
+        rgb = ImageOps.autocontrast(rgb, cutoff=2)
+        rgb = ImageEnhance.Color(rgb).enhance(1.25)
+        rgb = ImageEnhance.Sharpness(rgb).enhance(1.3)
+        return rgb
+    except Exception:
+        return img
 
 
 def apply_watermark(img, text):
@@ -905,6 +952,54 @@ class UpdateChecker(QtCore.QThread):
                              str(data.get("html_url") or DOWNLOAD_PAGE))
         except Exception:
             self.result.emit("", "")
+
+
+class ScannerFinder(QtCore.QThread):
+    """Network par eSCL scanner khud dhoondo — poore /24 subnet ko jaanchta hai
+    (IP hath se daalne ki zaroorat nahi)."""
+    found = QtCore.pyqtSignal(list)   # [(ip, model), ...]
+
+    def run(self):
+        import socket as _s
+        import concurrent.futures as _cf
+        import urllib.request as _u
+        results = []
+        try:
+            s = _s.socket(_s.AF_INET, _s.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            my_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            self.found.emit([])
+            return
+        base = my_ip.rsplit(".", 1)[0]
+
+        def probe(i):
+            ip = "%s.%d" % (base, i)
+            for port in (80, 8080):
+                try:
+                    c = _s.create_connection((ip, port), timeout=0.25)
+                    c.close()
+                except Exception:
+                    continue
+                try:
+                    host = ip if port == 80 else "%s:%d" % (ip, port)
+                    r = _u.urlopen("http://%s/eSCL/ScannerCapabilities" % host, timeout=1.5)
+                    xml = r.read(4000).decode("utf-8", "ignore")
+                    m = re.search(r"MakeAndModel>\s*([^<]+)", xml)
+                    return (ip, (m.group(1).strip() if m else "eSCL scanner"))
+                except Exception:
+                    pass
+            return None
+
+        try:
+            with _cf.ThreadPoolExecutor(max_workers=64) as ex:
+                for res in ex.map(probe, range(1, 255)):
+                    if res:
+                        results.append(res)
+        except Exception:
+            pass
+        self.found.emit(results)
 
 
 class ScannerError(Exception):
@@ -1591,6 +1686,13 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
         w, h = 2550, 4200
     elif ps.startswith("a5"):
         w, h = 1748, 2480
+    elif ps.startswith("custom"):
+        # "custom:800" => 800mm lambi parchi (receipt/bahi-khata). Width full bed.
+        mm = 600
+        _m = re.findall(r"(\d+)", ps)
+        if _m:
+            mm = max(100, min(3000, int(_m[0])))
+        w, h = 2550, int(round(mm * 300 / 25.4))
     else:  # auto -> full width, Legal length, let ADF stop at paper end
         w, h = 2550, 4200
         try:
@@ -2096,6 +2198,13 @@ class ScanWorker(QtCore.QThread):
                         img = deskew(img)
                     if self.opts.get("quality_enhance"):
                         img = auto_enhance(img)
+                    if self.opts.get("auto_orient") and tesseract_available():
+                        img = auto_orient(img)
+                    # Rang-heen page ko gray bana do (chhoti file) — sirf colour
+                    # scan me, aur sirf jab option ON ho.
+                    if (self.opts.get("auto_colour") and self.pixel_type == "color"
+                            and colorfulness(img) < 6.0):
+                        img = img.convert("L")
                     # Save the page. JPEG encodes ~5x faster than PNG (big scan-speed
                     # win); use it for colour/grey. Keep PNG for 1-bit black&white.
                     if self.pixel_type == "bw":
@@ -2138,10 +2247,13 @@ class ScanWorker(QtCore.QThread):
         err = None
         method = self.opts.get("scanner_method", "twain")
         try:
+            _ps = str(self.opts.get("page_size", "auto"))
+            if _ps.startswith("custom"):
+                _ps = "custom:%d" % int(self.opts.get("custom_page_mm", 600) or 600)
             if method == "escl":
                 scan_via_escl(self.opts.get("scanner_ip"), self.dpi, self.pixel_type,
                               self.duplex, _on_page, should_stop=self.isInterruptionRequested,
-                              page_size=self.opts.get("page_size", "auto"))
+                              page_size=_ps)
             elif method == "naps2":
                 scan_via_naps2(self.opts.get("naps2_path") or find_naps2(),
                                self.opts.get("naps2_profile"), self.tmpdir,
@@ -2217,10 +2329,13 @@ class EditProfileDialog(QtWidgets.QDialog):
         self.chk_duplex.setChecked(bool(self.profile.get("duplex")))
         form.addRow("", self.chk_duplex)
         self.cmb_psize = QtWidgets.QComboBox()
-        self._PSIZES = ["Auto (alag-alag size khud pakde)", "A4 (210x297 mm)", "Letter", "Legal", "A5"]
-        self.cmb_psize.addItems(self._PSIZES)
+        self._PSIZES = [("Auto (alag-alag size khud pakde)", "auto"),
+                        ("A4 (210x297 mm)", "a4"), ("Letter", "letter"),
+                        ("Legal", "legal"), ("A5", "a5"),
+                        ("Lambi parchi / custom (length Settings me)", "custom")]
+        self.cmb_psize.addItems([t for t, _c in self._PSIZES])
         _ps = (self.profile.get("page_size") or "auto").lower()
-        _idx = next((k for k, s in enumerate(self._PSIZES) if s.lower().startswith(_ps[:4])), 0)
+        _idx = next((k for k, (_t, c) in enumerate(self._PSIZES) if _ps.startswith(c[:4])), 0)
         self.cmb_psize.setCurrentIndex(_idx)
         form.addRow("Page size:", self.cmb_psize)
         btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
@@ -2250,7 +2365,7 @@ class EditProfileDialog(QtWidgets.QDialog):
         self.profile["dpi"] = int(self.cmb_dpi.currentText())
         self.profile["color"] = COLOUR_MODES[self.cmb_color.currentText()]
         self.profile["duplex"] = self.chk_duplex.isChecked()
-        self.profile["page_size"] = self.cmb_psize.currentText().strip().lower()
+        self.profile["page_size"] = self._PSIZES[self.cmb_psize.currentIndex()][1]
         return self.profile
 
 
@@ -2379,6 +2494,16 @@ class OptionsDialog(QtWidgets.QDialog):
         form.addRow(chkrow(self.chk_deskew, 'हिन्दी: ON: tedha scan hua page apne aap seedha ho jayega.\nEnglish: ON: straightens a tilted/skewed page automatically.'))
         self.chk_enhance = QtWidgets.QCheckBox("Quality auto-sudhar (faded documents saaf)")
         self.chk_enhance.setChecked(self.opts["quality_enhance"]); form.addRow(chkrow(self.chk_enhance, 'हिन्दी: ON: feeke/halke documents saaf aur gehre dikhenge.\nEnglish: ON: brightens & sharpens faded documents.'))
+        self.chk_orient = QtWidgets.QCheckBox("Ulta page khud seedha karo (OCR se)")
+        self.chk_orient.setChecked(bool(self.opts.get("auto_orient")))
+        form.addRow(chkrow(self.chk_orient, 'हिन्दी: ON: ulta (90/180/270) scan hua page OCR se pehchan kar apne aap seedha ho jayega (Tesseract chahiye; scan thoda dheema hota hai).\nEnglish: ON: auto-rotates upside-down/sideways pages using OCR (needs Tesseract; slightly slower).'))
+        self.chk_autocolour = QtWidgets.QCheckBox("Auto colour-detect (rang-heen page gray me)")
+        self.chk_autocolour.setChecked(bool(self.opts.get("auto_colour")))
+        form.addRow(chkrow(self.chk_autocolour, 'हिन्दी: ON (sirf Colour scan me): jis page par rang nahi hai wo apne aap gray me save hoga — chhoti file, saaf print.\nEnglish: ON (colour scans only): pages with no real colour are saved as grayscale — smaller files.'))
+        self.spin_custlen = QtWidgets.QSpinBox(); self.spin_custlen.setRange(100, 3000)
+        self.spin_custlen.setValue(int(self.opts.get("custom_page_mm", 600) or 600))
+        self.spin_custlen.setSuffix(" mm")
+        form.addRow(lblhelp("Custom page ki lambai:", 'हिन्दी: Profile me page size "Lambi parchi/custom" chunne par itni lambi patti scan hogi (receipt/bahi-khata).\nEnglish: Length used when the profile page size is "custom" (long receipts).'), self.spin_custlen)
         self.chk_filexfer = QtWidgets.QCheckBox("TWAIN continuous feed (experimental)")
         self.chk_filexfer.setChecked(bool(self.opts.get("twain_file_xfer")))
         form.addRow(chkrow(self.chk_filexfer, 'हिन्दी: ON (sirf TWAIN method me): scanner ka feeder bina ruke chalta rahega (file-transfer mode). Agar scanner support na kare to app khud purane tareeke par aa jayegi.\nEnglish: ON (TWAIN method only): keeps the ADF feeding continuously via file-transfer mode; falls back to the normal path automatically if unsupported.'))
@@ -2459,6 +2584,9 @@ class OptionsDialog(QtWidgets.QDialog):
         o["deskew"] = self.chk_deskew.isChecked()
         o["quality_enhance"] = self.chk_enhance.isChecked()
         o["twain_file_xfer"] = self.chk_filexfer.isChecked()
+        o["auto_orient"] = self.chk_orient.isChecked()
+        o["auto_colour"] = self.chk_autocolour.isChecked()
+        o["custom_page_mm"] = int(self.spin_custlen.value())
         o["compress"] = self.chk_compress.isChecked()
         o["jpeg_quality"] = int(self.q_spin.value())
         o["watermark"] = self.chk_wm.isChecked()
@@ -2909,6 +3037,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(me, "Clear all", self.clear_all, "हिन्दी: Saare pages hatao (khaali karo).\nEnglish: Remove all pages.")
 
         mt = mb.addMenu(tr("menu_tools", self._lang)); mt.setToolTipsVisible(True)
+        self._ma(mt, "Bundle → alag-alag PDFs (blank separator)…", self.bundle_split_save, "हिन्दी: Poora bundle ek saath feeder me daalo, documents ke beech KHAALI page rakho — ye khud alag-alag PDF bana dega. (Settings me 'blank hatao' OFF rakhein.)\nEnglish: Scan a whole bundle with a blank page between documents; this splits and saves separate PDFs automatically.")
+        self._ma(mt, "Book page → 2 pages me kaato", self.split_book_page, "हिन्दी: Khuli kitab ke scan ko beech se kaat kar do alag pages bana do.\nEnglish: Split an open-book scan into left and right pages.")
+        self._ma(mt, "Business cards → contacts…", self.business_cards, "हिन्दी: Visiting cards ke scan se naam/phone/email padh kar contact files (.vcf) + Excel banao.\nEnglish: Read visiting cards into contact (.vcf) files and an Excel sheet.")
+        self._ma(mt, "Purani photo sudharo (restore)", self.restore_photo_current, "हिन्दी: Feeki/dhundhli purani photo ka rang-roop sudharo.\nEnglish: Restore faded/dull old photos.")
+        self._ma(mt, "Scan History…", self.show_history, "हिन्दी: Ab tak ki saari saved PDFs — nayi se purani, filter ke saath.\nEnglish: All saved PDFs, newest first, with quick filter.")
         self._ma(mt, "Phone-photo se PDF (photo import)…", self.import_photos, "हिन्दी: Phone se kheenchi document-photos ko saaf karke pages banao (shadow hatana, seedha karna) — phir PDF save karo.\nEnglish: Clean up phone photos of documents (remove shadows, straighten) and add them as pages.")
         self._ma(mt, "ID cards alag karo (is page se)…", self.split_id_cards, "हिन्दी: Ek page par 2-3 ID cards scan kiye hain? Ye unhe alag-alag pages me kaat dega.\nEnglish: Scanned 2-3 ID cards on one page? This splits them into separate pages.")
         self._ma(mt, "Search past PDFs…", self.search_pdfs, "हिन्दी: Purani save ki hui PDF dhoondo (claim/naam se, ya PDF ke andar ke text se).\nEnglish: Search your saved PDFs by name or text content.", "Ctrl+F")
@@ -2925,6 +3058,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, tr("scan_method", self._lang) + "…", self.choose_scan_method, "हिन्दी: Scan ka tareeka: escl (network duplex), twain (USB duplex), ya wia.\nEnglish: Scan method: escl (network duplex), twain (USB), or wia.")
         self._ma(ms, tr("language", self._lang) + "…", self.choose_language, "हिन्दी: App ki bhasha badlo (Hindi/English).\nEnglish: Change the app language.")
         self._ma(ms, "Stats server URL…", self.set_stats_url, "हिन्दी: Worldwide stats ke liye Google Apps Script ka URL daalein (kitne scan hue, kitne online).\nEnglish: Set the stats server URL (worldwide scan counts + online users).")
+        self._ma(ms, "Scanner khud dhoondo (network)…", self.find_scanners, "हिन्दी: IP yaad rakhne ki zaroorat nahi — network par scanner khud dhoondh kar set karo.\nEnglish: Auto-discover eSCL scanners on the network and set the IP.")
         self._ma(ms, "Scanner IP…", self.set_scanner_ip, "हिन्दी: Network scanner ka IP set karo (jaise 192.168.1.8).\nEnglish: Set the network scanner IP.")
         self._ma(ms, "Keyboard Shortcuts…", self.show_shortcuts, "हिन्दी: Keyboard ke shortcuts ki list dekho.\nEnglish: View keyboard shortcuts.")
         self.act_simple = self._ma(ms, tr("simple_on", self._lang), self.toggle_simple_mode, "हिन्दी: Simple mode: sirf zaroori buttons dikhein (naye users ke liye aasan).\nEnglish: Simple mode: show only the essential buttons.")
@@ -4725,6 +4859,252 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self, "Ho gaya",
                 "%d card/hissa alag karke aage add kar diye.\n(Original page waise hi hai — "
                 "chahiye na ho to Delete kar dein.)" % added)
+
+    def find_scanners(self):
+        """Network par eSCL scanners khud dhoondo aur chun kar IP set karo."""
+        self.status.showMessage("Network par scanner dhoondh rahe hain… (10-20 sec)", 0)
+        self._finder = ScannerFinder()
+        self._finder.found.connect(self._on_scanners_found)
+        self._finder.start()
+
+    def _on_scanners_found(self, results):
+        self.status.clearMessage()
+        if not results:
+            self._warn("Network par koi eSCL scanner nahi mila.\n\n"
+                       "Scanner ON hai aur isi WiFi/LAN par hai? IP hath se bhi "
+                       "daal sakte ho: Settings → Scanner IP.")
+            return
+        items = ["%s  —  %s" % (ip, model) for ip, model in results]
+        pick, ok = QtWidgets.QInputDialog.getItem(
+            self, "Scanner mil gaye", "%d scanner mile — kaunsa use karein?" % len(results),
+            items, 0, False)
+        if not ok or not pick:
+            return
+        ip = pick.split()[0]
+        self._config["scanner_ip"] = ip
+        self._opts["scanner_ip"] = ip
+        self._opts["scanner_method"] = "escl"
+        self.ip_field.setText(ip)
+        self._save_opts(); save_config(self._config)
+        QtWidgets.QMessageBox.information(
+            self, "Ho gaya", "Scanner set ho gaya: %s\n(Method: eSCL network scan)" % ip)
+
+    def bundle_split_save(self):
+        """Bundle scan → BLANK page ko separator maan kar alag-alag PDFs banao.
+        (Scan karte waqt 'blank hatao' OFF rakhein aur documents ke beech ek
+        khaali page daalein.)"""
+        paths = self._ordered_paths()
+        if not paths:
+            self._warn(tr("scan_first", self._lang)); return
+        groups, cur = [], []
+        for p in paths:
+            blank = False
+            try:
+                with Image.open(p) as im:
+                    blank = is_blank_page(im.convert("RGB"))
+            except Exception:
+                pass
+            if blank:
+                if cur:
+                    groups.append(cur); cur = []
+            else:
+                cur.append(p)
+        if cur:
+            groups.append(cur)
+        if len(groups) <= 1:
+            self._warn("Koi blank separator page nahi mila — sab ek hi document lag "
+                       "raha hai.\n(Documents ke beech ek khaali page rakh kar scan "
+                       "karein, aur Settings me 'blank hatao' OFF ho.)")
+            return
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "PDFs kis folder me banayein?", self._opts.get("save_folder", ""))
+        if not folder:
+            return
+        os.makedirs(folder, exist_ok=True)
+        made = []
+        for i, grp in enumerate(groups, 1):
+            it0 = None
+            for r in range(self.list.count()):
+                if self.list.item(r).data(QtCore.Qt.UserRole) == grp[0]:
+                    it0 = self.list.item(r); break
+            name = (it0.data(TITLE_ROLE) if it0 else "") or ("Document_%d" % i)
+            out = os.path.join(folder, sanitize(underscore_name(name)) + ".pdf")
+            n = 2
+            while os.path.exists(out):
+                out = os.path.join(folder, "%s_%d.pdf" % (sanitize(underscore_name(name)), n)); n += 1
+            try:
+                self._pages_as_pdf(grp, out)
+                made.append(os.path.basename(out))
+            except Exception:
+                pass
+        QtWidgets.QMessageBox.information(
+            self, "Ho gaya", "%d alag PDF ban gayi:\n\n%s" % (len(made), "\n".join(made[:15])))
+
+    def split_book_page(self):
+        """Khuli kitab ka scan → do alag pages (baayan + daayan)."""
+        items = self.list.selectedItems() or ([self.list.currentItem()] if self.list.currentItem() else [])
+        if not items:
+            self._warn("Pehle koi page select karein."); return
+        added = 0
+        for it in items:
+            path = it.data(QtCore.Qt.UserRole)
+            try:
+                with Image.open(path) as im:
+                    img = im.convert("RGB").copy()
+                mid = img.width // 2
+                for half in (img.crop((0, 0, mid, img.height)),
+                             img.crop((mid, 0, img.width, img.height))):
+                    fd, png = tempfile.mkstemp(suffix=".png", dir=self._tmpdir)
+                    os.close(fd); half.save(png, "PNG")
+                    self._add_item_for_path(png); added += 1
+            except Exception:
+                pass
+        if added:
+            self._dirty = True
+            self.status.showMessage("%d pages ban gaye (original ko delete kar sakte ho)." % added, 5000)
+
+    def business_cards(self):
+        """Visiting cards ke scan se contacts nikaalo: har card alag + naam/phone/email
+        padh kar .vcf (contact file) aur contacts.xlsx me save."""
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        if not tesseract_available():
+            self._warn("Iske liye Tesseract OCR chahiye."); return
+        path = item.data(QtCore.Qt.UserRole)
+        with Image.open(path) as im:
+            img = im.convert("RGB").copy()
+        boxes = detect_content_boxes(img)
+        area = img.width * img.height
+        cards = [b for b in boxes if (b[2]-b[0])*(b[3]-b[1]) >= area*0.01
+                 and (b[2]-b[0]) > 80 and (b[3]-b[1]) > 50]
+        if not cards:
+            cards = [(0, 0, img.width, img.height)]
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Contacts kahan save karein?", self._opts.get("save_folder", ""))
+        if not folder:
+            return
+        os.makedirs(folder, exist_ok=True)
+        got = 0
+        rows = []
+        for i, b in enumerate(sorted(cards, key=lambda x: (x[1], x[0])), 1):
+            card = img.crop(b)
+            try:
+                text = pytesseract.image_to_string(card, lang="eng+hin")
+            except Exception:
+                text = ""
+            lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
+            name = lines[0] if lines else ("Card_%d" % i)
+            phones = re.findall(r"(?:\+?\d[\d\s\-]{8,14}\d)", text or "")
+            emails = re.findall(r"[\w.+-]+@[\w-]+\.[\w.]+", text or "")
+            phone = (phones[0].replace(" ", "").replace("-", "") if phones else "")
+            email = emails[0] if emails else ""
+            vcf = os.path.join(folder, sanitize(underscore_name(name))[:40] + ".vcf")
+            try:
+                with open(vcf, "w", encoding="utf-8") as fh:
+                    fh.write("BEGIN:VCARD\nVERSION:3.0\nFN:%s\n" % name)
+                    if phone:
+                        fh.write("TEL;TYPE=CELL:%s\n" % phone)
+                    if email:
+                        fh.write("EMAIL:%s\n" % email)
+                    fh.write("END:VCARD\n")
+                got += 1
+            except Exception:
+                pass
+            rows.append((name, phone, email))
+            fd, png = tempfile.mkstemp(suffix=".png", dir=self._tmpdir)
+            os.close(fd); card.save(png, "PNG")
+            self._add_item_for_path(png)
+        if HAS_XLSX and rows:
+            try:
+                xp = os.path.join(folder, "contacts.xlsx")
+                wb = openpyxl.load_workbook(xp) if os.path.exists(xp) else openpyxl.Workbook()
+                ws = wb.active
+                if ws.max_row == 1 and not ws.cell(1, 1).value:
+                    ws.append(["Naam", "Phone", "Email", "Date"])
+                for nm, ph, em in rows:
+                    ws.append([nm, ph, em, datetime.datetime.now().strftime("%Y-%m-%d")])
+                wb.save(xp)
+            except Exception:
+                pass
+        QtWidgets.QMessageBox.information(
+            self, "Ho gaya",
+            "%d card mile.\n%d contact (.vcf) files bani + contacts.xlsx me entry.\n\n"
+            "(.vcf ko phone me bhejo — kholte hi contact save ho jata hai.)" % (len(rows), got))
+
+    def restore_photo_current(self):
+        """Selected page/photo ko sudharo (purani feeki photo wala mode)."""
+        items = self.list.selectedItems() or ([self.list.currentItem()] if self.list.currentItem() else [])
+        if not items:
+            self._warn("Pehle koi page select karein."); return
+        for it in items:
+            path = it.data(QtCore.Qt.UserRole)
+            try:
+                with Image.open(path) as im:
+                    out = restore_photo(im)
+                out.save(path, "PNG")
+                self._refresh_item(it)
+            except Exception:
+                pass
+        self._dirty = True
+        self.status.showMessage("Photo sudhar di gayi.", 4000)
+
+    def show_history(self):
+        """Save folder ki saari PDFs — nayi se purani, search ke saath."""
+        root = self._opts.get("save_folder", os.path.expanduser("~"))
+        files = []
+        try:
+            for dp, _dn, fn in os.walk(root):
+                for f in fn:
+                    if f.lower().endswith(".pdf"):
+                        p = os.path.join(dp, f)
+                        try:
+                            st = os.stat(p)
+                            files.append((st.st_mtime, st.st_size, p))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+        files.sort(reverse=True)
+        files = files[:300]
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Scan History (%d files)" % len(files))
+        dlg.resize(720, 480)
+        v = QtWidgets.QVBoxLayout(dlg)
+        ed = QtWidgets.QLineEdit(); ed.setPlaceholderText("Naam se filter karein…")
+        v.addWidget(ed)
+        tree = QtWidgets.QTreeWidget()
+        tree.setHeaderLabels(["File", "Kab", "Size"])
+        tree.setRootIsDecorated(False)
+        tree.setColumnWidth(0, 380); tree.setColumnWidth(1, 150)
+        for mt, sz, p in files:
+            when = datetime.datetime.fromtimestamp(mt).strftime("%d-%m-%Y %H:%M")
+            kb = sz / 1024.0
+            pretty = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024))
+            it = QtWidgets.QTreeWidgetItem([os.path.basename(p), when, pretty])
+            it.setData(0, QtCore.Qt.UserRole, p)
+            tree.addTopLevelItem(it)
+        v.addWidget(tree, 1)
+
+        def _filter(txt):
+            t = txt.strip().lower()
+            for i in range(tree.topLevelItemCount()):
+                it = tree.topLevelItem(i)
+                it.setHidden(bool(t) and t not in it.text(0).lower())
+        ed.textChanged.connect(_filter)
+        tree.itemDoubleClicked.connect(
+            lambda it, col: self._open_path(it.data(0, QtCore.Qt.UserRole)))
+        row = QtWidgets.QHBoxLayout()
+        b1 = QtWidgets.QPushButton("Kholo")
+        b1.clicked.connect(lambda: tree.currentItem() and self._open_path(
+            tree.currentItem().data(0, QtCore.Qt.UserRole)))
+        b2 = QtWidgets.QPushButton("Folder kholo")
+        b2.clicked.connect(lambda: tree.currentItem() and self._reveal_in_explorer(
+            tree.currentItem().data(0, QtCore.Qt.UserRole)))
+        bc = QtWidgets.QPushButton("Band karo"); bc.clicked.connect(dlg.accept)
+        row.addWidget(b1); row.addWidget(b2); row.addStretch(1); row.addWidget(bc)
+        v.addLayout(row)
+        dlg.exec_()
 
     # ---- page edit ----
     def _current_item_or_warn(self):
