@@ -151,7 +151,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "20"
+VERSION = "21"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -354,6 +354,7 @@ DEFAULT_OPTIONS = {
     "sign_image": "",            # sign/stamp wali image ka path
     "tags": {},                  # pdf path -> [tags]
     "show_files_panel": True,    # daayan "Meri Files" panel
+    "fav_folders": [],           # panel ke ⭐ favourite folders
     "wia_device_id": None,
     "language": "hi",            # "hi" ya "en"
     "simple_mode": False,
@@ -3012,6 +3013,43 @@ class PreviewDialog(QtWidgets.QDialog):
             super().keyPressEvent(e)
 
 
+class LibraryModel(QtWidgets.QFileSystemModel):
+    """'Meri Files' panel ka model — AAJ banayi files hari dikhti hain."""
+
+    def data(self, index, role=QtCore.Qt.DisplayRole):
+        if role == QtCore.Qt.ForegroundRole and index.column() == 0:
+            try:
+                fi = self.fileInfo(index)
+                if fi.isFile() and fi.lastModified().date() == QtCore.QDate.currentDate():
+                    return QtGui.QBrush(QtGui.QColor("#16a34a"))
+            except Exception:
+                pass
+        return super().data(index, role)
+
+
+class FilesTree(QtWidgets.QTreeView):
+    """Folder tree jo pages ka DROP le leta hai — page ko kheench kar folder
+    par chhodo = seedha wahan save."""
+
+    def __init__(self, on_drop):
+        super().__init__()
+        self._on_drop = on_drop
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, e):
+        e.acceptProposedAction()
+
+    def dragMoveEvent(self, e):
+        e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        try:
+            self._on_drop(self.indexAt(e.pos()))
+            e.acceptProposedAction()
+        except Exception:
+            e.ignore()
+
+
 class ScannerWindow(QtWidgets.QMainWindow):
     THUMB_W = 150
     THUMB_H = 200
@@ -3840,8 +3878,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             return False
 
-    def share_whatsapp(self):
-        pdf = self._pick_share_pdf()
+    def share_whatsapp(self, pdf=None):
+        if not isinstance(pdf, str) or not pdf:
+            pdf = self._pick_share_pdf()
         if not pdf:
             return
         copied = self._copy_file_to_clipboard(pdf)
@@ -3858,8 +3897,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
                  "File: %s") % ("" if copied else " (copy nahi ho payi)", pdf)
         QtWidgets.QMessageBox.information(self, "WhatsApp par bhejo", steps)
 
-    def share_email(self):
-        pdf = self._pick_share_pdf()
+    def share_email(self, pdf=None):
+        if not isinstance(pdf, str) or not pdf:
+            pdf = self._pick_share_pdf()
         if not pdf:
             return
         # Pehle Outlook try karo (attachment ke saath draft khulta hai)
@@ -3899,12 +3939,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "File: %s" % pdf)
 
     # ---- PDF compress tool ----
-    def compress_pdf_tool(self):
+    def compress_pdf_tool(self, src_pdf=None):
         """Abhi ke pages (ya koi bhi purani PDF) ko chhota karke alag PDF banao —
         portal ki 200KB/500KB/1MB/2MB limit ke hisaab se."""
+        if not isinstance(src_pdf, str) or not src_pdf:
+            src_pdf = None
         paths = self._ordered_paths()
-        src_pdf = None
-        if not paths:
+        if src_pdf is None and not paths:
             start = self._opts.get("save_folder", os.path.expanduser("~"))
             src_pdf, _ = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Kaunsi PDF chhoti karni hai?", start, "PDF (*.pdf)")
@@ -4717,13 +4758,22 @@ class ScannerWindow(QtWidgets.QMainWindow):
         _hdr.setToolTip("Save folder ke folders aur documents — yahin se naya folder "
                         "banao aur scan ki PDF seedha usme save karo.")
         fp.addWidget(_hdr)
+        # Search: kisi bhi folder ke andar naam se dhoondo (folder chuna ho to
+        # usi ke andar, warna poore save-folder me)
+        self.files_search = QtWidgets.QLineEdit()
+        self.files_search.setPlaceholderText("🔍 Dhoondo… (chune folder ke andar)")
+        self.files_search.setClearButtonEnabled(True)
+        fp.addWidget(self.files_search)
+        self.fav_bar = QtWidgets.QHBoxLayout()
+        self.fav_bar.setSpacing(4)
+        fp.addLayout(self.fav_bar)
         _root = self._files_root()
-        self.files_model = QtWidgets.QFileSystemModel(self)
+        self.files_model = LibraryModel(self)
         self.files_model.setRootPath(_root)
         self.files_model.setNameFilters(["*.pdf", "*.jpg", "*.jpeg", "*.png",
                                          "*.tif", "*.tiff", "*.docx", "*.xlsx"])
         self.files_model.setNameFilterDisables(False)
-        self.files_tree = QtWidgets.QTreeView()
+        self.files_tree = FilesTree(self._on_pages_dropped)
         self.files_tree.setModel(self.files_model)
         self.files_tree.setRootIndex(self.files_model.index(_root))
         for _c in (1, 2, 3):
@@ -4731,9 +4781,26 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.files_tree.setHeaderHidden(True)
         self.files_tree.setAnimated(True)
         self.files_tree.doubleClicked.connect(self._files_tree_open)
-        self.files_tree.setToolTip("Folder par click karke 'Yahan save' dabao.\n"
-                                   "File par double-click = kholo.")
+        self.files_tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.files_tree.customContextMenuRequested.connect(self._files_tree_menu)
+        self.files_tree.selectionModel().currentChanged.connect(self._files_sel_changed)
+        self.files_tree.setToolTip("Folder chuno → 'Yahan save' dabao, ya pages ko\n"
+                                   "kheench kar folder par chhod do.\n"
+                                   "Right-click = share/rename/delete/merge.\n"
+                                   "File par double-click = kholo. Hari = aaj ki file.")
         fp.addWidget(self.files_tree, 1)
+        # search ke results (search karte hi tree ki jagah dikhte hain)
+        self.files_results = QtWidgets.QListWidget()
+        self.files_results.itemDoubleClicked.connect(
+            lambda it: it.data(QtCore.Qt.UserRole) and self._open_path(it.data(QtCore.Qt.UserRole)))
+        self.files_results.hide()
+        fp.addWidget(self.files_results, 1)
+        self._files_search_timer = QtCore.QTimer(self)
+        self._files_search_timer.setSingleShot(True)
+        self._files_search_timer.setInterval(350)
+        self._files_search_timer.timeout.connect(self._run_files_search)
+        self.files_search.textChanged.connect(lambda _t: self._files_search_timer.start())
+        self._rebuild_fav_bar()
         _row = QtWidgets.QHBoxLayout()
         _bnew = QtWidgets.QPushButton("➕ Naya folder")
         _bnew.clicked.connect(self.new_library_folder)
@@ -5487,17 +5554,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if not paths:
             self._warn(tr("scan_first", self._lang))
             return
-        folder = self._selected_library_folder()
+        self._save_pages_to_folder(self._selected_library_folder(), paths, ask_name=True)
+
+    def _save_pages_to_folder(self, folder, paths, ask_name=True):
+        if not paths:
+            self._warn(tr("scan_first", self._lang))
+            return
         default = os.path.basename(self._build_filename(".pdf", paths=paths))
         if default.lower().endswith(".pdf"):
             default = default[:-4]
-        name, ok = QtWidgets.QInputDialog.getText(
-            self, "Save karein",
-            "File ka naam:   (folder: %s)" % (os.path.basename(folder) or folder),
-            text=default)
-        if not ok or not name.strip():
-            return
-        base = sanitize(underscore_name(name.strip()))
+        if ask_name:
+            name, ok = QtWidgets.QInputDialog.getText(
+                self, "Save karein",
+                "File ka naam:   (folder: %s)" % (os.path.basename(folder) or folder),
+                text=default)
+            if not ok or not name.strip():
+                return
+            default = name.strip()
+        base = sanitize(underscore_name(default))
         out = os.path.join(folder, base + ".pdf")
         n = 2
         while os.path.exists(out):          # duplicate par khud numbering
@@ -5520,6 +5594,218 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
         self.status.showMessage("✔ Save ho gayi: %s" % out, 7000)
+
+    def _on_pages_dropped(self, idx):
+        """Pages ko folder par DROP karo = turant wahan save (auto naam se).
+        Jo pages select hain wahi; kuch select na ho to saare."""
+        try:
+            p = self.files_model.filePath(idx) if idx.isValid() else self._files_root()
+        except Exception:
+            p = self._files_root()
+        folder = p if os.path.isdir(p) else os.path.dirname(p)
+        paths = self._selected_paths() or self._ordered_paths()
+        self._save_pages_to_folder(folder, paths, ask_name=False)
+
+    def _files_sel_changed(self, cur, _prev):
+        # Folder chunte hi status me uska hisaab: kitni files, kitni jagah
+        try:
+            p = self.files_model.filePath(cur)
+            if p and os.path.isdir(p):
+                files = [f for f in os.listdir(p)
+                         if os.path.isfile(os.path.join(p, f))]
+                sz = sum(os.path.getsize(os.path.join(p, f)) for f in files)
+                self.status.showMessage(
+                    "📁 %s — %d files, %.1f MB" %
+                    (os.path.basename(p) or p, len(files), sz / 1048576.0), 4000)
+        except Exception:
+            pass
+
+    def _files_tree_menu(self, pos):
+        idx = self.files_tree.indexAt(pos)
+        menu = QtWidgets.QMenu(self)
+        if idx.isValid():
+            path = self.files_model.filePath(idx)
+            if os.path.isdir(path):
+                menu.addAction("💾 Yahan save karo",
+                               lambda: self._save_pages_to_folder(path, self._ordered_paths()))
+                menu.addAction("➕ Naya folder isme…", lambda: self._new_folder_in(path))
+                menu.addAction("🧩 Is folder ki saari PDFs → ek PDF…",
+                               lambda: self._merge_folder_pdfs(path))
+                menu.addAction("📂 Explorer me kholo", lambda: self._open_path(path))
+                favs = self._opts.get("fav_folders") or []
+                menu.addAction("⭐ Favourite hatao" if path in favs else "⭐ Favourite banao",
+                               lambda: self._toggle_fav(path))
+            else:
+                menu.addAction("📖 Kholo", lambda: self._open_path(path))
+                if path.lower().endswith(".pdf"):
+                    menu.addAction("🟢 WhatsApp par bhejo", lambda: self.share_whatsapp(path))
+                    menu.addAction("✉ Email se bhejo", lambda: self.share_email(path))
+                    menu.addAction("🗜 Chhota karo (compress)…",
+                                   lambda: self.compress_pdf_tool(path))
+                    menu.addAction("🏷 Tag lagao…", lambda: self.tag_pdf(path))
+                menu.addAction("✏ Naam badlo…", lambda: self._rename_library_file(path))
+                menu.addAction("🗑 Delete…", lambda: self._delete_library_file(path))
+        else:
+            menu.addAction("➕ Naya folder", self.new_library_folder)
+        menu.exec_(self.files_tree.viewport().mapToGlobal(pos))
+
+    def _new_folder_in(self, base):
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, "Naya folder",
+            "Folder ka naam:\n(banega: '%s' ke andar)" % (os.path.basename(base) or "Meri Files"))
+        if not ok or not name.strip():
+            return
+        p = os.path.join(base, sanitize(underscore_name(name.strip())))
+        try:
+            os.makedirs(p, exist_ok=True)
+        except Exception as exc:
+            self._warn("Folder nahi bana:\n%s" % exc)
+            return
+        try:
+            self.files_tree.expand(self.files_model.index(base))
+            self.files_tree.setCurrentIndex(self.files_model.index(p))
+        except Exception:
+            pass
+        self.status.showMessage("Folder ban gaya: %s" % os.path.basename(p), 4000)
+
+    def _toggle_fav(self, path):
+        favs = self._opts.setdefault("fav_folders", [])
+        if path in favs:
+            favs.remove(path)
+        else:
+            favs.append(path)
+            while len(favs) > 4:
+                favs.pop(0)
+        self._save_opts()
+        self._rebuild_fav_bar()
+
+    def _rebuild_fav_bar(self):
+        while self.fav_bar.count():
+            it = self.fav_bar.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.deleteLater()
+        for p in (self._opts.get("fav_folders") or []):
+            if not os.path.isdir(p):
+                continue
+            b = QtWidgets.QPushButton("⭐ " + (os.path.basename(p) or p)[:12])
+            b.setToolTip(p)
+            b.setStyleSheet("padding:3px 8px; font-size:11px;")
+            b.clicked.connect(lambda _c=False, pp=p: self._jump_to_folder(pp))
+            self.fav_bar.addWidget(b)
+        self.fav_bar.addStretch(1)
+
+    def _jump_to_folder(self, p):
+        try:
+            self.files_search.clear()
+            idx = self.files_model.index(p)
+            self.files_tree.setCurrentIndex(idx)
+            self.files_tree.expand(idx)
+            self.files_tree.scrollTo(idx)
+        except Exception:
+            pass
+
+    def _run_files_search(self):
+        """Panel ki search: chune folder ke andar (ya poore save-folder me)
+        naam se file dhoondo — background me, turant results."""
+        q = self.files_search.text().strip().lower()
+        if len(q) < 2:
+            self.files_results.hide()
+            self.files_tree.show()
+            return
+        scope = self._selected_library_folder()
+
+        def job():
+            hits = []
+            for dp, _dn, fn in os.walk(scope):
+                for f in fn:
+                    if q in f.lower():
+                        hits.append(os.path.join(dp, f))
+                        if len(hits) >= 400:
+                            return hits
+            return hits
+
+        def done(res):
+            if isinstance(res, Exception):
+                return
+            if self.files_search.text().strip().lower() != q:
+                return                      # tab tak nayi search shuru ho gayi
+            self.files_results.clear()
+            for p in res:
+                rel = os.path.dirname(os.path.relpath(p, scope))
+                label = "📄 " + os.path.basename(p)
+                if rel and rel != ".":
+                    label += "   (%s)" % rel
+                it = QtWidgets.QListWidgetItem(label)
+                it.setToolTip(p)
+                it.setData(QtCore.Qt.UserRole, p)
+                self.files_results.addItem(it)
+            if not res:
+                it = QtWidgets.QListWidgetItem("(kuch nahi mila)")
+                it.setFlags(QtCore.Qt.NoItemFlags)
+                self.files_results.addItem(it)
+            self.files_tree.hide()
+            self.files_results.show()
+        self._run_bg(job, done, "Dhoondh rahe hain…")
+
+    def _merge_folder_pdfs(self, folder):
+        if not HAS_OCR_LIBS:
+            self._warn("pypdf install nahi hai.")
+            return
+        pdfs = sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                      if f.lower().endswith(".pdf"))
+        if len(pdfs) < 2:
+            self._warn("Is folder me 2 se kam PDF hain.")
+            return
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Merged PDF save karein",
+            os.path.join(folder, (os.path.basename(folder) or "sab") + "_sab.pdf"),
+            "PDF (*.pdf)")
+        if not out:
+            return
+        try:
+            writer = PdfWriter()
+            used = 0
+            for p in pdfs:
+                if os.path.abspath(p) == os.path.abspath(out):
+                    continue
+                try:
+                    for pg in PdfReader(p).pages:
+                        writer.add_page(pg)
+                    used += 1
+                except Exception:
+                    pass
+            with open(out, "wb") as fh:
+                writer.write(fh)
+        except Exception:
+            self._warn("Merge fail:\n%s" % traceback.format_exc())
+            return
+        QtWidgets.QMessageBox.information(
+            self, "Ho gaya", "%d PDFs jud kar ek ban gayi:\n%s" % (used, out))
+
+    def _rename_library_file(self, path):
+        stem, ext = os.path.splitext(os.path.basename(path))
+        name, ok = QtWidgets.QInputDialog.getText(self, "Naam badlo", "Naya naam:", text=stem)
+        if not ok or not name.strip():
+            return
+        new = os.path.join(os.path.dirname(path),
+                           sanitize(underscore_name(name.strip())) + ext)
+        try:
+            os.rename(path, new)
+        except Exception as exc:
+            self._warn("Rename fail: %s" % exc)
+
+    def _delete_library_file(self, path):
+        if QtWidgets.QMessageBox.question(
+                self, "Delete",
+                "'%s' ko delete kar dein?\n(Ye wapas nahi aayegi)" % os.path.basename(path),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            return
+        try:
+            os.remove(path)
+        except Exception as exc:
+            self._warn("Delete fail: %s" % exc)
 
     def toggle_files_panel(self):
         vis = not self.files_panel.isVisible()
@@ -5594,9 +5880,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 % (total, changed))
         self._run_bg(job, done, "Search index ban raha hai… (app chalti rahegi)")
 
-    def tag_pdf(self):
+    def tag_pdf(self, src=None):
         """Kisi bhi saved PDF par tags lagao (jaise: Aadhaar, School, Bijli-bill)."""
-        src = self._pick_pdf("Kis PDF par tag lagana hai?")
+        if not isinstance(src, str) or not src:
+            src = self._pick_pdf("Kis PDF par tag lagana hai?")
         if not src:
             return
         tags = self._opts.setdefault("tags", {})
