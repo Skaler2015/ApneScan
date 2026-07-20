@@ -1,0 +1,38 @@
+name: Build ApneScan EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/content-review-jjokt7
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up 32-bit Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x86
+
+      - name: Install dependencies
+        working-directory: ApneScan_Project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build EXE with PyInstaller
+        working-directory: ApneScan_Project
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name "ApneScan" --icon apnescan.ico --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes apnescan.py
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApneScan-exe
+          path: ApneScan_Project/dist/ApneScan.exe
+          if-no-files-found: error
