@@ -31,7 +31,7 @@ jobs:
       - name: Build EXE with PyInstaller
         working-directory: ApneScan_Project
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name "ApneScan" --icon apnescan.ico --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes apnescan.py
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name "ApneScan" --icon apnescan.ico --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes --hidden-import PyQt5.QtMultimedia --hidden-import PyQt5.QtMultimediaWidgets apnescan.py
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4

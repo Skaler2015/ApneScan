@@ -28,6 +28,13 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
 
 try:
+    from PyQt5.QtMultimedia import QCamera, QCameraInfo, QCameraImageCapture
+    from PyQt5.QtMultimediaWidgets import QCameraViewfinder
+    HAS_CAMERA = True
+except Exception:
+    HAS_CAMERA = False
+
+try:
     import twain
     HAS_TWAIN = True
 except Exception:
@@ -151,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "25"
+VERSION = "26"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -366,6 +373,7 @@ DEFAULT_OPTIONS = {
     "ui_jobs": False,            # job-chips patti
     "ui_kiosk": False,           # kiosk overlay
     "jobs": [],                  # job-chips: [{name,icon,profile,folder,template}]
+    "ui_ribbon": False,          # ribbon toolbar (classic toolbar ki jagah)
     "wia_device_id": None,
     "language": "hi",            # "hi" ya "en"
     "simple_mode": False,
@@ -3036,6 +3044,93 @@ class PreviewDialog(QtWidgets.QDialog):
             super().keyPressEvent(e)
 
 
+class CameraDialog(QtWidgets.QDialog):
+    """Webcam/USB-camera se document capture — scanner na ho to bhi PDF banao.
+    Capture ki gayi har photo apne aap saaf (shadow hatana/seedha) hoti hai."""
+
+    def __init__(self, parent, tmpdir):
+        super().__init__(parent)
+        self.tmpdir = tmpdir
+        self.captured = []          # saved temp image paths
+        self.setWindowTitle("📷 Camera se scan")
+        self.resize(720, 560)
+        v = QtWidgets.QVBoxLayout(self)
+        self.viewf = QCameraViewfinder()
+        v.addWidget(self.viewf, 1)
+        row = QtWidgets.QHBoxLayout()
+        self.cmb = QtWidgets.QComboBox()
+        self._cams = QCameraInfo.availableCameras()
+        for c in self._cams:
+            self.cmb.addItem(c.description())
+        row.addWidget(self.cmb, 1)
+        self.lbl = QtWidgets.QLabel("0 captured")
+        row.addWidget(self.lbl)
+        v.addLayout(row)
+        brow = QtWidgets.QHBoxLayout()
+        self.b_shot = QtWidgets.QPushButton("📸 Capture (Space)")
+        self.b_shot.setObjectName("primary"); self.b_shot.setMinimumHeight(40)
+        self.b_shot.clicked.connect(self._capture)
+        b_done = QtWidgets.QPushButton("✔ Done — pages add karo")
+        b_done.clicked.connect(self.accept)
+        b_cancel = QtWidgets.QPushButton("Cancel")
+        b_cancel.clicked.connect(self.reject)
+        brow.addWidget(self.b_shot, 2); brow.addWidget(b_done, 1); brow.addWidget(b_cancel)
+        v.addLayout(brow)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Space"), self, self._capture)
+        self.camera = None
+        self.cap = None
+        self.cmb.currentIndexChanged.connect(self._start_camera)
+        if self._cams:
+            self._start_camera(0)
+        else:
+            self.b_shot.setEnabled(False)
+            self.viewf.setStyleSheet("background:#111;")
+
+    def _start_camera(self, idx):
+        try:
+            if self.camera:
+                self.camera.stop()
+            self.camera = QCamera(self._cams[idx])
+            self.camera.setViewfinder(self.viewf)
+            self.cap = QCameraImageCapture(self.camera)
+            self.cap.imageCaptured.connect(self._on_captured)
+            self.camera.start()
+        except Exception:
+            self.b_shot.setEnabled(False)
+
+    def _capture(self):
+        if not self.cap:
+            return
+        try:
+            self.cap.capture()          # imageCaptured signal me frame aayega
+        except Exception:
+            pass
+
+    def _on_captured(self, _id, qimg):
+        try:
+            fd, png = tempfile.mkstemp(suffix=".jpg", dir=self.tmpdir)
+            os.close(fd)
+            qimg.save(png, "JPG", 92)
+            # scan-jaisa saaf: shadow hatana + seedha (clean_photo module-level hai)
+            try:
+                with Image.open(png) as im:
+                    clean_photo(im).save(png, "JPEG", quality=90)
+            except Exception:
+                pass
+            self.captured.append(png)
+            self.lbl.setText("%d captured" % len(self.captured))
+        except Exception:
+            pass
+
+    def closeEvent(self, e):
+        try:
+            if self.camera:
+                self.camera.stop()
+        except Exception:
+            pass
+        super().closeEvent(e)
+
+
 class SparkBars(QtWidgets.QWidget):
     """Chhota bar-chart (bina kisi library ke) — dashboard ke liye."""
 
@@ -3233,6 +3328,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "Purani photo sudharo (restore)", self.restore_photo_current, "हिन्दी: Feeki/dhundhli purani photo ka rang-roop sudharo.\nEnglish: Restore faded/dull old photos.")
         self._ma(mt, "Scan History…", self.show_history, "हिन्दी: Ab tak ki saari saved PDFs — nayi se purani, filter ke saath.\nEnglish: All saved PDFs, newest first, with quick filter.")
         self._ma(mt, "📊 Stats Dashboard…", self.show_stats_dashboard, "हिन्दी: Aapki + duniya bhar ki poori statistics — graphs ke saath. (Sidebar ke stats-box par click karke bhi khulta hai.)\nEnglish: Full personal + worldwide statistics with charts.")
+        self._ma(mt, "📷 Camera se scan (webcam)…", self.scan_from_camera, "हिन्दी: Scanner na ho to bhi — webcam/USB camera se document capture karke PDF banao (photo apne aap saaf hoti hai).\nEnglish: No scanner? Capture documents with a webcam/USB camera (auto-cleaned).")
         self._ma(mt, "Phone-photo se PDF (photo import)…", self.import_photos, "हिन्दी: Phone se kheenchi document-photos ko saaf karke pages banao (shadow hatana, seedha karna) — phir PDF save karo.\nEnglish: Clean up phone photos of documents (remove shadows, straighten) and add them as pages.")
         self._ma(mt, "ID cards alag karo (is page se)…", self.split_id_cards, "हिन्दी: Ek page par 2-3 ID cards scan kiye hain? Ye unhe alag-alag pages me kaat dega.\nEnglish: Scanned 2-3 ID cards on one page? This splits them into separate pages.")
         self._ma(mt, "Search past PDFs…", self.search_pdfs, "हिन्दी: Purani save ki hui PDF dhoondo (claim/naam/tag se, ya PDF ke andar ke text se).\nEnglish: Search your saved PDFs by name, tag or text content.", "Ctrl+F")
@@ -4710,6 +4806,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.chk_fast.toggled.connect(self._on_fast_toggled)
         tb.addWidget(self._vsep())
         self.btn_import = tbtn("import", tr("import", self._lang), self.import_images, advanced=True)
+        tbtn("import", self.L("Camera", "Camera"), self.scan_from_camera, advanced=True)
         self.btn_save_pdf = tbtn("savepdf", tr("save_pdf", self._lang), self.save_pdf)
         tbtn("images", "Save Images", self.save_images, advanced=True)
         self.btn_print = tbtn("print", "Print", self.print_all, advanced=True)
@@ -4734,7 +4831,55 @@ class ScannerWindow(QtWidgets.QMainWindow):
         printmenu.addAction("ID print - sirf selected", self.print_ids_selected)
         self.btn_print.setMenu(printmenu)
         self.btn_print.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
+        self._classic_toolbar = tbwrap
         outer.addWidget(tbwrap)
+        # ---- UI #1: Ribbon toolbar (MS-Office jaisa — tabs me buttons) ----
+        self.ribbon = QtWidgets.QTabWidget()
+        self.ribbon.setObjectName("ribbon")
+        self.ribbon.setMaximumHeight(96)
+
+        def _ribbon_tab(pairs):
+            w = QtWidgets.QWidget()
+            h = QtWidgets.QHBoxLayout(w)
+            h.setContentsMargins(8, 4, 8, 4); h.setSpacing(4)
+            for icon, text, fn in pairs:
+                b = QtWidgets.QToolButton()
+                b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+                b.setText("%s\n%s" % (icon, text))
+                b.setAutoRaise(True); b.setMinimumWidth(66); b.setMinimumHeight(56)
+                b.clicked.connect(fn)
+                h.addWidget(b)
+            h.addStretch(1)
+            return w
+        L = self.L
+        self.ribbon.addTab(_ribbon_tab([
+            ("🖨", L("Scan", "Scan"), self.do_scan),
+            ("📷", "Camera", self.scan_from_camera),
+            ("📥", "Import", self.import_images),
+            ("🖼", "Photo", self.import_photos),
+            ("💾", "Save PDF", self.save_pdf_all),
+            ("🖨️", "Print", self.print_pages)]), L("🏠 Home", "🏠 Home"))
+        self.ribbon.addTab(_ribbon_tab([
+            ("↺", L("Ghumao", "Rotate"), self.rotate_left),
+            ("✂", "Crop", self.autocrop_current),
+            ("✒", "Sign", self.place_sign),
+            ("🔤", "OCR text", self.copy_page_text),
+            ("🗑", "Delete", self.delete_page),
+            ("↩", "Undo", self.undo_delete)]), L("✏ Edit", "✏ Edit"))
+        self.ribbon.addTab(_ribbon_tab([
+            ("🗜", "Compress", self.compress_pdf_tool),
+            ("🧩", "Merge", self.merge_pdfs),
+            ("✂", "Split", self.split_pdfs),
+            ("🔍", "Search", self.search_pdfs),
+            ("📊", "Stats", self.show_stats_dashboard),
+            ("📷", "Cards", self.business_cards)]), L("🧰 Tools", "🧰 Tools"))
+        self.ribbon.addTab(_ribbon_tab([
+            ("🟢", "WhatsApp", self.share_whatsapp),
+            ("✉", "Email", self.share_email)]), L("📤 Share", "📤 Share"))
+        self.ribbon.setVisible(bool(self._opts.get("ui_ribbon", False)))
+        if self._opts.get("ui_ribbon"):
+            tbwrap.hide()
+        outer.addWidget(self.ribbon)
         # ---- UI #7: Status-header card (toolbar ke neeche patli smart patti) ----
         self.ui_header = QtWidgets.QWidget()
         self.ui_header.setObjectName("uiheader")
@@ -5455,6 +5600,23 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.status.clearMessage()
             self._warn("Import nahi ho paya. PDF ho to behtar result ke liye "
                        "'PyMuPDF' install karein:\n  py -3.12-32 -m pip install PyMuPDF")
+
+    def scan_from_camera(self):
+        """Webcam/USB-camera se seedha document capture — scanner na ho to bhi."""
+        if not HAS_CAMERA:
+            self._warn("Camera support is build me nahi hai (PyQt5 QtMultimedia).\n"
+                       "Filhaal 'Phone-photo se PDF' ya Import istemal karein.")
+            return
+        if not QCameraInfo.availableCameras():
+            self._warn("Koi camera nahi mila. Webcam juda hai aur on hai?")
+            return
+        dlg = CameraDialog(self, self._tmpdir)
+        if dlg.exec_() == QtWidgets.QDialog.Accepted and dlg.captured:
+            for p in dlg.captured:
+                self._add_item_for_path(p)
+            self.status.showMessage("%d page camera se add ho gaye." % len(dlg.captured), 4000)
+            if tesseract_available():
+                self.auto_name_pages()
 
     def import_photos(self):
         """Phone se kheenchi photos ko saaf karke pages banao (shadow hatana,
@@ -6509,8 +6671,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
         cmb.setCurrentIndex({"light": 0, "dark": 1, "darkpro": 2}.get(self._opts.get("theme"), 0))
         form.addRow("Theme:", cmb)
         checks = {}
-        default_on = {"ui_fab", "ui_preview", "ui_jobs", "ui_kiosk"}
+        default_on = {"ui_fab", "ui_preview", "ui_jobs", "ui_kiosk", "ui_ribbon"}
         for key, hi, en in (
+                ("ui_ribbon", "Ribbon toolbar (MS-Office jaisa — tabs me buttons)",
+                 "Ribbon toolbar (Office-style tabs)"),
                 ("ui_dashboard", "Start dashboard (khaali screen par bade buttons)",
                  "Start dashboard (big buttons on empty screen)"),
                 ("ui_header", "Status-patti (scanner/profile/aaj ka kaam)",
@@ -6555,6 +6719,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.side_graph.setVisible(bool(self._opts.get("ui_graph")))
             self.preview_panel.setVisible(bool(self._opts.get("ui_preview")))
             self.jobs_bar.setVisible(bool(self._opts.get("ui_jobs")))
+            rib = bool(self._opts.get("ui_ribbon"))
+            self.ribbon.setVisible(rib)
+            self._classic_toolbar.setVisible(not rib)
             self._update_preview_panel()
             self._update_empty_state()
             self._update_sidebar_stats()
