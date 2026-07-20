@@ -151,7 +151,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "23"
+VERSION = "24"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -358,6 +358,10 @@ DEFAULT_OPTIONS = {
     "show_left_panel": True,     # baayan scan-settings panel
     "fav_folders": [],           # panel ke ⭐ favourite folders
     "sidebar_stats": [],         # khaali = default set dikhega
+    "ui_dashboard": True,        # khaali screen par bade action-cards
+    "ui_fab": False,             # floating gol Scan button
+    "ui_header": True,           # toolbar ke neeche status-patti
+    "ui_graph": True,            # sidebar me 7-din ka graph
     "wia_device_id": None,
     "language": "hi",            # "hi" ya "en"
     "simple_mode": False,
@@ -2550,8 +2554,8 @@ class OptionsDialog(QtWidgets.QDialog):
             w = QtWidgets.QWidget(); w.setLayout(row); return w
 
         header("Interface")
-        self.cmb_theme = QtWidgets.QComboBox(); self.cmb_theme.addItems(["Light", "Dark"])
-        self.cmb_theme.setCurrentIndex(1 if self.opts.get("theme") == "dark" else 0)
+        self.cmb_theme = QtWidgets.QComboBox(); self.cmb_theme.addItems(["Light", "Dark", "Dark Pro"])
+        self.cmb_theme.setCurrentIndex({"light": 0, "dark": 1, "darkpro": 2}.get(self.opts.get("theme"), 0))
         form.addRow(lblhelp("Theme:", 'हिन्दी: App ka rang-roop. Dark = kaala theme (aankhon ko aaram, raat me achha). Light = safed.\nEnglish: App look. Dark = dark theme (easy on eyes at night). Light = white.'), self.cmb_theme)
         self.chk_pagenum = QtWidgets.QCheckBox("Page number thumbnails ke neeche dikhao")
         self.chk_pagenum.setChecked(self.opts.get("show_page_numbers", True)); form.addRow(chkrow(self.chk_pagenum, "हिन्दी: Har thumbnail ke neeche 'Page 1, 2..' dikhana. Band karne par number nahi dikhenge.\nEnglish: Show 'Page 1, 2..' under each thumbnail. Off = no numbers."))
@@ -2670,7 +2674,7 @@ class OptionsDialog(QtWidgets.QDialog):
 
     def get_opts(self):
         o = self.opts
-        o["theme"] = "dark" if self.cmb_theme.currentIndex() == 1 else "light"
+        o["theme"] = ["light", "dark", "darkpro"][self.cmb_theme.currentIndex()]
         o["show_page_numbers"] = self.chk_pagenum.isChecked()
         o["auto_name"] = self.chk_autoname.isChecked()
         o["save_images_too"] = self.chk_imgtoo.isChecked()
@@ -3038,6 +3042,12 @@ class SparkBars(QtWidgets.QWidget):
         self.c = QtGui.QColor(color)
         self.setMinimumHeight(96)
 
+    def set_values(self, values, labels=None):
+        self.v = [max(0, int(x or 0)) for x in (values or [0])]
+        if labels is not None:
+            self.labels = labels
+        self.update()
+
     def paintEvent(self, _e):
         p = QtGui.QPainter(self)
         try:
@@ -3259,6 +3269,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, self.L("Left sidebar dikhao/chhupao", "Show/hide left sidebar"), self.toggle_left_panel, "हिन्दी: Baayin taraf ka scan-settings panel on/off (zyada jagah ke liye).\nEnglish: Show/hide the left scan-settings sidebar for more space.", "F9")
         self.act_files_panel = self._ma(ms, self.L("Right sidebar (Meri Files) dikhao/chhupao", "Show/hide right sidebar (My Files)"), self.toggle_files_panel, "हिन्दी: Daayin taraf ka folders-wala panel on/off karo.\nEnglish: Show/hide the right-side files panel.", "F10")
         self._ma(ms, "Sidebar stats chuno…", self.choose_sidebar_stats, "हिन्दी: Sidebar ke stats-box me kaun-kaun si ginti dikhe — aap khud chuno (worldwide + personal).\nEnglish: Choose which stats appear in the sidebar box.")
+        self._ma(ms, "🎨 UI customize karo…", self.customize_ui, "हिन्दी: App ka look apne hisaab se: dashboard, floating Scan button, status-patti, sidebar graph, Dark Pro theme — jo chaho on/off karo.\nEnglish: Customize the UI: dashboard, floating Scan button, status bar, sidebar graph, Dark Pro theme.")
         self.act_touch = self._ma(ms, "Touch / bade-button mode", self.toggle_touch_mode, "हिन्दी: Buttons/likhai badi ho jayegi — touch screen ya buzurgon ke liye aasan.\nEnglish: Bigger buttons and text for touch screens or elderly users.")
         self.act_touch.setCheckable(True)
         self.act_touch.setChecked(bool(self._opts.get("touch_mode")))
@@ -3684,9 +3695,20 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     def _update_empty_state(self):
         empty = self.list.count() == 0
-        self._empty_lbl.setVisible(empty)
+        use_dash = empty and bool(self._opts.get("ui_dashboard", True)) and hasattr(self, "_dash")
+        if hasattr(self, "_dash"):
+            self._dash.setVisible(use_dash)
+        self._empty_lbl.setVisible(empty and not use_dash)
         if empty:
-            self._empty_lbl.setGeometry(self.list.viewport().rect())
+            r = self.list.viewport().rect()
+            self._empty_lbl.setGeometry(r)
+            if hasattr(self, "_dash"):
+                self._dash.setGeometry(r)
+                try:
+                    names = [os.path.basename(p) for p in (self._recent or [])[:3]]
+                    self._dash_recent.setText(("Recent: " + "  ·  ".join(names)) if names else "")
+                except Exception:
+                    pass
 
     def _apply_thumb_zoom(self, w):
         w = max(80, min(340, int(w)))
@@ -3702,6 +3724,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if obj is self.list.viewport():
             if ev.type() == QtCore.QEvent.Resize:
                 self._empty_lbl.setGeometry(self.list.viewport().rect())
+                if hasattr(self, "_dash"):
+                    self._dash.setGeometry(self.list.viewport().rect())
             elif ev.type() == QtCore.QEvent.Wheel and (ev.modifiers() & QtCore.Qt.ControlModifier):
                 # Ctrl + mouse scroll -> zoom thumbnails in/out (like NAPS2)
                 self._apply_thumb_zoom(self._thumb_w * (1.15 if ev.angleDelta().y() > 0 else 0.87))
@@ -4707,6 +4731,23 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.btn_print.setMenu(printmenu)
         self.btn_print.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         outer.addWidget(tbwrap)
+        # ---- UI #7: Status-header card (toolbar ke neeche patli smart patti) ----
+        self.ui_header = QtWidgets.QWidget()
+        self.ui_header.setObjectName("uiheader")
+        self.ui_header.setStyleSheet(
+            "#uiheader{background:#f0fdfa;border-bottom:1px solid #ccfbf1;}"
+            "#uiheader QLabel{font-size:12px;color:#115e59;}")
+        _hb = QtWidgets.QHBoxLayout(self.ui_header)
+        _hb.setContentsMargins(10, 3, 10, 3)
+        self.hdr_scanner = QtWidgets.QLabel("●")
+        self.hdr_profile = QtWidgets.QLabel("")
+        self.hdr_today = QtWidgets.QLabel("")
+        _hb.addWidget(self.hdr_scanner)
+        _hb.addWidget(self.hdr_profile)
+        _hb.addStretch(1)
+        _hb.addWidget(self.hdr_today)
+        self.ui_header.setVisible(bool(self._opts.get("ui_header", True)))
+        outer.addWidget(self.ui_header)
         hr = QtWidgets.QFrame(); hr.setObjectName("hr"); hr.setFrameShape(QtWidgets.QFrame.HLine); outer.addWidget(hr)
 
         # ---------- Body: left settings panel | thumbnails ----------
@@ -4773,6 +4814,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.stats_box.mousePressEvent = lambda _e: self.show_stats_dashboard()
         self._set_stats_display(None)
         pl.addWidget(self.stats_box)
+        # ---- UI #9: sidebar me 7-din ka chhota graph ----
+        self.side_graph = SparkBars([0] * 7)
+        self.side_graph.setMinimumHeight(56)
+        self.side_graph.setMaximumHeight(56)
+        self.side_graph.setToolTip(self.L("Pichhle 7 din ke pages", "Pages in the last 7 days"))
+        self.side_graph.setVisible(bool(self._opts.get("ui_graph", True)))
+        pl.addWidget(self.side_graph)
         self.btn_scan = QtWidgets.QPushButton("▶  " + tr("scan", self._lang)); self.btn_scan.setObjectName("primary")
         self.btn_scan.setMinimumHeight(38); self.btn_scan.clicked.connect(self.do_scan); pl.addWidget(self.btn_scan)
         self.btn_scan.setToolTip("Scan shuru karo (F5)")
@@ -4802,6 +4850,46 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.list.viewport())
         self._empty_lbl.setAlignment(QtCore.Qt.AlignCenter)
         self._empty_lbl.setStyleSheet("color:#94a3b8; font-size:15px;")
+        # ---- UI #2: Start-dashboard (khaali screen par bade action-cards) ----
+        self._dash = QtWidgets.QWidget(self.list.viewport())
+        _dv = QtWidgets.QVBoxLayout(self._dash)
+        _dv.addStretch(1)
+        _dt = QtWidgets.QLabel(self.L("Kya karna hai?", "What would you like to do?"))
+        _dt.setAlignment(QtCore.Qt.AlignCenter)
+        _dt.setStyleSheet("color:#64748b;font-size:17px;font-weight:600;")
+        _dv.addWidget(_dt)
+        _dr = QtWidgets.QHBoxLayout()
+        _dr.addStretch(1)
+
+        def _dbtn(icon, text, slot):
+            b = QtWidgets.QPushButton("%s\n%s" % (icon, text))
+            b.setMinimumSize(118, 84)
+            b.setStyleSheet("QPushButton{font-size:13px;font-weight:700;border:1px solid "
+                            "#cbd5e1;border-radius:12px;background:#fff;padding:8px;}"
+                            "QPushButton:hover{border-color:#0f766e;color:#0f766e;}")
+            b.clicked.connect(slot)
+            _dr.addWidget(b)
+        _dbtn("🖨", self.L("Scan karo", "Scan"), self.do_scan)
+        _dbtn("📥", "Import", self.import_images)
+        _dbtn("📷", "Photo→PDF", self.import_photos)
+        _dbtn("🕘", "History", self.show_history)
+        _dr.addStretch(1)
+        _dv.addLayout(_dr)
+        self._dash_recent = QtWidgets.QLabel("")
+        self._dash_recent.setAlignment(QtCore.Qt.AlignCenter)
+        self._dash_recent.setStyleSheet("color:#94a3b8;font-size:11px;")
+        _dv.addWidget(self._dash_recent)
+        _dv.addStretch(1)
+        self._dash.hide()
+        # ---- UI #6: Floating Scan button (FAB) ----
+        self.fab = QtWidgets.QPushButton("🖨", self)
+        self.fab.setFixedSize(56, 56)
+        self.fab.setToolTip("Scan (F5)")
+        self.fab.setStyleSheet(
+            "QPushButton{background:#0f766e;color:#fff;border:none;border-radius:28px;"
+            "font-size:22px;}QPushButton:hover{background:#115e59;}")
+        self.fab.clicked.connect(self.do_scan)
+        self.fab.setVisible(bool(self._opts.get("ui_fab", False)))
         self.list.viewport().installEventFilter(self)
         self.list.itemDoubleClicked.connect(self._open_preview_dialog)
         self.list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
@@ -4927,6 +5015,38 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 pass
 
     def _apply_base_style(self):
+        if self._opts.get("theme") == "darkpro":
+            # UI #4: Dark Pro — gehra premium look, teal glow
+            self.setStyleSheet("""
+                QMainWindow, QWidget { background:#0b1220; color:#e2e8f0; }
+                QMenuBar { background:#0b1220; color:#e2e8f0; }
+                QMenuBar::item:selected { background:#132036; }
+                QMenu { background:#111c30; color:#e2e8f0; border:1px solid #1e3a5f; }
+                QMenu::item:selected { background:#134e4a; color:#5eead4; }
+                #toolbar { background:#0d1526; border-bottom:1px solid #1e3a5f; }
+                QToolButton { border:1px solid transparent; border-radius:9px; padding:5px 7px; color:#94a3b8; font-size:11px; }
+                QToolButton:hover { background:#132036; border-color:#2dd4bf; color:#5eead4; }
+                QToolButton:checked { background:#134e4a; border-color:#2dd4bf; color:#5eead4; }
+                #panel { background:#0d1526; }
+                #uiheader { background:#0d1f1d; border-bottom:1px solid #134e4a; }
+                #uiheader QLabel { color:#5eead4; }
+                #dev { color:#64748b; font-size:12px; }
+                #hr { color:#1e3a5f; }
+                QLabel { color:#cbd5e1; }
+                QLineEdit, QComboBox, QSpinBox, QPlainTextEdit { background:#111c30; border:1px solid #1e3a5f; border-radius:8px; padding:5px 9px; color:#e2e8f0; }
+                QLineEdit:focus, QComboBox:focus { border-color:#2dd4bf; }
+                QPushButton { background:#111c30; border:1px solid #1e3a5f; border-radius:8px; padding:6px 12px; color:#e2e8f0; }
+                QPushButton:hover { background:#132036; border-color:#2dd4bf; }
+                QPushButton#primary { background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #14b8a6,stop:1 #0f766e); border:1px solid #2dd4bf; color:#fff; font-weight:700; }
+                QPushButton#primary:hover { background:#0d9488; }
+                QListWidget { background:#080e1a; border:none; }
+                QListWidget::item:selected { background:#134e4a; color:#e2e8f0; }
+                QTreeView { background:#0d1526; color:#cbd5e1; border:none; }
+                QTreeView::item:selected { background:#134e4a; color:#5eead4; }
+                QScrollArea { background:#0d1526; }
+                #statsbox { border:1px solid #1e3a5f; border-radius:10px; padding:8px; color:#94a3b8; background:#0d1526; }
+            """)
+            return
         if self._opts.get("theme") == "dark":
             self.setStyleSheet("""
                 QMainWindow, QWidget { background:#0f172a; color:#e2e8f0; }
@@ -5002,6 +5122,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
             txt, col = "Scanner: --", "#9ca3af"
         self.lbl_busy.setText(
             '<span style="color:%s; font-size:15px;">&#9679;</span>&nbsp;<b>%s</b>' % (col, txt))
+        # UI header ki scanner-pill bhi yahi dikhaye
+        try:
+            self.hdr_scanner.setText(
+                '<span style="color:%s;">●</span> <b>%s</b>' % (col, txt))
+        except Exception:
+            pass
 
     def _tick_scanner_state(self):
         # IMPORTANT: do NOT poll the scanner over the network here. This HP scanner
@@ -5072,6 +5198,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if hasattr(self, "fab"):
+            self.fab.move(self.width() - 78, self.height() - 100)
+            self.fab.raise_()
 
 
     def do_scan(self):
@@ -5712,6 +5841,26 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     v = "…" if val is None else ("{:,}".format(val) if isinstance(val, int) else str(val))
                     lines.append("%s: <b>%s</b>" % (lbl, v))
             self.stats_box.setText("<br>".join(lines))
+            # sidebar graph + header ke numbers bhi taaza karo
+            if hasattr(self, "side_graph"):
+                days = self._pstats().get("days", {})
+                now = datetime.datetime.now()
+                vals = [(days.get((now - datetime.timedelta(days=i)).strftime("%Y-%m-%d")) or {}).get("pages", 0)
+                        for i in range(6, -1, -1)]
+                self.side_graph.set_values(vals)
+            if hasattr(self, "hdr_today"):
+                d = (self._pstats().get("days") or {}).get(now.strftime("%Y-%m-%d"), {}) if hasattr(self, "side_graph") else {}
+                self.hdr_today.setText(self.L(
+                    "Aaj: <b>%d pages · %d PDFs</b> 🔥%d" %
+                    (d.get("pages", 0), d.get("pdfs", 0), self._pstats_streak()),
+                    "Today: <b>%d pages · %d PDFs</b> 🔥%d" %
+                    (d.get("pages", 0), d.get("pdfs", 0), self._pstats_streak())))
+            if hasattr(self, "hdr_profile"):
+                try:
+                    prof = self._selected_profile()
+                    self.hdr_profile.setText("〔 %s 〕" % (prof.get("name") if prof else "—"))
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -6184,6 +6333,56 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.files_panel.setVisible(vis)
         self._opts["show_files_panel"] = vis
         self._save_opts()
+
+    def customize_ui(self):
+        """UI ke design-elements — user apne hisaab se on/off kare (v24)."""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("🎨 UI customize", "🎨 Customize UI"))
+        form = QtWidgets.QFormLayout(dlg)
+        cmb = QtWidgets.QComboBox()
+        cmb.addItems(["Light", "Dark", "Dark Pro"])
+        cmb.setCurrentIndex({"light": 0, "dark": 1, "darkpro": 2}.get(self._opts.get("theme"), 0))
+        form.addRow("Theme:", cmb)
+        checks = {}
+        for key, hi, en in (
+                ("ui_dashboard", "Start dashboard (khaali screen par bade buttons)",
+                 "Start dashboard (big buttons on empty screen)"),
+                ("ui_header", "Status-patti (scanner/profile/aaj ka kaam)",
+                 "Status header (scanner/profile/today)"),
+                ("ui_fab", "Floating gol Scan button (neeche-daayein)",
+                 "Floating round Scan button (bottom-right)"),
+                ("ui_graph", "Sidebar me 7-din ka graph",
+                 "7-day graph in the sidebar")):
+            c = QtWidgets.QCheckBox(self.L(hi, en))
+            c.setChecked(bool(self._opts.get(key, key != "ui_fab")))
+            checks[key] = c
+            form.addRow(c)
+        note = QtWidgets.QLabel(self.L(
+            "<span style='color:#64748b;font-size:11px;'>Aur bhi aayenge: Ribbon toolbar, "
+            "Preview panel, Job-chips… (agle updates me)</span>",
+            "<span style='color:#64748b;font-size:11px;'>Coming next: Ribbon toolbar, "
+            "Preview panel, Job chips…</span>"))
+        note.setTextFormat(QtCore.Qt.RichText)
+        form.addRow(note)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        form.addRow(bb)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        self._opts["theme"] = ["light", "dark", "darkpro"][cmb.currentIndex()]
+        for key, c in checks.items():
+            self._opts[key] = c.isChecked()
+        self._save_opts()
+        # turant lagao — restart ki zaroorat nahi
+        self._apply_style()
+        try:
+            self.fab.setVisible(bool(self._opts.get("ui_fab")))
+            self.ui_header.setVisible(bool(self._opts.get("ui_header")))
+            self.side_graph.setVisible(bool(self._opts.get("ui_graph")))
+            self._update_empty_state()
+            self._update_sidebar_stats()
+        except Exception:
+            pass
 
     def toggle_left_panel(self):
         vis = not self.left_panel.isVisible()
