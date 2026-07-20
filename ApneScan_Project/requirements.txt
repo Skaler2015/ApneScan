@@ -7,4 +7,7 @@ numpy
 pyzbar
 pyinstaller
 pywin32
+python-docx
+# behtar PDF import/render ke liye
+PyMuPDF
 # optional: PyMuPDF  (behtar PDF import ke liye)

@@ -650,6 +650,14 @@ def restore_photo(img):
         return img
 
 
+def save_image_keep_ext(img, path, quality=92):
+    """Image ko uske extension ke hisaab se sahi format me save karo."""
+    if path.lower().endswith((".jpg", ".jpeg")):
+        img.convert("RGB").save(path, "JPEG", quality=quality)
+    else:
+        img.save(path, "PNG")
+
+
 def apply_watermark(img, text):
     try:
         base = img.convert("RGBA")
@@ -2081,6 +2089,22 @@ class NameWorker(QtCore.QThread):
         self.finished_all.emit()
 
 
+class FuncWorker(QtCore.QThread):
+    """Koi bhi bhaari kaam (OCR/network) background me chala kar result de —
+    UI kabhi nahi rukti. Result ya Exception, dono `done` signal me aate hain."""
+    done = QtCore.pyqtSignal(object)
+
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def run(self):
+        try:
+            self.done.emit(self.fn())
+        except Exception as e:
+            self.done.emit(e)
+
+
 class LearnWorker(QtCore.QThread):
     """Rename ke baad naam 'seekhne' ka OCR background me — pehle ye UI thread
     par chalta tha aur har rename par app 3-10 second jam jaati thi."""
@@ -3031,6 +3055,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(me, "Contrast +", lambda: self._enhance_current(1.0, 1.15), "हिन्दी: Text aur saaf/gehra dikhe.\nEnglish: Increase contrast (sharper text).")
         self._ma(me, "Contrast -", lambda: self._enhance_current(1.0, 0.88), "हिन्दी: Contrast kam karo.\nEnglish: Decrease contrast.")
         self._ma(me, "Auto-crop page", self.autocrop_current, "हिन्दी: Page ke aas-paas ki khaali border kaato.\nEnglish: Trim the empty border around the page.")
+        self._ma(me, "Page ka text copy karo", self.copy_page_text, "हिन्दी: Is page ka poora text padh kar copy kar lo (kahin bhi paste karo).\nEnglish: OCR this page's text to the clipboard.")
+        self._ma(me, "Page translate karo (Hindi ↔ English)…", self.translate_page, "हिन्दी: Page ka text padh kar Hindi/English me translate karo (internet chahiye).\nEnglish: Translate the page's text between Hindi and English (needs internet).")
         self._ma(me, "Undo delete", self.undo_delete, "हिन्दी: Galti se delete hua page wapas laao.\nEnglish: Restore a deleted page.", "Ctrl+Z")
         me.addSeparator()
         self._ma(me, "Delete page", self.delete_page, "हिन्दी: Selected page hatao.\nEnglish: Delete the selected page.", "Delete")
@@ -3048,6 +3074,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "Merge PDFs…", self.merge_pdfs, "हिन्दी: Kai PDF ko jodkar ek PDF banao.\nEnglish: Merge several PDFs into one.")
         self._ma(mt, "Split into multiple PDFs…", self.split_pdfs, "हिन्दी: Ek scan ko kai alag PDF me baanto.\nEnglish: Split into multiple PDFs.")
         self._ma(mt, "PDF chhota karo (compress)…", self.compress_pdf_tool, "हिन्दी: Abhi ke pages ya koi purani PDF ko 200KB/500KB/1MB/2MB tak chhota karo (portal upload ke liye).\nEnglish: Shrink current pages or any PDF to a 200KB/500KB/1MB/2MB target for portal uploads.")
+        pdft = mt.addMenu("PDF Tools")
+        pdft.setToolTipsVisible(True)
+        pdft.addAction("PDF page editor (kram/ghumao/hatao)…", self.pdf_page_editor)
+        pdft.addAction("Sign/Stamp lagao (is page par)…", self.place_sign)
+        pdft.addAction("Page numbers lagao (sab pages par)…", self.add_page_numbers)
+        pdft.addAction("Kisi PDF par watermark…", self.watermark_pdf_tool)
+        pdft.addAction("PDF ka password hatao…", self.remove_pdf_password)
+        pdft.addAction("PDF → Word (.docx)…", self.pdf_to_word)
+        pdft.addAction("PDF → Excel (.xlsx)…", self.pdf_to_excel)
+        pdft.addAction("PDF → JPG images…", self.pdf_to_jpgs)
+        pdft.addAction("Folder ki images → ek PDF…", self.folder_to_pdf)
+        pdft.addAction("Archival PDF (300dpi + metadata)…", self.save_archival_pdf)
         self._ma(mt, "Monthly report…", self.monthly_report, "हिन्दी: Mahine ka scan/claim report banao.\nEnglish: Generate a monthly report.")
         self._ma(mt, "Create desktop shortcut…", self.create_shortcut, "हिन्दी: Desktop par ek-click scan ka shortcut banao.\nEnglish: Make a one-click desktop scan shortcut.")
         self._ma(mt, "Auto-name pages (document ka naam)", self.auto_name_pages, "हिन्दी: Har page ko padh kar uska naam (jaise DISCHARGE SUMMARY, RECEIPT) thumbnail ke neeche likhe. 'Page 1,2' ke bajay asli naam.\nEnglish: Read each page and label it with its document title instead of 'Page 1,2'.")
@@ -5105,6 +5143,521 @@ class ScannerWindow(QtWidgets.QMainWindow):
         row.addWidget(b1); row.addWidget(b2); row.addStretch(1); row.addWidget(bc)
         v.addLayout(row)
         dlg.exec_()
+
+    # ---- PDF tools (naye) ----
+    def _pick_pdf(self, title):
+        start = self._opts.get("save_folder", os.path.expanduser("~"))
+        f, _ = QtWidgets.QFileDialog.getOpenFileName(self, title, start, "PDF (*.pdf)")
+        return f or None
+
+    def _run_bg(self, fn, on_done, busy_msg):
+        """Bhaari kaam background me; done hone par on_done(result)."""
+        self.status.showMessage(busy_msg, 0)
+        self._bg_workers = getattr(self, "_bg_workers", [])
+        w = FuncWorker(fn)
+
+        def _fin(res, w=w):
+            self.status.clearMessage()
+            try:
+                self._bg_workers.remove(w)
+            except ValueError:
+                pass
+            on_done(res)
+        w.done.connect(_fin)
+        self._bg_workers.append(w)
+        w.start()
+
+    def pdf_page_editor(self):
+        """Kisi bhi PDF ke pages ka kram badlo / ghumao / hatao — bina quality
+        kharaab kiye (lossless, pypdf se)."""
+        if not HAS_OCR_LIBS:
+            self._warn("pypdf install nahi hai."); return
+        src = self._pick_pdf("Kaunsi PDF edit karni hai?")
+        if not src:
+            return
+        try:
+            reader = PdfReader(src)
+            if reader.is_encrypted:
+                pw, ok = QtWidgets.QInputDialog.getText(
+                    self, "Password", "Is PDF ka password:", QtWidgets.QLineEdit.Password)
+                if not ok or not reader.decrypt(pw or ""):
+                    self._warn("Password galat hai."); return
+            n = len(reader.pages)
+        except Exception as exc:
+            self._warn("PDF nahi khuli:\n%s" % exc); return
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("PDF page editor — %s (%d pages)" % (os.path.basename(src), n))
+        dlg.resize(420, 460)
+        v = QtWidgets.QVBoxLayout(dlg)
+        lw = QtWidgets.QListWidget()
+        for i in range(n):
+            it = QtWidgets.QListWidgetItem("Page %d" % (i + 1))
+            it.setData(QtCore.Qt.UserRole, [i, 0])   # [original index, extra rotation]
+            lw.addItem(it)
+        v.addWidget(lw, 1)
+        row = QtWidgets.QHBoxLayout()
+
+        def _move(d):
+            r = lw.currentRow()
+            if r < 0 or not (0 <= r + d < lw.count()):
+                return
+            it = lw.takeItem(r); lw.insertItem(r + d, it); lw.setCurrentItem(it)
+
+        def _rot():
+            it = lw.currentItem()
+            if it:
+                data = it.data(QtCore.Qt.UserRole)
+                data[1] = (data[1] + 90) % 360
+                it.setData(QtCore.Qt.UserRole, data)
+                it.setText("Page %d  (ghuma: %d°)" % (data[0] + 1, data[1]))
+
+        def _del():
+            r = lw.currentRow()
+            if r >= 0:
+                lw.takeItem(r)
+        for t, s in [("⬆ Upar", lambda: _move(-1)), ("⬇ Neeche", lambda: _move(1)),
+                     ("↻ Ghumao", _rot), ("🗑 Hatao", _del)]:
+            b = QtWidgets.QPushButton(t); b.clicked.connect(s); row.addWidget(b)
+        v.addLayout(row)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted or lw.count() == 0:
+            return
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Nayi PDF save karein", src[:-4] + "_edit.pdf", "PDF (*.pdf)")
+        if not out:
+            return
+        try:
+            writer = PdfWriter()
+            for i in range(lw.count()):
+                idx, rot = lw.item(i).data(QtCore.Qt.UserRole)
+                pg = reader.pages[idx]
+                if rot:
+                    pg.rotate(rot)
+                writer.add_page(pg)
+            with open(out, "wb") as fh:
+                writer.write(fh)
+        except Exception:
+            self._warn("Save fail:\n%s" % traceback.format_exc()); return
+        self._remember_save_dir(out)
+        QtWidgets.QMessageBox.information(self, "Ho gaya", "PDF ban gayi:\n%s" % out)
+
+    def place_sign(self):
+        """Apne sign/mohar ki image current page par lagao (white background
+        apne aap transparent ho jata hai)."""
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        sp = self._opts.get("sign_image") or ""
+        if not sp or not os.path.exists(sp):
+            f, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Apne sign/stamp ki image chuno (white background wali)",
+                "", "Images (*.png *.jpg *.jpeg *.bmp)")
+            if not f:
+                return
+            self._opts["sign_image"] = f
+            self._save_opts()
+            sp = f
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Sign/Stamp lagao")
+        form = QtWidgets.QFormLayout(dlg)
+        POS = ["Neeche-daayein", "Neeche-beech", "Neeche-baayein",
+               "Upar-daayein", "Upar-beech", "Upar-baayein", "Beech me"]
+        cmb = QtWidgets.QComboBox(); cmb.addItems(POS)
+        spn = QtWidgets.QSpinBox(); spn.setRange(8, 60); spn.setValue(22); spn.setSuffix(" % chaudai")
+        btn = QtWidgets.QPushButton("Sign image badlo…")
+
+        def _chg():
+            f, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Sign/stamp image", "", "Images (*.png *.jpg *.jpeg *.bmp)")
+            if f:
+                self._opts["sign_image"] = f; self._save_opts()
+        btn.clicked.connect(_chg)
+        form.addRow("Jagah:", cmb)
+        form.addRow("Size:", spn)
+        form.addRow(btn)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        form.addRow(bb)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        path = item.data(QtCore.Qt.UserRole)
+        try:
+            with Image.open(path) as im:
+                page = im.convert("RGB").copy()
+            with Image.open(self._opts["sign_image"]) as s:
+                sign = s.convert("RGBA")
+            g = sign.convert("L")
+            sign.putalpha(g.point(lambda v: 0 if v > 230 else 255))
+            w = max(30, int(page.width * spn.value() / 100.0))
+            h = max(1, int(sign.height * w / sign.width))
+            sign = sign.resize((w, h), Image.LANCZOS)
+            m = max(20, page.width // 40)
+            x_r, x_c, x_l = page.width - w - m, (page.width - w) // 2, m
+            y_b, y_c, y_t = page.height - h - m, (page.height - h) // 2, m
+            pos = [(x_r, y_b), (x_c, y_b), (x_l, y_b),
+                   (x_r, y_t), (x_c, y_t), (x_l, y_t), (x_c, y_c)][cmb.currentIndex()]
+            page.paste(sign, pos, sign)
+            save_image_keep_ext(page, path)
+            self._refresh_item(item)
+            self._dirty = True
+        except Exception:
+            self._warn("Sign nahi laga:\n%s" % traceback.format_exc())
+
+    def add_page_numbers(self):
+        """Sab pages par 'Page X / N' (aur chaaho to upar apna text) chhapo."""
+        paths = self._ordered_paths()
+        if not paths:
+            self._warn(tr("scan_first", self._lang)); return
+        header, ok = QtWidgets.QInputDialog.getText(
+            self, "Header (optional)", "Upar kya likhna hai? (khaali chhod sakte ho):")
+        if not ok:
+            return
+        n = len(paths)
+        for i, p in enumerate(paths, 1):
+            try:
+                with Image.open(p) as im:
+                    img = im.convert("RGB").copy()
+                d = ImageDraw.Draw(img)
+                size = max(16, img.width // 50)
+                try:
+                    font = ImageFont.truetype("arial.ttf", size)
+                except Exception:
+                    font = ImageFont.load_default()
+                foot = "Page %d / %d" % (i, n)
+                try:
+                    tw = d.textbbox((0, 0), foot, font=font)[2]
+                except Exception:
+                    tw = len(foot) * size // 2
+                d.text(((img.width - tw) // 2, img.height - size - 12), foot,
+                       fill=(70, 70, 70), font=font)
+                if header.strip():
+                    d.text((16, 10), header.strip()[:80], fill=(70, 70, 70), font=font)
+                save_image_keep_ext(img, p)
+            except Exception:
+                pass
+        for r in range(self.list.count()):
+            self._refresh_item(self.list.item(r))
+        self._dirty = True
+        self.status.showMessage("Page numbers lag gaye.", 4000)
+
+    def watermark_pdf_tool(self):
+        """Kisi bhi purani PDF par watermark/stamp chhapo."""
+        src = self._pick_pdf("Kis PDF par watermark lagana hai?")
+        if not src:
+            return
+        text, ok = QtWidgets.QInputDialog.getText(
+            self, "Watermark", "Kya likhna hai?",
+            text=self._opts.get("watermark_text", "Noble Care Hospital"))
+        if not ok or not text.strip():
+            return
+        pages = pdf_to_images(src, self._tmpdir)
+        if not pages:
+            self._warn("PDF se pages nahi nikle (PyMuPDF install karein)."); return
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save karein", src[:-4] + "_wm.pdf", "PDF (*.pdf)")
+        if not out:
+            return
+        try:
+            imgs = [apply_watermark(Image.open(p).convert("RGB"), text.strip()) for p in pages]
+            imgs[0].save(out, "PDF", save_all=True, append_images=imgs[1:], resolution=200.0)
+            for im in imgs:
+                im.close()
+        except Exception:
+            self._warn("Fail:\n%s" % traceback.format_exc()); return
+        QtWidgets.QMessageBox.information(self, "Ho gaya", "Watermark wali PDF:\n%s" % out)
+
+    def remove_pdf_password(self):
+        """Password pata ho to PDF ki bina-password copy banao."""
+        if not HAS_OCR_LIBS:
+            self._warn("pypdf install nahi hai."); return
+        src = self._pick_pdf("Password wali PDF chuno")
+        if not src:
+            return
+        pw, ok = QtWidgets.QInputDialog.getText(
+            self, "Password", "Is PDF ka password:", QtWidgets.QLineEdit.Password)
+        if not ok:
+            return
+        try:
+            reader = PdfReader(src)
+            if reader.is_encrypted and not reader.decrypt(pw or ""):
+                self._warn("Password galat hai."); return
+            writer = PdfWriter()
+            for pg in reader.pages:
+                writer.add_page(pg)
+            out = src[:-4] + "_unlocked.pdf"
+            with open(out, "wb") as fh:
+                writer.write(fh)
+        except Exception:
+            self._warn("Fail:\n%s" % traceback.format_exc()); return
+        QtWidgets.QMessageBox.information(self, "Ho gaya", "Bina password wali copy:\n%s" % out)
+
+    def pdf_to_jpgs(self):
+        """Kisi bhi PDF ke pages JPG images me nikaalo."""
+        src = self._pick_pdf("Kaunsi PDF ki images chahiye?")
+        if not src:
+            return
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Images kahan save karein?", os.path.dirname(src))
+        if not folder:
+            return
+        pages = pdf_to_images(src, self._tmpdir)
+        if not pages:
+            self._warn("PDF se pages nahi nikle (PyMuPDF install karein)."); return
+        base = os.path.splitext(os.path.basename(src))[0]
+        cnt = 0
+        for i, p in enumerate(pages, 1):
+            try:
+                with Image.open(p) as im:
+                    im.convert("RGB").save(
+                        os.path.join(folder, "%s_p%02d.jpg" % (base, i)), "JPEG", quality=90)
+                cnt += 1
+            except Exception:
+                pass
+        QtWidgets.QMessageBox.information(self, "Ho gaya", "%d images ban gayi:\n%s" % (cnt, folder))
+
+    def folder_to_pdf(self):
+        """Ek folder ki SAARI images (naam ke kram me) ek PDF me."""
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Images wala folder chuno", self._opts.get("save_folder", ""))
+        if not folder:
+            return
+        exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
+        files = sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                       if f.lower().endswith(exts))
+        if not files:
+            self._warn("Is folder me koi image nahi mili."); return
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "PDF save karein",
+            os.path.join(folder, os.path.basename(folder) + ".pdf"), "PDF (*.pdf)")
+        if not out:
+            return
+        try:
+            imgs = [Image.open(f).convert("RGB") for f in files]
+            imgs[0].save(out, "PDF", save_all=True, append_images=imgs[1:], resolution=200.0)
+            for im in imgs:
+                im.close()
+        except Exception:
+            self._warn("Fail:\n%s" % traceback.format_exc()); return
+        QtWidgets.QMessageBox.information(
+            self, "Ho gaya", "%d images ki PDF ban gayi:\n%s" % (len(files), out))
+
+    def _collect_page_texts(self, src_pdf=None):
+        """OCR se har page ka text (current pages ya kisi PDF ka). Bhaari kaam —
+        FuncWorker ke andar hi bulayein."""
+        if src_pdf:
+            pages = pdf_to_images(src_pdf, self._tmpdir) or []
+        else:
+            pages = self._ordered_paths()
+        texts = []
+        for p in pages:
+            try:
+                with Image.open(p) as im:
+                    texts.append(pytesseract.image_to_string(im, lang="eng+hin"))
+            except Exception:
+                texts.append("")
+        return texts
+
+    def pdf_to_word(self):
+        """Pages/PDF ka text OCR karke Word (.docx) file banao."""
+        if not tesseract_available():
+            self._warn("Iske liye Tesseract OCR chahiye."); return
+        src = None
+        if not self._ordered_paths():
+            src = self._pick_pdf("Kaunsi PDF ko Word banana hai?")
+            if not src:
+                return
+        default = (src[:-4] + ".docx") if src else self._build_filename(".docx")
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Word file save karein", default, "Word (*.docx)")
+        if not out:
+            return
+
+        def job():
+            texts = self._collect_page_texts(src)
+            try:
+                import docx
+                doc = docx.Document()
+                for i, t in enumerate(texts):
+                    if i:
+                        doc.add_page_break()
+                    doc.add_paragraph(t)
+                doc.save(out)
+                return out
+            except ImportError:
+                alt = os.path.splitext(out)[0] + ".txt"
+                with open(alt, "w", encoding="utf-8") as fh:
+                    fh.write("\n\n----\n\n".join(texts))
+                return alt
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn("Word banane me fail:\n%s" % res); return
+            QtWidgets.QMessageBox.information(self, "Ho gaya", "File ban gayi:\n%s" % res)
+        self._run_bg(job, done, "Word bana rahe hain… (OCR chal raha hai)")
+
+    def pdf_to_excel(self):
+        """Bill/table wale pages ko OCR karke Excel me nikaalo (best-effort)."""
+        if not tesseract_available() or not HAS_XLSX:
+            self._warn("Iske liye Tesseract OCR + openpyxl chahiye."); return
+        src = None
+        if not self._ordered_paths():
+            src = self._pick_pdf("Kaunsi PDF ko Excel banana hai?")
+            if not src:
+                return
+        default = (src[:-4] + ".xlsx") if src else self._build_filename(".xlsx")
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Excel save karein", default, "Excel (*.xlsx)")
+        if not out:
+            return
+
+        def job():
+            pages = (pdf_to_images(src, self._tmpdir) or []) if src else self._ordered_paths()
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            for p in pages:
+                with Image.open(p) as im:
+                    data = pytesseract.image_to_data(
+                        im.convert("RGB"), lang="eng+hin",
+                        output_type=pytesseract.Output.DICT)
+                lines = {}
+                for i in range(len(data["text"])):
+                    w = (data["text"][i] or "").strip()
+                    if not w:
+                        continue
+                    key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+                    lines.setdefault(key, []).append((data["left"][i], data["width"][i], w))
+                for key in sorted(lines):
+                    words = sorted(lines[key])
+                    cells, cur, last_end = [], [], None
+                    for left, width, w in words:
+                        if last_end is not None and left - last_end > 45:
+                            cells.append(" ".join(cur)); cur = []
+                        cur.append(w)
+                        last_end = left + width
+                    if cur:
+                        cells.append(" ".join(cur))
+                    ws.append(cells)
+                ws.append([])
+            wb.save(out)
+            return out
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn("Excel banane me fail:\n%s" % res); return
+            QtWidgets.QMessageBox.information(self, "Ho gaya", "Excel ban gayi:\n%s" % res)
+        self._run_bg(job, done, "Excel bana rahe hain… (OCR chal raha hai)")
+
+    def save_archival_pdf(self):
+        """High-quality PDF + poora metadata (title/date/producer) — lambe samay
+        tak sambhal kar rakhne ke liye."""
+        paths = self._ordered_paths()
+        if not paths:
+            self._warn(tr("scan_first", self._lang)); return
+        if not HAS_OCR_LIBS:
+            self._warn("pypdf install nahi hai."); return
+        default = self._build_filename(".pdf")
+        default = (default[:-4] if default.lower().endswith(".pdf") else default) + "_archive.pdf"
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Archival PDF save karein", default, "PDF (*.pdf)")
+        if not out:
+            return
+        try:
+            imgs = [Image.open(p).convert("RGB") for p in paths]
+            tmp = out + ".tmp.pdf"
+            imgs[0].save(tmp, "PDF", save_all=True, append_images=imgs[1:],
+                         resolution=300.0, quality=95)
+            for im in imgs:
+                im.close()
+            reader = PdfReader(tmp)
+            writer = PdfWriter()
+            for pg in reader.pages:
+                writer.add_page(pg)
+            writer.add_metadata({
+                "/Title": os.path.splitext(os.path.basename(out))[0],
+                "/Producer": "ApneScan v%s" % VERSION,
+                "/CreationDate": datetime.datetime.now().strftime("D:%Y%m%d%H%M%S"),
+            })
+            with open(out, "wb") as fh:
+                writer.write(fh)
+            os.remove(tmp)
+        except Exception:
+            self._warn("Fail:\n%s" % traceback.format_exc()); return
+        self._remember_save_dir(out)
+        self._record_save(out, len(paths))
+        QtWidgets.QMessageBox.information(
+            self, "Ho gaya", "Archival PDF (300dpi, metadata ke saath):\n%s" % out)
+
+    def copy_page_text(self):
+        """Selected page ka poora text OCR karke clipboard par."""
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        if not tesseract_available():
+            self._warn("Iske liye Tesseract OCR chahiye."); return
+        path = item.data(QtCore.Qt.UserRole)
+
+        def job():
+            with Image.open(path) as im:
+                return pytesseract.image_to_string(im, lang="eng+hin")
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn("OCR fail:\n%s" % res); return
+            QtWidgets.QApplication.clipboard().setText(res or "")
+            self.status.showMessage("Text copy ho gaya (Ctrl+V se kahin bhi paste karo).", 5000)
+        self._run_bg(job, done, "Text padh rahe hain…")
+
+    def translate_page(self):
+        """Page ka text padh kar Hindi ↔ English translate karo (internet chahiye)."""
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        if not tesseract_available():
+            self._warn("Iske liye Tesseract OCR chahiye."); return
+        opts = ["English → Hindi", "Hindi → English"]
+        pick, ok = QtWidgets.QInputDialog.getItem(
+            self, "Translate", "Kis taraf translate karein?", opts, 0, False)
+        if not ok:
+            return
+        tl = "hi" if pick.startswith("English") else "en"
+        path = item.data(QtCore.Qt.UserRole)
+
+        def job():
+            with Image.open(path) as im:
+                text = pytesseract.image_to_string(im, lang="eng+hin")
+            text = (text or "").strip()[:4500]
+            if not text:
+                raise RuntimeError("Page par padhne layak text nahi mila.")
+            import urllib.parse as P
+            import urllib.request as U
+            import json as J
+            url = ("https://translate.googleapis.com/translate_a/single"
+                   "?client=gtx&sl=auto&tl=%s&dt=t&q=%s" % (tl, P.quote(text)))
+            req = U.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            data = J.loads(U.urlopen(req, timeout=20).read().decode("utf-8", "ignore"))
+            return "".join(seg[0] for seg in data[0] if seg and seg[0])
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn("Translate nahi ho paya (internet chal raha hai?):\n%s" % res)
+                return
+            dlg = QtWidgets.QDialog(self)
+            dlg.setWindowTitle("Translation (%s)" % pick)
+            dlg.resize(560, 420)
+            v = QtWidgets.QVBoxLayout(dlg)
+            ed = QtWidgets.QPlainTextEdit(res)
+            v.addWidget(ed, 1)
+            row = QtWidgets.QHBoxLayout()
+            bcopy = QtWidgets.QPushButton("Copy")
+            bcopy.clicked.connect(
+                lambda: QtWidgets.QApplication.clipboard().setText(ed.toPlainText()))
+            bcl = QtWidgets.QPushButton("Band karo"); bcl.clicked.connect(dlg.accept)
+            row.addWidget(bcopy); row.addStretch(1); row.addWidget(bcl)
+            v.addLayout(row)
+            dlg.exec_()
+        self._run_bg(job, done, "Translate ho raha hai…")
 
     # ---- page edit ----
     def _current_item_or_warn(self):
