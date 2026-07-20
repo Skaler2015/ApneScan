@@ -151,7 +151,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "24"
+VERSION = "25"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -362,6 +362,10 @@ DEFAULT_OPTIONS = {
     "ui_fab": False,             # floating gol Scan button
     "ui_header": True,           # toolbar ke neeche status-patti
     "ui_graph": True,            # sidebar me 7-din ka graph
+    "ui_preview": False,         # daayan preview panel
+    "ui_jobs": False,            # job-chips patti
+    "ui_kiosk": False,           # kiosk overlay
+    "jobs": [],                  # job-chips: [{name,icon,profile,folder,template}]
     "wia_device_id": None,
     "language": "hi",            # "hi" ya "en"
     "simple_mode": False,
@@ -4748,6 +4752,16 @@ class ScannerWindow(QtWidgets.QMainWindow):
         _hb.addWidget(self.hdr_today)
         self.ui_header.setVisible(bool(self._opts.get("ui_header", True)))
         outer.addWidget(self.ui_header)
+        # ---- UI #10: Job-chips bar (ek click me profile+folder+naming set) ----
+        self.jobs_bar = QtWidgets.QWidget()
+        self.jobs_bar.setObjectName("jobsbar")
+        self.jobs_bar.setStyleSheet("#jobsbar{background:#fffbeb;border-bottom:1px solid #fde68a;}")
+        self._jobs_lay = QtWidgets.QHBoxLayout(self.jobs_bar)
+        self._jobs_lay.setContentsMargins(10, 4, 10, 4)
+        self._jobs_lay.setSpacing(6)
+        self.jobs_bar.setVisible(bool(self._opts.get("ui_jobs", False)))
+        outer.addWidget(self.jobs_bar)
+        self._rebuild_jobs_bar()
         hr = QtWidgets.QFrame(); hr.setObjectName("hr"); hr.setFrameShape(QtWidgets.QFrame.HLine); outer.addWidget(hr)
 
         # ---------- Body: left settings panel | thumbnails ----------
@@ -4964,7 +4978,64 @@ class ScannerWindow(QtWidgets.QMainWindow):
         body.addWidget(self.files_panel)
         if not self._opts.get("show_files_panel", True):
             self.files_panel.hide()
+
+        # ---- UI #3: Preview panel (page click → badi jhalak + quick-edit) ----
+        self.preview_panel = QtWidgets.QWidget()
+        self.preview_panel.setObjectName("panel")
+        self.preview_panel.setFixedWidth(300)
+        pv = QtWidgets.QVBoxLayout(self.preview_panel)
+        pv.setContentsMargins(8, 8, 8, 8)
+        self.pv_title = QtWidgets.QLabel(self.L("👁 Preview", "👁 Preview"))
+        self.pv_title.setStyleSheet("font-weight:700;")
+        pv.addWidget(self.pv_title)
+        self.pv_img = QtWidgets.QLabel()
+        self.pv_img.setAlignment(QtCore.Qt.AlignCenter)
+        self.pv_img.setMinimumHeight(320)
+        self.pv_img.setStyleSheet("border:1px solid #cbd5e1;border-radius:8px;background:#fff;")
+        pv.addWidget(self.pv_img, 1)
+        _qe = QtWidgets.QHBoxLayout()
+        for _t, _tip, _fn in (("↺", "Rotate left", self.rotate_left),
+                              ("↻", "Rotate right", self.rotate_right),
+                              ("✂", "Auto-crop", self.autocrop_current),
+                              ("✒", "Sign/Stamp", self.place_sign),
+                              ("🗑", "Delete", self.delete_page)):
+            _b = QtWidgets.QPushButton(_t); _b.setToolTip(_tip)
+            _b.setFixedHeight(30); _b.clicked.connect(_fn)
+            _qe.addWidget(_b)
+        pv.addLayout(_qe)
+        self.pv_info = QtWidgets.QLabel("")
+        self.pv_info.setStyleSheet("color:#64748b;font-size:11px;")
+        self.pv_info.setWordWrap(True)
+        pv.addWidget(self.pv_info)
+        self.preview_panel.setVisible(bool(self._opts.get("ui_preview", False)))
+        body.addWidget(self.preview_panel)
+        self.list.currentItemChanged.connect(lambda cur, prev: self._update_preview_panel())
+
         outer.addLayout(body, 1)
+
+        # ---- UI #8: Kiosk overlay (bade buttons — dukaan/touch) ----
+        self.kiosk = QtWidgets.QWidget(self)
+        self.kiosk.setStyleSheet("background:#f4f6f8;")
+        _kg = QtWidgets.QGridLayout(self.kiosk)
+        _kg.setContentsMargins(30, 30, 30, 30)
+        _kg.setSpacing(16)
+        _kbtns = [("🖨", self.L("SCAN", "SCAN"), self.do_scan),
+                  ("💾", self.L("SAVE PDF", "SAVE PDF"), self.save_pdf_all),
+                  ("🟢", "WHATSAPP", self.share_whatsapp),
+                  ("📷", self.L("PHOTO→PDF", "PHOTO→PDF"), self.import_photos),
+                  ("🗜", "COMPRESS", self.compress_pdf_tool),
+                  ("🖨️", "PRINT", self.print_pages),
+                  ("🕘", "HISTORY", self.show_history),
+                  ("🚪", self.L("BAND KARO", "EXIT KIOSK"), self.toggle_kiosk)]
+        for i, (ic, tx, fn) in enumerate(_kbtns):
+            b = QtWidgets.QPushButton("%s\n%s" % (ic, tx))
+            b.setMinimumHeight(120)
+            b.setStyleSheet("QPushButton{font-size:20px;font-weight:800;border:2px solid "
+                            "#0f766e;border-radius:18px;background:#fff;color:#0f766e;}"
+                            "QPushButton:hover{background:#0f766e;color:#fff;}")
+            b.clicked.connect(fn)
+            _kg.addWidget(b, i // 3, i % 3)
+        self.kiosk.hide()
 
         # ---------- Status bar: connection ----------
         self.status = self.statusBar()
@@ -4993,6 +5064,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._upd_timer.start()
         # Mahine ki pehli baar kholne par "Aapka Mahina" summary
         QtCore.QTimer.singleShot(6000, self._maybe_month_wrap)
+        # Kiosk mode band karke exit kiya tha to wapas usi me kholo
+        if self._opts.get("ui_kiosk"):
+            QtCore.QTimer.singleShot(300, lambda: (self.kiosk.setGeometry(
+                self.centralWidget().rect()), self.kiosk.show(), self.kiosk.raise_()))
         # kept (hidden) for the connection feature; IP set via Settings menu
         self.ip_field = QtWidgets.QLineEdit(self._config.get("scanner_ip", "")); self.ip_field.hide()
         self.btn_check = QtWidgets.QPushButton(); self.btn_check.hide()
@@ -6334,6 +6409,96 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._opts["show_files_panel"] = vis
         self._save_opts()
 
+    def _update_preview_panel(self):
+        if not getattr(self, "preview_panel", None) or not self.preview_panel.isVisible():
+            return
+        it = self.list.currentItem()
+        if it is None:
+            self.pv_img.clear(); self.pv_info.setText(""); return
+        path = it.data(QtCore.Qt.UserRole)
+        try:
+            pm = QtGui.QPixmap(path)
+            if not pm.isNull():
+                self.pv_img.setPixmap(pm.scaled(
+                    self.pv_img.width() - 8, self.pv_img.height() - 8,
+                    QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+            name = it.data(TITLE_ROLE) or it.text() or "-"
+            kb = os.path.getsize(path) / 1024.0
+            self.pv_info.setText("%s\n%s · %dx%d" %
+                                 (name, ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024)),
+                                  pm.width(), pm.height()))
+        except Exception:
+            pass
+
+    def _rebuild_jobs_bar(self):
+        while self._jobs_lay.count():
+            it = self._jobs_lay.takeAt(0)
+            w = it.widget()
+            if w:
+                w.deleteLater()
+        lbl = QtWidgets.QLabel(self.L("JOBS:", "JOBS:"))
+        lbl.setStyleSheet("color:#92400e;font-weight:700;")
+        self._jobs_lay.addWidget(lbl)
+        for job in (self._opts.get("jobs") or []):
+            b = QtWidgets.QPushButton(job.get("icon", "📋") + " " + job.get("name", "Job"))
+            b.setStyleSheet("padding:3px 10px;border:1px solid #fbbf24;border-radius:99px;"
+                            "background:#fff;")
+            b.clicked.connect(lambda _c=False, j=job: self._apply_job(j))
+            self._jobs_lay.addWidget(b)
+        add = QtWidgets.QPushButton("➕")
+        add.setToolTip(self.L("Naya job banao", "Create a job"))
+        add.setStyleSheet("padding:3px 8px;border:1px dashed #fbbf24;border-radius:99px;background:#fff;")
+        add.clicked.connect(self._new_job)
+        self._jobs_lay.addWidget(add)
+        self._jobs_lay.addStretch(1)
+
+    def _apply_job(self, job):
+        """Job-chip: ek click me profile + folder + naming set."""
+        prof = job.get("profile")
+        if prof:
+            i = self.cmb_profile.findText(prof)
+            if i >= 0:
+                self.cmb_profile.setCurrentIndex(i)
+        if job.get("folder"):
+            self._opts["save_folder"] = job["folder"]
+        if job.get("template"):
+            self._opts["filename_template"] = job["template"]
+        self._opts["auto_name"] = bool(job.get("auto_name", True))
+        self._save_opts()
+        self._refresh_files_root()
+        self.status.showMessage(
+            self.L("Job '%s' set ho gaya — ab scan karo." % job.get("name"),
+                   "Job '%s' applied — scan now." % job.get("name")), 5000)
+
+    def _new_job(self):
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Naya job", "New job"),
+            self.L("Job ka naam (jaise Claim, ID-Cards):", "Job name (e.g. Claim, IDs):"))
+        if not ok or not name.strip():
+            return
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, self.L("Is job ki files kis folder me jaayen?", "Save this job's files to which folder?"),
+            self._opts.get("save_folder", ""))
+        icon, _ = QtWidgets.QInputDialog.getText(
+            self, "Icon", self.L("Ek emoji (optional):", "One emoji (optional):"), text="📋")
+        prof = self.cmb_profile.currentText()
+        jobs = self._opts.setdefault("jobs", [])
+        jobs.append({"name": name.strip(), "icon": (icon.strip() or "📋")[:2],
+                     "profile": prof, "folder": folder or "",
+                     "template": "{name}_{date}", "auto_name": True})
+        self._save_opts()
+        self._rebuild_jobs_bar()
+
+    def toggle_kiosk(self):
+        on = not self.kiosk.isVisible()
+        if on:
+            self.kiosk.setGeometry(self.centralWidget().rect())
+            self.kiosk.show(); self.kiosk.raise_()
+        else:
+            self.kiosk.hide()
+        self._opts["ui_kiosk"] = on
+        self._save_opts()
+
     def customize_ui(self):
         """UI ke design-elements — user apne hisaab se on/off kare (v24)."""
         dlg = QtWidgets.QDialog(self)
@@ -6344,24 +6509,33 @@ class ScannerWindow(QtWidgets.QMainWindow):
         cmb.setCurrentIndex({"light": 0, "dark": 1, "darkpro": 2}.get(self._opts.get("theme"), 0))
         form.addRow("Theme:", cmb)
         checks = {}
+        default_on = {"ui_fab", "ui_preview", "ui_jobs", "ui_kiosk"}
         for key, hi, en in (
                 ("ui_dashboard", "Start dashboard (khaali screen par bade buttons)",
                  "Start dashboard (big buttons on empty screen)"),
                 ("ui_header", "Status-patti (scanner/profile/aaj ka kaam)",
                  "Status header (scanner/profile/today)"),
+                ("ui_preview", "Preview panel (page ki badi jhalak + quick-edit)",
+                 "Preview panel (big page preview + quick edit)"),
+                ("ui_jobs", "Job-chips patti (1 click me profile+folder set)",
+                 "Job chips bar (1-click profile+folder)"),
                 ("ui_fab", "Floating gol Scan button (neeche-daayein)",
                  "Floating round Scan button (bottom-right)"),
                 ("ui_graph", "Sidebar me 7-din ka graph",
                  "7-day graph in the sidebar")):
             c = QtWidgets.QCheckBox(self.L(hi, en))
-            c.setChecked(bool(self._opts.get(key, key != "ui_fab")))
+            c.setChecked(bool(self._opts.get(key, key not in default_on)))
             checks[key] = c
             form.addRow(c)
+        bkiosk = QtWidgets.QPushButton(self.L("🖥 Kiosk mode ab chalu karo (bade buttons)",
+                                             "🖥 Enter Kiosk mode now (big buttons)"))
+        bkiosk.clicked.connect(lambda: (dlg.accept(), self.toggle_kiosk()))
+        form.addRow(bkiosk)
         note = QtWidgets.QLabel(self.L(
-            "<span style='color:#64748b;font-size:11px;'>Aur bhi aayenge: Ribbon toolbar, "
-            "Preview panel, Job-chips… (agle updates me)</span>",
-            "<span style='color:#64748b;font-size:11px;'>Coming next: Ribbon toolbar, "
-            "Preview panel, Job chips…</span>"))
+            "<span style='color:#64748b;font-size:11px;'>Ribbon toolbar aur Icon-rail "
+            "sidebars agle update me.</span>",
+            "<span style='color:#64748b;font-size:11px;'>Ribbon toolbar and icon-rail "
+            "sidebars coming in the next update.</span>"))
         note.setTextFormat(QtCore.Qt.RichText)
         form.addRow(note)
         bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
@@ -6379,6 +6553,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.fab.setVisible(bool(self._opts.get("ui_fab")))
             self.ui_header.setVisible(bool(self._opts.get("ui_header")))
             self.side_graph.setVisible(bool(self._opts.get("ui_graph")))
+            self.preview_panel.setVisible(bool(self._opts.get("ui_preview")))
+            self.jobs_bar.setVisible(bool(self._opts.get("ui_jobs")))
+            self._update_preview_panel()
             self._update_empty_state()
             self._update_sidebar_stats()
         except Exception:
