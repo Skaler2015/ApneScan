@@ -3070,7 +3070,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "Scan History…", self.show_history, "हिन्दी: Ab tak ki saari saved PDFs — nayi se purani, filter ke saath.\nEnglish: All saved PDFs, newest first, with quick filter.")
         self._ma(mt, "Phone-photo se PDF (photo import)…", self.import_photos, "हिन्दी: Phone se kheenchi document-photos ko saaf karke pages banao (shadow hatana, seedha karna) — phir PDF save karo.\nEnglish: Clean up phone photos of documents (remove shadows, straighten) and add them as pages.")
         self._ma(mt, "ID cards alag karo (is page se)…", self.split_id_cards, "हिन्दी: Ek page par 2-3 ID cards scan kiye hain? Ye unhe alag-alag pages me kaat dega.\nEnglish: Scanned 2-3 ID cards on one page? This splits them into separate pages.")
-        self._ma(mt, "Search past PDFs…", self.search_pdfs, "हिन्दी: Purani save ki hui PDF dhoondo (claim/naam se, ya PDF ke andar ke text se).\nEnglish: Search your saved PDFs by name or text content.", "Ctrl+F")
+        self._ma(mt, "Search past PDFs…", self.search_pdfs, "हिन्दी: Purani save ki hui PDF dhoondo (claim/naam/tag se, ya PDF ke andar ke text se).\nEnglish: Search your saved PDFs by name, tag or text content.", "Ctrl+F")
+        self._ma(mt, "Search index banao/refresh…", self.build_search_index, "हिन्दी: Saari PDFs ka text ek baar padh kar index bana lo — phir andar-ke-text wali search TURANT hogi.\nEnglish: Build a one-time text index so in-PDF search becomes instant.")
+        self._ma(mt, "Tag lagao (kisi PDF par)…", self.tag_pdf, "हिन्दी: PDF par apne tags lagao (jaise Aadhaar, School, Bijli-bill) — baad me tag se turant dhoondo.\nEnglish: Put your own tags on a PDF for quick finding later.")
+        self._ma(mt, "Tag se dhoondo…", self.search_by_tag, "हिन्दी: Lagaye hue tag se files ki list dekho aur kholo.\nEnglish: List and open files by tag.")
         self._ma(mt, "Merge PDFs…", self.merge_pdfs, "हिन्दी: Kai PDF ko jodkar ek PDF banao.\nEnglish: Merge several PDFs into one.")
         self._ma(mt, "Split into multiple PDFs…", self.split_pdfs, "हिन्दी: Ek scan ko kai alag PDF me baanto.\nEnglish: Split into multiple PDFs.")
         self._ma(mt, "PDF chhota karo (compress)…", self.compress_pdf_tool, "हिन्दी: Abhi ke pages ya koi purani PDF ko 200KB/500KB/1MB/2MB tak chhota karo (portal upload ke liye).\nEnglish: Shrink current pages or any PDF to a 200KB/500KB/1MB/2MB target for portal uploads.")
@@ -5144,6 +5147,111 @@ class ScannerWindow(QtWidgets.QMainWindow):
         v.addLayout(row)
         dlg.exec_()
 
+    # ---- Tags + OCR search index ----
+    INDEX_PATH = os.path.join(os.path.expanduser("~"), ".apnescan_index.json")
+
+    def _load_index(self):
+        try:
+            with open(self.INDEX_PATH, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except Exception:
+            return {}
+
+    def _save_index(self, idx):
+        try:
+            with open(self.INDEX_PATH, "w", encoding="utf-8") as fh:
+                json.dump(idx, fh)
+        except Exception:
+            pass
+
+    def build_search_index(self):
+        """Saari saved PDFs ka text EK BAAR padh kar index bana lo — uske baad
+        'andar ke text' wali search turant hoti hai."""
+        if not HAS_OCR_LIBS:
+            self._warn("pypdf install nahi hai."); return
+        root = self._opts.get("save_folder", os.path.expanduser("~"))
+
+        def job():
+            idx = self._load_index()
+            pdfs = []
+            for dp, _dn, fn in os.walk(root):
+                for f in fn:
+                    if f.lower().endswith(".pdf"):
+                        pdfs.append(os.path.join(dp, f))
+            changed = 0
+            for p in pdfs:
+                try:
+                    m = os.path.getmtime(p)
+                except Exception:
+                    continue
+                e = idx.get(p)
+                if e and e.get("m") == m:
+                    continue
+                text = ""
+                try:
+                    reader = PdfReader(p)
+                    for pg in reader.pages[:10]:
+                        text += (pg.extract_text() or "")
+                except Exception:
+                    pass
+                idx[p] = {"m": m, "t": (text or "").lower()[:20000]}
+                changed += 1
+            for p in list(idx):
+                if not os.path.exists(p):
+                    idx.pop(p, None)
+            self._save_index(idx)
+            return (len(pdfs), changed)
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn("Index fail:\n%s" % res); return
+            total, changed = res
+            QtWidgets.QMessageBox.information(
+                self, "Index taiyar",
+                "%d PDFs index me hain (%d nayi/badli padhi).\n\n"
+                "Ab Ctrl+F wali search me 'andar ka text' turant milega.\n"
+                "(Jo PDF 'OCR searchable' tick karke bani hain unhi ke andar text hota hai.)"
+                % (total, changed))
+        self._run_bg(job, done, "Search index ban raha hai… (app chalti rahegi)")
+
+    def tag_pdf(self):
+        """Kisi bhi saved PDF par tags lagao (jaise: Aadhaar, School, Bijli-bill)."""
+        src = self._pick_pdf("Kis PDF par tag lagana hai?")
+        if not src:
+            return
+        tags = self._opts.setdefault("tags", {})
+        cur = ", ".join(tags.get(src, []))
+        text, ok = QtWidgets.QInputDialog.getText(
+            self, "Tags", "Tags likhein (comma se alag, jaise: Aadhaar, Ghar):", text=cur)
+        if not ok:
+            return
+        lst = [t.strip() for t in text.split(",") if t.strip()]
+        if lst:
+            tags[src] = lst
+        else:
+            tags.pop(src, None)
+        self._save_opts()
+        self.status.showMessage("Tags save ho gaye: %s" % (", ".join(lst) or "(hata diye)"), 5000)
+
+    def search_by_tag(self):
+        tags = self._opts.get("tags", {}) or {}
+        all_tags = sorted({t for lst in tags.values() for t in lst})
+        if not all_tags:
+            self._warn("Abhi kisi PDF par tag nahi laga.\n(Tools → Tag lagao… se lagayein.)")
+            return
+        pick, ok = QtWidgets.QInputDialog.getItem(
+            self, "Tag se dhoondo", "Tag chuno:", all_tags, 0, False)
+        if not ok or not pick:
+            return
+        matches = [p for p, lst in tags.items() if pick in lst and os.path.exists(p)]
+        if not matches:
+            self._warn("Is tag ki koi file ab maujood nahi."); return
+        item, ok = QtWidgets.QInputDialog.getItem(
+            self, "'%s' wali files" % pick, "%d file mili — kholne ke liye chuno:" % len(matches),
+            matches, 0, False)
+        if ok and item:
+            self._open_path(item)
+
     # ---- PDF tools (naye) ----
     def _pick_pdf(self, title):
         start = self._opts.get("save_folder", os.path.expanduser("~"))
@@ -5894,9 +6002,23 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return os.path.join(self._target_folder(), suggested + ext)
         now = datetime.datetime.now()
         claim = sanitize(self.claim_edit.text().strip(), "scan")
+        # Pehle page ka OCR-naam (ho to) — {name} placeholder ke liye
+        docname = ""
+        try:
+            it0 = self.list.item(0)
+            if it0:
+                docname = underscore_name(it0.data(TITLE_ROLE) or "")
+        except Exception:
+            pass
         name = self._opts.get("filename_template", "{claim}_{date}_{seq}")
-        name = (name.replace("{claim}", claim).replace("{date}", now.strftime("%Y-%m-%d"))
-                    .replace("{time}", now.strftime("%H%M%S")).replace("{seq}", "%03d" % seq))
+        name = (name.replace("{claim}", claim)
+                    .replace("{date}", now.strftime("%Y-%m-%d"))
+                    .replace("{year}", now.strftime("%Y"))
+                    .replace("{month}", now.strftime("%m"))
+                    .replace("{day}", now.strftime("%d"))
+                    .replace("{time}", now.strftime("%H%M%S"))
+                    .replace("{name}", docname or "scan")
+                    .replace("{seq}", "%03d" % seq))
         return os.path.join(self._target_folder(), underscore_name(name) + ext)
 
     def _validate_claim_ok(self):
@@ -6239,8 +6361,23 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
         matches = [p for p in pdfs if q in os.path.basename(p).lower()]
+        # tag match bhi dikhao
+        for p, lst in (self._opts.get("tags") or {}).items():
+            if p not in matches and any(q in t.lower() for t in lst) and os.path.exists(p):
+                matches.append(p)
         if chk.isChecked() and HAS_OCR_LIBS:
-            todo = [p for p in pdfs if p not in matches]
+            # pehle INDEX se turant dhoondo; sirf un-indexed files live padho
+            idx = self._load_index()
+            todo = []
+            for p in pdfs:
+                if p in matches:
+                    continue
+                e = idx.get(p)
+                if e is not None:
+                    if q in (e.get("t") or ""):
+                        matches.append(p)
+                else:
+                    todo.append(p)
             prog = QtWidgets.QProgressDialog(
                 "PDF ke andar dhoondh rahe hain… (%d files)" % len(todo), "Cancel", 0, len(todo), self)
             prog.setWindowModality(QtCore.Qt.WindowModal)
