@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-ApneScan - v16  [fix: eSCL B&W feeder-jam + sahi error messages; naya: Share (WhatsApp/Email),
-                 PDF compress tool, TWAIN continuous-feed (experimental, Settings se)]
+ApneScan - v17  [speed: rename/import/thumbnails ab background me — UI kabhi nahi jamti;
+                 fix: eSCL B&W feeder-jam, backing-whitening pixel-accurate;
+                 naya: Share (WhatsApp/Email), PDF compress, photo import, ID split]
 =========================================================
 Run with 32-bit Python (HP TWAIN driver is 32-bit):
     py -3.12-32 scanner_app_v10.py
@@ -147,7 +148,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "16"
+VERSION = "17"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".apnescan.json")
@@ -1978,6 +1979,78 @@ class NameWorker(QtCore.QThread):
         self.finished_all.emit()
 
 
+class LearnWorker(QtCore.QThread):
+    """Rename ke baad naam 'seekhne' ka OCR background me — pehle ye UI thread
+    par chalta tha aur har rename par app 3-10 second jam jaati thi."""
+    got = QtCore.pyqtSignal(str, list)   # (name, words)
+
+    def __init__(self, path, name):
+        super().__init__()
+        self.path = path
+        self.name = name
+
+    def run(self):
+        try:
+            words = sorted(sig_words(page_ocr_text(self.path, 0.6)))
+        except Exception:
+            words = []
+        self.got.emit(self.name, words)
+
+
+class ImportWorker(QtCore.QThread):
+    """Import (images/PDF/photo-cleanup) background me — UI kabhi nahi rukti.
+    Thumbnail bhi yahin chhota (QImage worker thread me safe hai)."""
+    page_ready = QtCore.pyqtSignal(str, QtGui.QImage)
+    done = QtCore.pyqtSignal(int)
+
+    def __init__(self, files, tmpdir, mode="normal", thumb_w=360, thumb_h=480):
+        super().__init__()
+        self.files = list(files)
+        self.tmpdir = tmpdir
+        self.mode = mode          # "normal" ya "photo" (phone-photo cleanup)
+        self.thumb_w = thumb_w
+        self.thumb_h = thumb_h
+
+    def _thumb(self, path):
+        r = QtGui.QImageReader(path)
+        r.setAutoTransform(True)
+        sz = r.size()
+        if sz.isValid() and sz.width() > 0 and sz.height() > 0:
+            s = min(float(self.thumb_w) / sz.width(),
+                    float(self.thumb_h) / sz.height(), 1.0)
+            r.setScaledSize(QtCore.QSize(max(1, int(sz.width() * s)),
+                                         max(1, int(sz.height() * s))))
+        return r.read()
+
+    def run(self):
+        count = 0
+        for f in self.files:
+            if self.isInterruptionRequested():
+                break
+            try:
+                if self.mode == "photo":
+                    with Image.open(f) as im:
+                        img = clean_photo(im)
+                    fd, out = tempfile.mkstemp(suffix=".jpg", dir=self.tmpdir)
+                    os.close(fd)
+                    img.save(out, "JPEG", quality=90)
+                    outs = [out]
+                elif f.lower().endswith(".pdf"):
+                    outs = pdf_to_images(f, self.tmpdir) or []
+                else:
+                    with Image.open(f) as im:
+                        fd, out = tempfile.mkstemp(suffix=".png", dir=self.tmpdir)
+                        os.close(fd)
+                        im.convert("RGB").save(out, "PNG")
+                    outs = [out]
+                for p in outs:
+                    count += 1
+                    self.page_ready.emit(p, self._thumb(p))
+            except Exception:
+                pass
+        self.done.emit(count)
+
+
 class ScanWorker(QtCore.QThread):
     page_done = QtCore.pyqtSignal(str)
     done = QtCore.pyqtSignal(int, int)
@@ -3314,15 +3387,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     def dropEvent(self, e):
         exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".pdf")
-        count = 0
-        for url in e.mimeData().urls():
-            f = url.toLocalFile()
-            if f.lower().endswith(exts):
-                count += self._import_one(f)
-        if count:
-            self.status.showMessage("%d page add hue" % count, 4000)
-            if tesseract_available():
-                self.auto_name_pages()
+        files = [url.toLocalFile() for url in e.mimeData().urls()
+                 if url.toLocalFile().lower().endswith(exts)]
+        if files:
+            self._start_import(files, "normal")
 
     def _after_save_action(self, out):
         act = self._opts.get("after_save", "nothing")
@@ -4365,8 +4433,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._set_busy_display("free")
 
     # ---- list ----
-    def _add_item_for_path(self, path):
-        icon = QtGui.QIcon(self._make_thumb(path))
+    def _add_item_for_path(self, path, qimg=None):
+        # qimg: background worker se pehle se bana-banaya thumbnail (QImage) —
+        # UI thread par bhaari decode/scale nahi karna padta.
+        if qimg is not None and not qimg.isNull():
+            icon = QtGui.QIcon(QtGui.QPixmap.fromImage(qimg))
+        else:
+            icon = QtGui.QIcon(self._make_thumb(path))
         _lbl = ("Page %d" % (self.list.count() + 1)) if self._opts.get("show_page_numbers", True) else ""
         item = QtWidgets.QListWidgetItem(icon, _lbl)
         item.setData(QtCore.Qt.UserRole, path); item.setTextAlignment(QtCore.Qt.AlignHCenter)
@@ -4379,12 +4452,21 @@ class ScannerWindow(QtWidgets.QMainWindow):
     THUMB_HI_H = 480
 
     def _make_thumb(self, path):
-        pix = QtGui.QPixmap(path)
-        if pix.isNull():
+        # QImageReader ka scaled decode (khaaskar JPEG me) poori image decode
+        # karke SmoothTransformation se sikodne se KAI GUNA tez hai — isi se
+        # scan/import ke time UI ka atakna band hota hai.
+        r = QtGui.QImageReader(path)
+        r.setAutoTransform(True)
+        sz = r.size()
+        if sz.isValid() and sz.width() > 0 and sz.height() > 0:
+            s = min(float(self.THUMB_HI_W) / sz.width(),
+                    float(self.THUMB_HI_H) / sz.height(), 1.0)
+            r.setScaledSize(QtCore.QSize(max(1, int(sz.width() * s)),
+                                         max(1, int(sz.height() * s))))
+        img = r.read()
+        if img.isNull():
             return QtGui.QPixmap(self.THUMB_HI_W, self.THUMB_HI_H)
-        # high-res source; the list's iconSize scales it for display (crisp zoom)
-        return pix.scaled(self.THUMB_HI_W, self.THUMB_HI_H,
-                          QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+        return QtGui.QPixmap.fromImage(img)
 
     def _refresh_item(self, item):
         path = item.data(QtCore.Qt.UserRole)
@@ -4550,72 +4632,55 @@ class ScannerWindow(QtWidgets.QMainWindow):
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self, "Images / PDF chuno", start,
             "Images & PDF (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.pdf);;PDF (*.pdf);;Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
-        count = 0
-        for f in files:
-            count += self._import_one(f)
-        if files:
-            try:
-                self._config["last_import_dir"] = os.path.dirname(files[0])
-                save_config(self._config)
-            except Exception:
-                pass
+        if not files:
+            return
+        try:
+            self._config["last_import_dir"] = os.path.dirname(files[0])
+            save_config(self._config)
+        except Exception:
+            pass
+        self._start_import(files, "normal")
+
+    def _start_import(self, files, mode):
+        """Import BACKGROUND me chalta hai — app kabhi nahi rukti/jam hoti."""
+        if getattr(self, "_importer", None) is not None and self._importer.isRunning():
+            self._warn("Pehla import abhi chal raha hai — thoda ruk kar dobara try karein.")
+            return
+        self.status.showMessage("Import ho raha hai… (app istemal karte rahiye)", 0)
+        self._importer = ImportWorker(files, self._tmpdir, mode,
+                                      self.THUMB_HI_W, self.THUMB_HI_H)
+        self._importer.page_ready.connect(self._on_import_page)
+        self._importer.done.connect(self._on_import_done)
+        self._importer.start()
+
+    def _on_import_page(self, path, qimg):
+        self._add_item_for_path(path, qimg)
+
+    def _on_import_done(self, count):
         if count:
             self.status.showMessage("%d page import ho gaye." % count, 4000)
             if tesseract_available():
                 self.auto_name_pages()
-
-    def _import_one(self, f):
-        """Import a single image OR pdf file. Returns number of pages added."""
-        added = 0
-        try:
-            if f.lower().endswith(".pdf"):
-                pages = pdf_to_images(f, self._tmpdir)
-                if not pages:
-                    self._warn("Is PDF se pages nahi nikle.\nBehtar result ke liye 'PyMuPDF' install karein:\n  py -3.12-32 -m pip install PyMuPDF")
-                for png in pages:
-                    self._add_item_for_path(png); added += 1
-            else:
-                with Image.open(f) as im:
-                    fd, png = tempfile.mkstemp(suffix=".png", dir=self._tmpdir)
-                    os.close(fd); im.convert("RGB").save(png, "PNG")
-                    self._add_item_for_path(png); added += 1
-        except Exception:
-            pass
-        return added
+        else:
+            self.status.clearMessage()
+            self._warn("Import nahi ho paya. PDF ho to behtar result ke liye "
+                       "'PyMuPDF' install karein:\n  py -3.12-32 -m pip install PyMuPDF")
 
     def import_photos(self):
         """Phone se kheenchi photos ko saaf karke pages banao (shadow hatana,
-        seedha karna, chhota karna) — phir normal PDF save."""
+        seedha karna, chhota karna) — background me, app nahi rukti."""
         start = self._config.get("last_import_dir") or ""
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self, "Phone-photos chuno", start,
             "Photos (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp)")
         if not files:
             return
-        count = 0
-        for f in files:
-            try:
-                with Image.open(f) as im:
-                    img = clean_photo(im)
-                fd, png = tempfile.mkstemp(suffix=".jpg", dir=self._tmpdir)
-                os.close(fd)
-                img.save(png, "JPEG", quality=90)
-                self._add_item_for_path(png)
-                count += 1
-            except Exception:
-                pass
-        if files:
-            try:
-                self._config["last_import_dir"] = os.path.dirname(files[0])
-                save_config(self._config)
-            except Exception:
-                pass
-        if count:
-            self.status.showMessage("%d photo saaf karke import ho gayi." % count, 4000)
-            if tesseract_available():
-                self.auto_name_pages()
-        else:
-            self._warn("Photo import nahi ho payi.")
+        try:
+            self._config["last_import_dir"] = os.path.dirname(files[0])
+            save_config(self._config)
+        except Exception:
+            pass
+        self._start_import(files, "photo")
 
     def split_id_cards(self):
         """Selected page par rakhe 2-3 ID cards ko alag-alag pages me kaato."""
@@ -4736,12 +4801,19 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._learn_name(it.data(QtCore.Qt.UserRole), name)
 
     def _learn_name(self, path, name):
+        """Rename ka OCR-learning ab BACKGROUND me hota hai — pehle yahi OCR
+        UI thread par chal kar har rename ko 3-10 second ke liye jama deta tha."""
         if not path or not tesseract_available():
             return
-        try:
-            words = sorted(sig_words(page_ocr_text(path, 0.6)))
-        except Exception:
-            words = []
+        self._learn_workers = getattr(self, "_learn_workers", [])
+        w = LearnWorker(path, name)
+        w.got.connect(self._store_learned_name)
+        w.finished.connect(lambda w=w: self._learn_workers.remove(w)
+                           if w in self._learn_workers else None)
+        self._learn_workers.append(w)
+        w.start()
+
+    def _store_learned_name(self, name, words):
         if len(words) < 4:
             return   # too little text to identify the form reliably
         learned = self._config.setdefault("learned_names", [])
