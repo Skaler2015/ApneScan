@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "30"
+VERSION = "31"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -3910,6 +3910,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 # Ctrl + mouse scroll -> zoom thumbnails in/out (like NAPS2)
                 self._apply_thumb_zoom(self._thumb_w * (1.15 if ev.angleDelta().y() > 0 else 0.87))
                 return True
+        # Preview panel: Ctrl+scroll = zoom
+        if (hasattr(self, "pv_scroll") and obj is self.pv_scroll.viewport()
+                and ev.type() == QtCore.QEvent.Wheel
+                and (ev.modifiers() & QtCore.Qt.ControlModifier)):
+            self._pv_do_zoom(1.2 if ev.angleDelta().y() > 0 else 0.83)
+            return True
         return super().eventFilter(obj, ev)
 
     def dragEnterEvent(self, e):
@@ -5219,27 +5225,91 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # ---- UI #3: Preview panel (page click → badi jhalak + quick-edit) ----
         self.preview_panel = QtWidgets.QWidget()
         self.preview_panel.setObjectName("panel")
-        self.preview_panel.setFixedWidth(300)
+        self.preview_panel.setFixedWidth(310)
+        self._pv_zoom = 1.0
         pv = QtWidgets.QVBoxLayout(self.preview_panel)
-        pv.setContentsMargins(8, 8, 8, 8)
+        pv.setContentsMargins(8, 8, 8, 8); pv.setSpacing(4)
+        # header: ◀ Page x/N ▶
+        _nav = QtWidgets.QHBoxLayout()
+        _bprev = QtWidgets.QPushButton("◀"); _bprev.setFixedWidth(30)
+        _bprev.setToolTip(self.L("Pichhla page", "Previous page"))
+        _bprev.clicked.connect(lambda: self._pv_step(-1))
+        _bnext = QtWidgets.QPushButton("▶"); _bnext.setFixedWidth(30)
+        _bnext.setToolTip(self.L("Agla page", "Next page"))
+        _bnext.clicked.connect(lambda: self._pv_step(1))
         self.pv_title = QtWidgets.QLabel(self.L("👁 Preview", "👁 Preview"))
+        self.pv_title.setAlignment(QtCore.Qt.AlignCenter)
         self.pv_title.setStyleSheet("font-weight:700;")
-        pv.addWidget(self.pv_title)
+        _nav.addWidget(_bprev); _nav.addWidget(self.pv_title, 1); _nav.addWidget(_bnext)
+        pv.addLayout(_nav)
+        # tabs: Preview | Text | Info
+        self.pv_tabs = QtWidgets.QTabWidget()
+        _p1 = QtWidgets.QWidget(); _p1l = QtWidgets.QVBoxLayout(_p1)
+        _p1l.setContentsMargins(0, 0, 0, 0)
+        self.pv_scroll = QtWidgets.QScrollArea()
+        self.pv_scroll.setWidgetResizable(False)
+        self.pv_scroll.setAlignment(QtCore.Qt.AlignCenter)
         self.pv_img = QtWidgets.QLabel()
         self.pv_img.setAlignment(QtCore.Qt.AlignCenter)
-        self.pv_img.setMinimumHeight(320)
-        self.pv_img.setStyleSheet("border:1px solid #cbd5e1;border-radius:8px;background:#fff;")
-        pv.addWidget(self.pv_img, 1)
-        _qe = QtWidgets.QHBoxLayout()
-        for _t, _tip, _fn in (("↺", "Rotate left", self.rotate_left),
-                              ("↻", "Rotate right", self.rotate_right),
-                              ("✂", "Auto-crop", self.autocrop_current),
-                              ("✒", "Sign/Stamp", self.place_sign),
-                              ("🗑", "Delete", self.delete_page)):
-            _b = QtWidgets.QPushButton(_t); _b.setToolTip(_tip)
-            _b.setFixedHeight(30); _b.clicked.connect(_fn)
-            _qe.addWidget(_b)
-        pv.addLayout(_qe)
+        self.pv_img.setStyleSheet("background:#fff;")
+        self.pv_scroll.setWidget(self.pv_img)
+        self.pv_scroll.setStyleSheet("border:1px solid #cbd5e1;border-radius:8px;background:#fff;")
+        _p1l.addWidget(self.pv_scroll, 1)
+        # zoom row
+        _zr = QtWidgets.QHBoxLayout()
+        for _t, _tip, _fn in (("➖", self.L("Chhota", "Zoom out"), lambda: self._pv_do_zoom(0.8)),
+                              ("Fit", self.L("Panel me fit", "Fit to panel"), self._pv_fit),
+                              ("➕", self.L("Bada", "Zoom in"), lambda: self._pv_do_zoom(1.25)),
+                              ("⛶", self.L("Poori screen", "Full screen"), self._pv_fullscreen)):
+            _zb = QtWidgets.QPushButton(_t); _zb.setToolTip(_tip); _zb.setFixedHeight(26)
+            _zb.clicked.connect(_fn); _zr.addWidget(_zb)
+        _p1l.addLayout(_zr)
+        self.pv_tabs.addTab(_p1, self.L("👁 Jhalak", "👁 Preview"))
+        # Text tab
+        _p2 = QtWidgets.QWidget(); _p2l = QtWidgets.QVBoxLayout(_p2)
+        self.pv_text = QtWidgets.QPlainTextEdit()
+        self.pv_text.setReadOnly(True)
+        self.pv_text.setPlaceholderText(self.L("Is page ka text yahan padha jayega (OCR)…",
+                                               "This page's text (OCR) appears here…"))
+        _p2l.addWidget(self.pv_text, 1)
+        _tb = QtWidgets.QHBoxLayout()
+        _breadt = QtWidgets.QPushButton(self.L("🔤 Text padho", "🔤 Read text"))
+        _breadt.clicked.connect(self._pv_read_text)
+        _bcopyt = QtWidgets.QPushButton(self.L("📋 Copy", "📋 Copy"))
+        _bcopyt.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(self.pv_text.toPlainText()))
+        _tb.addWidget(_breadt); _tb.addWidget(_bcopyt)
+        _p2l.addLayout(_tb)
+        self.pv_tabs.addTab(_p2, self.L("🔤 Text", "🔤 Text"))
+        # Info tab
+        self.pv_info2 = QtWidgets.QLabel("")
+        self.pv_info2.setWordWrap(True); self.pv_info2.setAlignment(QtCore.Qt.AlignTop)
+        self.pv_info2.setStyleSheet("color:#334155;font-size:11px;padding:6px;")
+        self.pv_tabs.addTab(self.pv_info2, self.L("ℹ Info", "ℹ Info"))
+        pv.addWidget(self.pv_tabs, 1)
+        # quick-edit buttons (2 rows) — sab turant apply
+        for _rowdef in (
+            (("↺", self.L("Baayein ghumao", "Rotate left"), self.rotate_left),
+             ("↻", self.L("Daayein ghumao", "Rotate right"), self.rotate_right),
+             ("✂", self.L("Border crop", "Auto-crop"), self.autocrop_current),
+             ("📐", self.L("Seedha karo", "Deskew"), self.deskew_current),
+             ("🗑", self.L("Hatao", "Delete"), self.delete_page)),
+            (("☀", self.L("Halka (bright)", "Brighter"), lambda: self._enhance_current(1.12, 1.0)),
+             ("🌑", self.L("Gehra (dim)", "Darker"), lambda: self._enhance_current(0.9, 1.0)),
+             ("◐", self.L("Contrast +", "Contrast +"), lambda: self._enhance_current(1.0, 1.15)),
+             ("✨", self.L("Saaf karo", "Enhance"), self.enhance_current_page),
+             ("⬜", self.L("Backing white", "Whiten backing"), self.whiten_current_page)),
+            (("✒", self.L("Sign/Stamp", "Sign/Stamp"), self.place_sign),
+             ("🖼", self.L("Photo restore", "Restore photo"), self.restore_photo_current),
+             ("🪪", self.L("ID cards alag", "Split IDs"), self.split_id_cards),
+             ("🔤", self.L("Naam sikhao", "Rename"), self.rename_current_page),
+             ("⛶", self.L("Bada editor", "Big editor"), self._pv_open_editor)),
+        ):
+            _qe = QtWidgets.QHBoxLayout(); _qe.setSpacing(3)
+            for _t, _tip, _fn in _rowdef:
+                _b = QtWidgets.QPushButton(_t); _b.setToolTip(_tip)
+                _b.setFixedHeight(28); _b.clicked.connect(_fn)
+                _qe.addWidget(_b)
+            pv.addLayout(_qe)
         self.pv_info = QtWidgets.QLabel("")
         self.pv_info.setStyleSheet("color:#64748b;font-size:11px;")
         self.pv_info.setWordWrap(True)
@@ -5247,6 +5317,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.preview_panel.setVisible(bool(self._opts.get("ui_preview", False)))
         body.addWidget(self.preview_panel)
         self.list.currentItemChanged.connect(lambda cur, prev: self._update_preview_panel())
+        self.pv_scroll.viewport().installEventFilter(self)   # Ctrl+scroll zoom
 
         outer.addLayout(body, 1)
 
@@ -6734,21 +6805,148 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         it = self.list.currentItem()
         if it is None:
-            self.pv_img.clear(); self.pv_info.setText(""); return
+            self.pv_img.clear(); self.pv_info.setText("")
+            self.pv_title.setText(self.L("👁 Preview", "👁 Preview"))
+            self.pv_info2.setText(""); self.pv_text.setPlainText("")
+            self._pv_pm = None
+            return
         path = it.data(QtCore.Qt.UserRole)
+        row = self.list.row(it)
+        n = self.list.count()
         try:
-            pm = QtGui.QPixmap(path)
-            if not pm.isNull():
-                self.pv_img.setPixmap(pm.scaled(
-                    self.pv_img.width() - 8, self.pv_img.height() - 8,
-                    QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+            self._pv_pm = QtGui.QPixmap(path)
+            self.pv_title.setText("Page %d / %d" % (row + 1, n))
+            self._pv_zoom = 1.0
+            self._pv_render()
             name = it.data(TITLE_ROLE) or it.text() or "-"
             kb = os.path.getsize(path) / 1024.0
-            self.pv_info.setText("%s\n%s · %dx%d" %
-                                 (name, ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024)),
-                                  pm.width(), pm.height()))
+            szt = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024))
+            self.pv_info.setText("%s · %s · %dx%d" %
+                                 (name, szt, self._pv_pm.width(), self._pv_pm.height()))
+            # Info tab
+            mode = "-"
+            try:
+                with Image.open(path) as im:
+                    mode = {"1": "Black & White", "L": "Grayscale", "RGB": "Colour",
+                            "RGBA": "Colour"}.get(im.mode, im.mode)
+            except Exception:
+                pass
+            self.pv_info2.setText(
+                "<b>%s</b><br>📄 Page %d / %d<br>📐 %d × %d px<br>🎨 %s<br>💾 %s<br>"
+                "<span style='color:#94a3b8'>%s</span>"
+                % (name, row + 1, n, self._pv_pm.width(), self._pv_pm.height(),
+                   mode, szt, path))
+            # Text tab: purana text mita do (naya sirf 'Text padho' par)
+            self.pv_text.setPlainText("")
         except Exception:
             pass
+
+    def _pv_render(self):
+        pm = getattr(self, "_pv_pm", None)
+        if pm is None or pm.isNull():
+            return
+        if self._pv_zoom <= 0:
+            self._pv_zoom = 1.0
+        base_w = self.pv_scroll.viewport().width() - 6
+        w = int(base_w * self._pv_zoom)
+        scaled = pm.scaledToWidth(max(40, w), QtCore.Qt.SmoothTransformation)
+        self.pv_img.setPixmap(scaled)
+        self.pv_img.resize(scaled.size())
+
+    def _pv_do_zoom(self, factor):
+        self._pv_zoom = max(0.2, min(6.0, self._pv_zoom * factor))
+        self._pv_render()
+
+    def _pv_fit(self):
+        self._pv_zoom = 1.0
+        self._pv_render()
+
+    def _pv_step(self, d):
+        r = self.list.currentRow()
+        if r < 0:
+            r = 0
+        nr = r + d
+        if 0 <= nr < self.list.count():
+            self.list.setCurrentRow(nr)
+
+    def _pv_fullscreen(self):
+        it = self.list.currentItem()
+        if not it:
+            return
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("Poori-screen preview", "Full-screen preview"))
+        dlg.resize(900, 720)
+        v = QtWidgets.QVBoxLayout(dlg)
+        sc = QtWidgets.QScrollArea(); sc.setWidgetResizable(True)
+        lbl = QtWidgets.QLabel(); lbl.setAlignment(QtCore.Qt.AlignCenter)
+        pm = QtGui.QPixmap(it.data(QtCore.Qt.UserRole))
+        lbl.setPixmap(pm.scaled(880, 680, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+        sc.setWidget(lbl)
+        v.addWidget(sc, 1)
+        b = QtWidgets.QPushButton(self.L("Band karo", "Close")); b.clicked.connect(dlg.accept)
+        v.addWidget(b)
+        dlg.exec_()
+
+    def _pv_open_editor(self):
+        it = self.list.currentItem()
+        if it:
+            PreviewDialog(self, self.list.row(it)).exec_()
+            self._update_preview_panel()
+
+    def _pv_read_text(self):
+        it = self.list.currentItem()
+        if not it:
+            return
+        if not tesseract_available():
+            self.pv_text.setPlainText(self.L("Tesseract OCR install nahi hai.",
+                                             "Tesseract OCR is not installed."))
+            return
+        path = it.data(QtCore.Qt.UserRole)
+        self.pv_text.setPlainText(self.L("Padh rahe hain…", "Reading…"))
+
+        def job():
+            with Image.open(path) as im:
+                return pytesseract.image_to_string(im, lang="hin+eng")
+
+        def done(res):
+            self.pv_text.setPlainText("" if isinstance(res, Exception) else (res or ""))
+        self._run_bg(job, done, self.L("Text padh rahe hain…", "Reading text…"))
+
+    def deskew_current(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        path = item.data(QtCore.Qt.UserRole)
+        try:
+            with Image.open(path) as im:
+                deskew(im.convert("RGB")).save(path, "PNG")
+            self._refresh_item(item); self._update_preview_panel(); self._dirty = True
+        except Exception as exc:
+            self._warn("Deskew fail: %s" % exc)
+
+    def enhance_current_page(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        path = item.data(QtCore.Qt.UserRole)
+        try:
+            with Image.open(path) as im:
+                auto_enhance(im.convert("RGB")).save(path, "PNG")
+            self._refresh_item(item); self._update_preview_panel(); self._dirty = True
+        except Exception as exc:
+            self._warn("Enhance fail: %s" % exc)
+
+    def whiten_current_page(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        path = item.data(QtCore.Qt.UserRole)
+        try:
+            with Image.open(path) as im:
+                whiten_dark_background(im.convert("RGB")).save(path, "PNG")
+            self._refresh_item(item); self._update_preview_panel(); self._dirty = True
+        except Exception as exc:
+            self._warn("Whiten fail: %s" % exc)
 
     def _rebuild_jobs_bar(self):
         while self._jobs_lay.count():
