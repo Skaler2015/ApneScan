@@ -164,7 +164,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "59"
+VERSION = "60"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -3576,6 +3576,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "Business cards → contacts…", self.business_cards, "हिन्दी: Visiting cards ke scan se naam/phone/email padh kar contact files (.vcf) + Excel banao.\nEnglish: Read visiting cards into contact (.vcf) files and an Excel sheet.")
         self._ma(mt, "Purani photo sudharo (restore)", self.restore_photo_current, "हिन्दी: Feeki/dhundhli purani photo ka rang-roop sudharo.\nEnglish: Restore faded/dull old photos.")
         self._ma(mt, "Scan History…", self.show_history, "हिन्दी: Ab tak ki saari saved PDFs — nayi se purani, filter ke saath.\nEnglish: All saved PDFs, newest first, with quick filter.")
+        self._ma(mt, "📊 Analytics…", self.show_analytics, "हिन्दी: Aapki + duniya bhar ki ginti — kitne scan, import, print (sirf ginti, koi document nahi).\nEnglish: Your + worldwide counts — scans, imports, prints (counts only, no documents).")
         self._ma(mt, "📷 Camera se scan (webcam)…", self.scan_from_camera, "हिन्दी: Scanner na ho to bhi — webcam/USB camera se document capture karke PDF banao (photo apne aap saaf hoti hai).\nEnglish: No scanner? Capture documents with a webcam/USB camera (auto-cleaned).")
         self._ma(mt, "Phone-photo se PDF (photo import)…", self.import_photos, "हिन्दी: Phone se kheenchi document-photos ko saaf karke pages banao (shadow hatana, seedha karna) — phir PDF save karo.\nEnglish: Clean up phone photos of documents (remove shadows, straighten) and add them as pages.")
         self._ma(mt, "ID cards alag karo (is page se)…", self.split_id_cards, "हिन्दी: Ek page par 2-3 ID cards scan kiye hain? Ye unhe alag-alag pages me kaat dega.\nEnglish: Scanned 2-3 ID cards on one page? This splits them into separate pages.")
@@ -4081,6 +4082,159 @@ class ScannerWindow(QtWidgets.QMainWindow):
         w.done.connect(_fin)
         self._bg_workers.append(w)
         w.start()
+
+    # =================================================================
+    #  ANALYTICS (NAYA — bilkul fresh; personal + worldwide)
+    #  Networking ka asli fix: background thread me SIRF unverified SSL
+    #  context (ssl._create_unverified_context) — ye Windows ka cert-store
+    #  LOAD hi nahi karta, isliye thread me kabhi hang/fail nahi hota
+    #  (yahi purani dikkat thi: verified context thread me atak jata tha).
+    # =================================================================
+    def _an_url(self):
+        u = self._config.get("stats_url")
+        if u is None:
+            u = DEFAULT_STATS_URL
+        return u or ""
+
+    def _an_fetch(self, params, on_data):
+        """Server se ek request (background, UI nahi rukti). on_data(dict|None)."""
+        url = self._an_url()
+        if not url:
+            on_data(None); return
+        ver = VERSION
+
+        def fn():
+            import urllib.request as U
+            import urllib.parse as P
+            import json as J
+            import ssl
+            ctx = ssl._create_unverified_context()   # thread-safe (cert-store load nahi)
+            full = url + ("&" if "?" in url else "?") + P.urlencode(params)
+            req = U.Request(full, headers={"User-Agent": "ApneScan/%s" % ver})
+            try:
+                r = U.urlopen(req, timeout=15, context=ctx)
+                return J.loads(r.read().decode("utf-8", "ignore"))
+            except Exception:
+                return None
+
+        def done(res):
+            on_data(res if isinstance(res, dict) else None)
+        self._run_bg_quiet(fn, done)
+
+    def _an_apply(self, data):
+        if data and data.get("ok"):
+            self._an_world = data
+        self._an_update_box()
+
+    def _an_refresh(self):
+        """Worldwide numbers laao + sidebar/box taaza karo."""
+        self._an_fetch({"action": "stats"}, self._an_apply)
+
+    def _an_report(self, action, n=0, imp=0, prt=0):
+        """scan / ping / event (import-print) server ko bhejo + display taaza."""
+        p = {"action": action, "client": self._get_client_id(), "v": VERSION}
+        if n:
+            p["n"] = str(n)
+        if imp:
+            p["imp"] = str(imp)
+        if prt:
+            p["prt"] = str(prt)
+        self._an_fetch(p, self._an_apply)
+
+    def _an_wv(self, key):
+        w = getattr(self, "_an_world", {}) or {}
+        v = w.get(key)
+        try:
+            return "{:,}".format(int(v))
+        except Exception:
+            return "…"
+
+    def _an_update_box(self):
+        if not hasattr(self, "an_box"):
+            return
+        st = self._pstats()
+        t = st.get("totals", {})
+        day = (st.get("days") or {}).get(datetime.datetime.now().strftime("%Y-%m-%d"), {})
+        lines = [
+            '<b>📊 ApneScan</b> <span style="color:#94a3b8;font-size:10px;">(click = detail)</span>',
+            "🌍 World scans: <b>%s</b>" % self._an_wv("total"),
+            "📅 Aaj (world): <b>%s</b>" % self._an_wv("today"),
+            "🟢 Abhi online: <b>%s</b>" % self._an_wv("online"),
+            "📄 Mere aaj: <b>%d</b> pages" % day.get("pages", 0),
+            "🔥 Streak: <b>%d din</b>" % self._pstats_streak(),
+        ]
+        try:
+            self.an_box.setText("<br>".join(lines))
+        except Exception:
+            pass
+
+    def show_analytics(self):
+        """Poora analytics — personal + worldwide (naya, saaf)."""
+        self._an_refresh()
+        st = self._pstats()
+        t = st.get("totals", {})
+        w = getattr(self, "_an_world", {}) or {}
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("📊 Analytics", "📊 Analytics"))
+        dlg.resize(480, 520)
+        v = QtWidgets.QVBoxLayout(dlg)
+
+        def _card(title, rows):
+            box = QtWidgets.QGroupBox(title)
+            gl = QtWidgets.QVBoxLayout(box)
+            lbl = QtWidgets.QLabel("<br>".join(rows))
+            lbl.setTextFormat(QtCore.Qt.RichText); lbl.setWordWrap(True)
+            gl.addWidget(lbl)
+            return box, lbl
+
+        day = (st.get("days") or {}).get(datetime.datetime.now().strftime("%Y-%m-%d"), {})
+        my_rows = [
+            self.L("📄 Aaj: <b>%d</b> pages · <b>%d</b> PDF", "📄 Today: <b>%d</b> pages · <b>%d</b> PDF")
+            % (day.get("pages", 0), day.get("pdfs", 0)),
+            self.L("🗓 Is hafte: <b>%d</b> pages", "🗓 This week: <b>%d</b> pages") % self._pstats_sum(7, "pages"),
+            self.L("📚 Kul: <b>%s</b> pages · <b>%s</b> PDF", "📚 Total: <b>%s</b> pages · <b>%s</b> PDF")
+            % ("{:,}".format(t.get("pages", 0)), "{:,}".format(t.get("pdfs", 0))),
+            self.L("📥 Import: <b>%s</b> · 🖨 Print: <b>%s</b>", "📥 Imports: <b>%s</b> · 🖨 Prints: <b>%s</b>")
+            % ("{:,}".format(t.get("imports", 0)), "{:,}".format(t.get("prints", 0))),
+            self.L("📤 Share: <b>%d</b> · 🔥 Streak: <b>%d din</b>", "📤 Shared: <b>%d</b> · 🔥 Streak: <b>%d days</b>")
+            % (t.get("shared", 0), self._pstats_streak()),
+        ]
+        box1, _ = _card(self.L("🙋 Meri stats (is PC par)", "🙋 My stats (this PC)"), my_rows)
+        v.addWidget(box1)
+
+        wbox, wlbl = _card(self.L("🌍 Worldwide (sab users)", "🌍 Worldwide (all users)"), ["…"])
+        v.addWidget(wbox)
+
+        def _wfill():
+            w2 = getattr(self, "_an_world", {}) or {}
+            rows = [
+                "🌍 Total scans: <b>%s</b>" % self._an_wv("total"),
+                "📅 Aaj: <b>%s</b> · 🟢 Online: <b>%s</b>" % (self._an_wv("today"), self._an_wv("online")),
+                "👥 Users: <b>%s</b>" % self._an_wv("users"),
+                "📥 Import: <b>%s</b> · 🖨 Print: <b>%s</b>" % (self._an_wv("imports"), self._an_wv("prints")),
+            ]
+            wlbl.setText("<br>".join(rows))
+        _wfill()
+
+        note = QtWidgets.QLabel(self.L(
+            "<span style='color:#64748b;font-size:11px;'>Privacy: server par sirf GINTI jaati hai — "
+            "kabhi koi document/naam/file nahi.</span>",
+            "<span style='color:#64748b;font-size:11px;'>Privacy: only counts are sent — "
+            "never any document, name or file.</span>"))
+        note.setTextFormat(QtCore.Qt.RichText); note.setWordWrap(True)
+        v.addWidget(note)
+        v.addStretch(1)
+        row = QtWidgets.QHBoxLayout()
+        bref = QtWidgets.QPushButton(self.L("🔄 Refresh", "🔄 Refresh"))
+        bref.clicked.connect(lambda: (self._an_fetch({"action": "stats"},
+                                                     lambda d: (self._an_apply(d), _wfill()))))
+        bok = QtWidgets.QPushButton("OK"); bok.clicked.connect(dlg.accept)
+        row.addWidget(bref); row.addStretch(1); row.addWidget(bok)
+        v.addLayout(row)
+        # thodi der baad worldwide bhar do (fetch aane par)
+        QtCore.QTimer.singleShot(1500, _wfill)
+        QtCore.QTimer.singleShot(3500, _wfill)
+        dlg.exec_()
 
     def _stats_nam(self):
         """Qt ka apna network manager (main event-loop par — koi thread nahi).
@@ -5564,10 +5718,22 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.stats_box.setToolTip("Click karo \u2014 poora Stats Dashboard khulega.\n"
                                   "Kya-kya dikhe: Settings \u2192 Sidebar stats chuno")
         self.stats_box.setCursor(QtCore.Qt.PointingHandCursor)
-        # Analytics HATA diya gaya — stats box + 7-din graph ab sidebar me nahi.
-        self.stats_box.hide()
+        self.stats_box.hide()                 # purana box band
         self.side_graph = SparkBars([0] * 7)
         self.side_graph.hide()
+        # NAYA analytics card (personal + worldwide)
+        self.an_box = QtWidgets.QLabel()
+        self.an_box.setTextFormat(QtCore.Qt.RichText)
+        self.an_box.setStyleSheet(
+            "border:1px solid #cbd5e1;border-radius:8px;padding:8px;"
+            "color:#334155;font-size:12px;background:#f8fafc;")
+        self.an_box.setToolTip(self.L("Click karo — poora Analytics khulega",
+                                      "Click for full Analytics"))
+        self.an_box.setCursor(QtCore.Qt.PointingHandCursor)
+        self.an_box.mousePressEvent = lambda _e: self.show_analytics()
+        pl.addWidget(self.an_box)
+        self._an_world = {}
+        self._an_update_box()
         self.btn_scan = QtWidgets.QPushButton("▶  " + tr("scan", self._lang)); self.btn_scan.setObjectName("primary")
         self.btn_scan.setMinimumHeight(38); self.btn_scan.clicked.connect(self.do_scan); pl.addWidget(self.btn_scan)
         self.btn_scan.setToolTip("Scan shuru karo (F5)")
@@ -5998,7 +6164,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # Ctrl+O = koi folder kholo (sidebar me) · Ctrl+V = clipboard se paste
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+O"), self, self.open_existing_folder)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+V"), self, self._paste_from_clipboard)
-        # (Analytics/stats hata diya gaya — koi stats poll/timer nahi)
+        # NAYA analytics: startup par + har 2 min me worldwide numbers laao,
+        # aur online-ping bhejo
+        QtCore.QTimer.singleShot(1500, self._an_refresh)
+        QtCore.QTimer.singleShot(2500, lambda: self._an_report("ping"))
+        self._an_timer = QtCore.QTimer(self)
+        self._an_timer.setInterval(120000)
+        self._an_timer.timeout.connect(lambda: (self._an_report("ping"), self._an_refresh()))
+        self._an_timer.start()
         # Naya version aaya ho to sidebar me banner dikhao — startup par aur
         # phir har 6 ghante (lambi chalti app bhi update dekh legi)
         QtCore.QTimer.singleShot(4000, lambda: self.check_updates(True))
@@ -6314,7 +6487,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if skipped:
             msg += " (%d blank hataye)" % skipped
         self.status.showMessage(msg, 5000)
-        self._report_scan_stat(kept)
+        self._an_report("scan", n=kept)      # worldwide scan-count + refresh
         if self._opts.get("auto_name") and kept:
             self.auto_name_pages()
         if self._opts.get("auto_save") and kept:
@@ -6398,9 +6571,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _on_import_done(self, count):
         if count:
             self.status.showMessage("%d page import ho gaye." % count, 4000)
-            self._pstats_bump(imports=count)     # analytics: import ginti (personal)
-            self._report_event(imports=count)    # worldwide bhi
-            self._update_sidebar_stats()
+            self._pstats_bump(imports=count)     # personal
+            self._an_report("event", imp=count)  # worldwide + refresh
+            self._an_update_box()
             if tesseract_available():
                 self.auto_name_pages()
         else:
@@ -9956,9 +10129,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     self._draw_fit(painter, p, target)
         finally:
             painter.end()
-        self._pstats_bump(prints=1)          # analytics: print ginti (personal)
-        self._report_event(prints=1)         # worldwide bhi
-        self._update_sidebar_stats()
+        self._pstats_bump(prints=1)          # personal
+        self._an_report("event", prt=1)      # worldwide + refresh
+        self._an_update_box()
         self.status.showMessage("Print bhej diya.", 4000)
 
     def print_all(self):
