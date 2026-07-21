@@ -131,14 +131,22 @@ def _configure_tesseract():
         pass
 
 
+_TESS_OK = None      # cache: get_tesseract_version() har baar tesseract.exe ko
+                     # subprocess me chalata hai (~0.5-2s) — isse UI atak jati
+                     # thi (khaaskar rename ke baad). Ek baar check, phir yaad.
 def tesseract_available():
+    global _TESS_OK
+    if _TESS_OK is not None:
+        return _TESS_OK
     if not HAS_OCR_LIBS:
+        _TESS_OK = False
         return False
     try:
         pytesseract.get_tesseract_version()
-        return True
+        _TESS_OK = True
     except Exception:
-        return False
+        _TESS_OK = False
+    return _TESS_OK
 
 
 _configure_tesseract()
@@ -164,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "66"
+VERSION = "67"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -6304,6 +6312,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # Ctrl+O = koi folder kholo (sidebar me) · Ctrl+V = clipboard se paste
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+O"), self, self.open_existing_folder)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+V"), self, self._paste_from_clipboard)
+        # Tesseract check ko startup par BACKGROUND me warm kar do (ye tesseract.exe
+        # subprocess chalata hai ~1-2s) — taaki baad me koi bhi kaam (rename, scan)
+        # is check par UI thread par ATKE nahi.
+        self._run_bg_quiet(lambda: tesseract_available(), lambda _r: None)
         # NAYA analytics: startup par + har 2 min me worldwide numbers laao,
         # aur online-ping bhejo
         QtCore.QTimer.singleShot(1500, self._an_refresh)
