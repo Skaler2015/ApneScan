@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "34"
+VERSION = "35"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -1362,7 +1362,8 @@ def list_wia_sources():
     return out
 
 
-def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop=None):
+def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop=None,
+                   source="auto"):
     wia_scan_pages.last_duplex_value = getattr(wia_scan_pages, "last_duplex_value", None)
     """Scan via Windows WIA. Kept simple: no forced properties (some drivers
     throw otherwise). Runs inside a thread that has called CoInitialize."""
@@ -1405,6 +1406,24 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
             pass
         return want
 
+    def _has_feeder(dev):
+        # WIA_DPS_DOCUMENT_HANDLING_CAPABILITIES (3086): bit 0x01 = FEEDER.
+        # M1136 jaise flatbed-only MFP me ye bit nahi hota.
+        try:
+            for p in dev.Properties:
+                if int(p.PropertyID) == 3086:
+                    return bool(int(p.Value) & 0x01)
+        except Exception:
+            pass
+        return None   # pata nahi
+
+    def _apply_flatbed(dev):
+        # FLATBED (glass) — ek hi page scan hota hai.
+        try:
+            _wia_set(dev.Properties, 3088, 2)     # DOCUMENT_HANDLING_SELECT = FLATBED
+        except Exception:
+            pass
+
     def _apply_feeder(dev, want_duplex=None):
         # Feeder + (optional) DUPLEX + all pages. HP network drivers use different
         # duplex "select" values, so try a few and keep the first the driver accepts.
@@ -1424,6 +1443,12 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
         except Exception:
             pass
 
+    # FLATBED ya FEEDER? User ne "Glass" chuna, ya device me feeder hai hi nahi
+    # (jaise HP LaserJet M1136 MFP) -> flatbed: SIRF 1 page scan karke ruko.
+    _feeder_cap = _has_feeder(device)
+    flatbed_only = (str(source).lower().startswith("glass")
+                    or _feeder_cap is False)
+
     def _apply_quality(it):
         try:
             props = it.Properties
@@ -1434,7 +1459,10 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
         except Exception:
             pass
 
-    _apply_feeder(device)          # set FEEDER|DUPLEX on the DEVICE first
+    if flatbed_only:
+        _apply_flatbed(device)     # glass: 1 page only
+    else:
+        _apply_feeder(device)      # set FEEDER|DUPLEX on the DEVICE first
     item = device.Items[1]         # enumerate the page item AFTER duplex is active
     _apply_quality(item)
     _props_ok = True
@@ -1473,7 +1501,10 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
                             device2 = info.Connect(); break
                     if device2 is not None:
                         if stage == 0:
-                            _apply_feeder(device2)          # retry: duplex, no quality props
+                            if flatbed_only:
+                                _apply_flatbed(device2)
+                            else:
+                                _apply_feeder(device2)      # retry: duplex, no quality props
                         # stage 1: apply nothing -> guaranteed to scan (single side)
                         item = device2.Items[1]
                 except Exception:
@@ -1499,6 +1530,10 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
         count += 1
         if on_page:
             on_page(img)
+        # FLATBED (glass) me feeder khaali hone ka signal nahi aata — isliye
+        # 1 page ke baad KHUD ruk jao, warna ye baar-baar scan karta rahega.
+        if flatbed_only:
+            break
     if count == 0:
         raise ScannerError("Koi page scan nahi hua (WIA).")
     return count
@@ -2427,7 +2462,8 @@ class ScanWorker(QtCore.QThread):
                 try:
                     wia_scan_pages(self.opts.get("wia_device_id"), self.dpi,
                                    self.pixel_type, self.duplex, _on_page,
-                                   should_stop=self.isInterruptionRequested)
+                                   should_stop=self.isInterruptionRequested,
+                                   source=self.opts.get("paper_source", "auto"))
                 finally:
                     try:
                         _pythoncom.CoUninitialize()
@@ -5773,6 +5809,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 opts[k] = False
         opts = dict(opts)
         opts["page_size"] = self.cmb_pagesize.currentText().strip().lower()
+        # "Feeder (ADF)" / "Glass (Flatbed)" — flatbed par WIA sirf 1 page scan kare
+        opts["paper_source"] = "glass" if self.cmb_source.currentIndex() == 1 else "feeder"
         self._worker = ScanWorker(int(self.winId()), (prof or {}).get("source_name"),
                                   dpi, color, duplex, self._tmpdir, opts)
         self._worker.page_done.connect(self._on_page_scanned)

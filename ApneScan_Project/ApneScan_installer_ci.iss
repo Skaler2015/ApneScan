@@ -3,7 +3,7 @@
 
 [Setup]
 AppName=ApneScan
-AppVersion=34
+AppVersion=35
 AppPublisher=ApneSoft
 AppPublisherURL=https://apnescan.apnesoft.com
 DefaultDirName={autopf}\ApneScan
