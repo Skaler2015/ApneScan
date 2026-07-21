@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "67"
+VERSION = "68"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -10239,8 +10239,26 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._remember_save_dir(out); self._remember_doc_name(out)
             self._record_save(out, npages); self._dirty = False; self._after_save_action(out)
             self.status.showMessage("✔ PDF saved: %s" % out, 8000)
+            self._open_saved_in_panel(out)   # us file ka folder Meri Files panel me khol do
         self._run_bg(job, done,
                      "Saving PDF…" if not ocr else "Creating OCR PDF…")
+
+    def _open_saved_in_panel(self, out):
+        """Document save hote hi uska folder Meri Files panel me khol do aur
+        file ko select kar do (panel chhupa ho to dikha bhi do)."""
+        try:
+            folder = os.path.dirname(out)
+            if not folder or not os.path.isdir(folder):
+                return
+            if hasattr(self, "files_panel") and not self.files_panel.isVisible():
+                self.files_panel.setVisible(True)
+                self._opts["show_files_panel"] = True
+            self._jump_to_folder(folder)
+            idx = self.files_model.index(out)
+            self.files_tree.setCurrentIndex(idx)
+            self.files_tree.scrollTo(idx)
+        except Exception:
+            pass
 
     def save_pdf_password(self):
         paths = self._ordered_paths()
@@ -10268,6 +10286,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._remember_save_dir(out); self._remember_doc_name(out)
             self._record_save(out, npages); self._dirty = False; self._after_save_action(out)
             self.status.showMessage("✔ Password PDF saved: %s" % out, 8000)
+            self._open_saved_in_panel(out)
         self._run_bg(job, done, "Creating password PDF…")
 
     def save_images(self):
