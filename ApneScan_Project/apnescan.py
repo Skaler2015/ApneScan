@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "48"
+VERSION = "49"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -999,15 +999,30 @@ class StatsWorker(QtCore.QThread):
             import urllib.request as U
             import urllib.parse as P
             import json as J
+            import ssl
             q = {"action": self.action, "client": self.client,
                  "v": VERSION, "c": self.country}
             if self.action == "scan":
                 q["n"] = str(self.n)
             full = self.url + ("&" if "?" in self.url else "?") + P.urlencode(q)
             req = U.Request(full, headers={"User-Agent": "ApneScan/%s" % VERSION})
-            r = _urlopen_safe(req, timeout=20)
-            data = J.loads(r.read().decode("utf-8", "ignore"))
-            if data.get("ok"):
+            data = None
+            try:
+                r = _urlopen_safe(req, timeout=20)
+                data = J.loads(r.read().decode("utf-8", "ignore"))
+            except Exception:
+                # ping/stats sirf GINTI padhte hain (idempotent) — isliye kisi
+                # bhi dikkat (SSL/proxy/redirect) par bina-verify dobara try
+                # karo, taaki worldwide stats hamesha aayein. 'scan' ko dobara
+                # nahi bhejte (double-count na ho).
+                if self.action != "scan":
+                    try:
+                        r = U.urlopen(req, timeout=25,
+                                      context=ssl._create_unverified_context())
+                        data = J.loads(r.read().decode("utf-8", "ignore"))
+                    except Exception:
+                        data = None
+            if data and data.get("ok"):
                 self.got.emit(int(data.get("total", 0)),
                               int(data.get("today", 0)),
                               int(data.get("online", 0)))
