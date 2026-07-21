@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "76"
+VERSION = "77"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -3343,6 +3343,398 @@ class PreviewDialog(QtWidgets.QDialog):
             super().keyPressEvent(e)
 
 
+class _EditorCanvas(QtWidgets.QLabel):
+    """Editor ka canvas — mouse ka kaam editor ko de deta hai, aur upar
+    rubber-band / arrow / corner overlay khud kheenchta hai."""
+    def __init__(self, editor):
+        super().__init__()
+        self.ed = editor
+        self.setMouseTracking(True)
+        self.setStyleSheet("background:#fff;")
+
+    def mousePressEvent(self, e):
+        self.ed._canvas_press(e.pos())
+
+    def mouseMoveEvent(self, e):
+        self.ed._canvas_move(e.pos())
+
+    def mouseReleaseEvent(self, e):
+        self.ed._canvas_release(e.pos())
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        try:
+            self.ed._overlay(self)
+        except Exception:
+            pass
+
+
+class ImageEditor(QtWidgets.QDialog):
+    """Interactive page editor: Crop, Erase, Text, Arrow, Highlight, Perspective
+    fix, page-number, straighten, brightness/contrast — Save page par wapas."""
+    def __init__(self, win, path, on_saved=None):
+        super().__init__(win)
+        self.win = win
+        self.path = path
+        self.on_saved = on_saved
+        L = win.L
+        self.setWindowTitle(L("🎨 Page sudhaar (editor)", "🎨 Page editor"))
+        self.resize(1000, 840)
+        try:
+            self.base = Image.open(path).convert("RGB")
+        except Exception:
+            self.base = Image.new("RGB", (827, 1169), "white")
+        self.bright = 1.0
+        self.contrast = 1.0
+        self.tool = None
+        self._undo = []
+        self._corners = []
+        self._start = None
+        self._cur = None
+        self._erasing = False
+        self._disp_scale = 1.0
+
+        root = QtWidgets.QVBoxLayout(self)
+        # ---- Tool row (checkable, mutually exclusive) ----
+        bar = QtWidgets.QHBoxLayout(); bar.setSpacing(4)
+        self._tool_btns = {}
+        for key, icon, name, tip in (
+            ("crop", "✂", L("Crop", "Crop"), L("Ghseet kar hissa chuno, baaki kat jayega",
+                                               "Drag to keep a region, rest is cropped")),
+            ("erase", "🧽", L("Miṭao", "Erase"), L("Ghseet kar safed karo (daag miṭao)",
+                                                    "Drag to paint white (erase marks)")),
+            ("text", "✍", L("Text", "Text"), L("Click karke likho", "Click to add text")),
+            ("arrow", "➡", L("Teer", "Arrow"), L("Ghseet kar teer banao", "Drag to draw an arrow")),
+            ("box", "🖍", L("Highlight", "Highlight"),
+                L("Ghseet kar peela highlight", "Drag for a yellow highlight box")),
+            ("persp", "📐", L("Seedha (4 kone)", "Perspective (4 corners)"),
+                L("Document ke 4 kone click karo — tirchha seedha ho jayega",
+                  "Click the document's 4 corners — fixes a skewed photo")),
+        ):
+            b = QtWidgets.QToolButton()
+            b.setText(icon + " " + name); b.setToolTip(tip); b.setCheckable(True)
+            b.clicked.connect(lambda _c, t=key: self._set_tool(t))
+            bar.addWidget(b)
+            self._tool_btns[key] = b
+        bar.addStretch(1)
+        root.addLayout(bar)
+        # ---- Action row ----
+        act = QtWidgets.QHBoxLayout(); act.setSpacing(4)
+
+        def act_btn(icon, name, fn, tip=""):
+            b = QtWidgets.QToolButton(); b.setText(icon + " " + name)
+            b.setToolTip(tip or name); b.clicked.connect(fn)
+            act.addWidget(b); return b
+        act_btn("↺", L("Baayen", "Rot L"), lambda: self._rotate90(-90))
+        act_btn("↻", L("Dayen", "Rot R"), lambda: self._rotate90(90))
+        act_btn("📐", L("Auto-seedha", "Straighten"), self._straighten)
+        act_btn("🔢", L("Page number", "Page #"), self._add_page_number,
+                L("Kone me page number lagao", "Stamp a page number in the corner"))
+        act_btn("↶", L("Undo", "Undo"), self._undo_last)
+        act.addStretch(1)
+        # Brightness / Contrast sliders
+        act.addWidget(QtWidgets.QLabel("☀"))
+        self.sl_bright = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.sl_bright.setFixedWidth(90); self.sl_bright.setRange(40, 200); self.sl_bright.setValue(100)
+        self.sl_bright.valueChanged.connect(self._bc_changed)
+        act.addWidget(self.sl_bright)
+        act.addWidget(QtWidgets.QLabel("◐"))
+        self.sl_contrast = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.sl_contrast.setFixedWidth(90); self.sl_contrast.setRange(40, 200); self.sl_contrast.setValue(100)
+        self.sl_contrast.valueChanged.connect(self._bc_changed)
+        act.addWidget(self.sl_contrast)
+        root.addLayout(act)
+        # ---- Canvas ----
+        self.canvas = _EditorCanvas(self)
+        self.canvas.setAlignment(QtCore.Qt.AlignCenter)
+        self.scroll = QtWidgets.QScrollArea(); self.scroll.setWidgetResizable(False)
+        self.scroll.setAlignment(QtCore.Qt.AlignCenter); self.scroll.setWidget(self.canvas)
+        self.scroll.setStyleSheet("background:#334155;")
+        root.addWidget(self.scroll, 1)
+        # ---- Bottom: hint + Save/Close ----
+        bot = QtWidgets.QHBoxLayout()
+        self.hint = QtWidgets.QLabel(L("Upar se ek tool chuno (Crop/Miṭao/Text…).",
+                                       "Pick a tool above (Crop/Erase/Text…)."))
+        self.hint.setStyleSheet("color:#64748b;font-size:12px;")
+        bot.addWidget(self.hint, 1)
+        bsave = QtWidgets.QPushButton(L("💾 Save (page par lagao)", "💾 Save to page"))
+        bsave.setObjectName("primary"); bsave.clicked.connect(self._save)
+        bclose = QtWidgets.QPushButton(L("✖ Band", "✖ Close")); bclose.clicked.connect(self.reject)
+        bot.addWidget(bsave); bot.addWidget(bclose)
+        root.addLayout(bot)
+        QtCore.QTimer.singleShot(0, self._render)
+
+    # ---- helpers ----
+    def _pil_to_qpix(self, im):
+        im = im.convert("RGB")
+        data = im.tobytes("raw", "RGB")
+        qim = QtGui.QImage(data, im.width, im.height, 3 * im.width,
+                           QtGui.QImage.Format_RGB888)
+        return QtGui.QPixmap.fromImage(qim.copy())
+
+    def _composited(self):
+        im = self.base
+        if abs(self.bright - 1.0) > 0.001:
+            im = ImageEnhance.Brightness(im).enhance(self.bright)
+        if abs(self.contrast - 1.0) > 0.001:
+            im = ImageEnhance.Contrast(im).enhance(self.contrast)
+        return im
+
+    def _render(self):
+        img = self._composited()
+        w, h = img.size
+        maxw, maxh = 940, 660
+        s = min(maxw / float(w), maxh / float(h), 1.0)
+        dw, dh = max(1, int(w * s)), max(1, int(h * s))
+        self._disp_scale = w / float(dw)
+        self.canvas.setPixmap(self._pil_to_qpix(img.resize((dw, dh))))
+        self.canvas.setFixedSize(dw, dh)
+        self.canvas.update()
+
+    def _set_tool(self, t):
+        self.tool = t
+        for k, b in self._tool_btns.items():
+            b.setChecked(k == t)
+        self._corners = []
+        tips = {
+            "crop": self.win.L("✂ Ghseet kar rakhne wala hissa chuno.",
+                               "✂ Drag to select the area to keep."),
+            "erase": self.win.L("🧽 Ghseet kar safed karo (daag miṭao).",
+                                "🧽 Drag to paint white over marks."),
+            "text": self.win.L("✍ Jahan likhna hai wahan click karo.",
+                               "✍ Click where you want to add text."),
+            "arrow": self.win.L("➡ Ghseet kar teer banao.", "➡ Drag to draw an arrow."),
+            "box": self.win.L("🖍 Ghseet kar peela highlight banao.",
+                              "🖍 Drag to make a yellow highlight."),
+            "persp": self.win.L("📐 Document ke 4 kone click karo (ek-ek karke).",
+                                "📐 Click the 4 corners of the document, one by one."),
+        }
+        self.hint.setText(tips.get(t, ""))
+
+    def _bc_changed(self, _v):
+        self.bright = self.sl_bright.value() / 100.0
+        self.contrast = self.sl_contrast.value() / 100.0
+        self._render()
+
+    def _bake(self):
+        """Abhi tak ka roop (brightness/contrast sameto) 'base' me pakka karo,
+        undo ke liye snapshot rakho."""
+        self._undo.append(self.base.copy())
+        if len(self._undo) > 12:
+            self._undo.pop(0)
+        if abs(self.bright - 1.0) > 0.001 or abs(self.contrast - 1.0) > 0.001:
+            self.base = self._composited()
+            self.bright = self.contrast = 1.0
+            for s in (self.sl_bright, self.sl_contrast):
+                s.blockSignals(True); s.setValue(100); s.blockSignals(False)
+
+    def _d2i(self, pt):
+        """Display (canvas) coord -> image coord."""
+        x = int(max(0, min(self.base.width, pt.x() * self._disp_scale)))
+        y = int(max(0, min(self.base.height, pt.y() * self._disp_scale)))
+        return x, y
+
+    # ---- mouse ----
+    def _canvas_press(self, pos):
+        if self.tool in ("crop", "arrow", "box"):
+            self._start = pos; self._cur = pos
+        elif self.tool == "erase":
+            self._bake(); self._erasing = True; self._erase_at(pos)
+        elif self.tool == "text":
+            self._place_text(pos)
+        elif self.tool == "persp":
+            self._corners.append(pos)
+            if len(self._corners) >= 4:
+                self._apply_perspective()
+            self.canvas.update()
+
+    def _canvas_move(self, pos):
+        if self._start and self.tool in ("crop", "arrow", "box"):
+            self._cur = pos; self.canvas.update()
+        elif self._erasing and self.tool == "erase":
+            self._erase_at(pos)
+
+    def _canvas_release(self, pos):
+        if self._start and self.tool == "crop":
+            self._apply_crop(self._start, pos)
+        elif self._start and self.tool == "arrow":
+            self._apply_arrow(self._start, pos)
+        elif self._start and self.tool == "box":
+            self._apply_box(self._start, pos)
+        self._start = self._cur = None
+        self._erasing = False
+        self.canvas.update()
+
+    def _overlay(self, canvas):
+        if not (self._start and self._cur) and not self._corners:
+            return
+        p = QtGui.QPainter(canvas)
+        if self._start and self._cur:
+            pen = QtGui.QPen(QtGui.QColor("#ef4444")); pen.setWidth(2); p.setPen(pen)
+            if self.tool == "arrow":
+                p.drawLine(self._start, self._cur)
+            else:
+                p.drawRect(QtCore.QRect(self._start, self._cur).normalized())
+        for c in self._corners:
+            p.setBrush(QtGui.QColor("#22c55e")); p.setPen(QtCore.Qt.NoPen)
+            p.drawEllipse(c, 5, 5)
+        p.end()
+
+    # ---- operations (base par, undo ke saath) ----
+    def _erase_at(self, pos):
+        x, y = self._d2i(pos)
+        r = max(6, int(12 * self._disp_scale))
+        d = ImageDraw.Draw(self.base)
+        d.ellipse([x - r, y - r, x + r, y + r], fill=(255, 255, 255))
+        self._render()
+
+    def _apply_crop(self, a, b):
+        x0, y0 = self._d2i(a); x1, y1 = self._d2i(b)
+        x0, x1 = sorted((x0, x1)); y0, y1 = sorted((y0, y1))
+        if x1 - x0 < 8 or y1 - y0 < 8:
+            return
+        self._bake()
+        self.base = self.base.crop((x0, y0, x1, y1))
+        self._render()
+
+    def _apply_arrow(self, a, b):
+        if (a - b).manhattanLength() < 6:
+            return
+        self._bake()
+        x0, y0 = self._d2i(a); x1, y1 = self._d2i(b)
+        w = max(3, int(self.base.width / 300))
+        d = ImageDraw.Draw(self.base)
+        d.line([x0, y0, x1, y1], fill=(220, 20, 20), width=w)
+        import math
+        ang = math.atan2(y1 - y0, x1 - x0)
+        hl = w * 6
+        for da in (math.pi - 0.5, math.pi + 0.5):
+            hx = x1 + int(hl * math.cos(ang + da))
+            hy = y1 + int(hl * math.sin(ang + da))
+            d.line([x1, y1, hx, hy], fill=(220, 20, 20), width=w)
+        self._render()
+
+    def _apply_box(self, a, b):
+        x0, y0 = self._d2i(a); x1, y1 = self._d2i(b)
+        x0, x1 = sorted((x0, x1)); y0, y1 = sorted((y0, y1))
+        if x1 - x0 < 6 or y1 - y0 < 6:
+            return
+        self._bake()
+        ov = Image.new("RGBA", self.base.size, (0, 0, 0, 0))
+        ImageDraw.Draw(ov).rectangle([x0, y0, x1, y1], fill=(255, 235, 59, 90))
+        self.base = Image.alpha_composite(self.base.convert("RGBA"), ov).convert("RGB")
+        self._render()
+
+    def _place_text(self, pos):
+        txt, ok = QtWidgets.QInputDialog.getText(
+            self, self.win.L("Text likho", "Add text"),
+            self.win.L("Is jagah kya likhein?", "Text to place here:"))
+        if not ok or not txt.strip():
+            return
+        self._bake()
+        x, y = self._d2i(pos)
+        size = max(16, int(self.base.width / 28))
+        font = None
+        for fn in ("arial.ttf", "DejaVuSans.ttf", "Arial.ttf"):
+            try:
+                font = ImageFont.truetype(fn, size); break
+            except Exception:
+                font = None
+        if font is None:
+            try:
+                font = ImageFont.load_default()
+            except Exception:
+                font = None
+        ImageDraw.Draw(self.base).text((x, y), txt, fill=(200, 20, 20), font=font)
+        self._render()
+
+    def _add_page_number(self):
+        self._bake()
+        try:
+            n = self.win.list.currentRow() + 1
+            total = self.win.list.count()
+            label = "%d / %d" % (n, total)
+        except Exception:
+            label = "1"
+        size = max(16, int(self.base.width / 32))
+        font = None
+        for fn in ("arial.ttf", "DejaVuSans.ttf"):
+            try:
+                font = ImageFont.truetype(fn, size); break
+            except Exception:
+                font = None
+        if font is None:
+            font = ImageFont.load_default()
+        d = ImageDraw.Draw(self.base)
+        x = self.base.width - int(size * 5)
+        y = self.base.height - int(size * 2)
+        d.text((x, y), label, fill=(60, 60, 60), font=font)
+        self._render()
+
+    def _apply_perspective(self):
+        pts = [self._d2i(c) for c in self._corners[:4]]
+        self._corners = []
+        try:
+            import math
+            (tl, tr, br, bl) = pts     # user clicks: TL, TR, BR, BL
+            def dist(a, b):
+                return math.hypot(a[0] - b[0], a[1] - b[1])
+            ow = int(max(dist(tl, tr), dist(bl, br)))
+            oh = int(max(dist(tl, bl), dist(tr, br)))
+            if ow < 10 or oh < 10:
+                self._render(); return
+            self._bake()
+            # PIL QUAD: output rect corners UL,LL,LR,UR -> source quad
+            quad = (tl[0], tl[1], bl[0], bl[1], br[0], br[1], tr[0], tr[1])
+            self.base = self.base.transform((ow, oh), Image.QUAD, quad, Image.BILINEAR)
+        except Exception:
+            pass
+        self._render()
+
+    def _rotate90(self, ang):
+        self._bake()
+        self.base = self.base.rotate(-ang, expand=True)
+        self._render()
+
+    def _straighten(self):
+        self._bake()
+        try:
+            self.base = deskew(self.base).convert("RGB")
+        except Exception:
+            pass
+        self._render()
+
+    def _undo_last(self):
+        if not self._undo:
+            return
+        self.base = self._undo.pop()
+        self.bright = self.contrast = 1.0
+        for s in (self.sl_bright, self.sl_contrast):
+            s.blockSignals(True); s.setValue(100); s.blockSignals(False)
+        self._render()
+
+    def _save(self):
+        img = self._composited()
+        try:
+            img.save(self.path, "PNG")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, APP_NAME, str(e)); return
+        if callable(self.on_saved):
+            try:
+                self.on_saved()
+            except Exception:
+                pass
+        self.accept()
+
+    def keyPressEvent(self, e):
+        if e.key() == QtCore.Qt.Key_Escape:
+            self.reject()
+        elif e.key() == QtCore.Qt.Key_Z and (e.modifiers() & QtCore.Qt.ControlModifier):
+            self._undo_last()
+        else:
+            super().keyPressEvent(e)
+
+
 class CameraDialog(QtWidgets.QDialog):
     """Webcam/USB-camera se document capture — scanner na ho to bhi PDF banao.
     Capture ki gayi har photo apne aap saaf (shadow hatana/seedha) hoti hai."""
@@ -4700,7 +5092,36 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 and (ev.modifiers() & QtCore.Qt.ControlModifier)):
             self._pv_do_zoom(1.2 if ev.angleDelta().y() > 0 else 0.83)
             return True
+        # Loupe (kaanch): preview image par maus le jao to zoom-jhalak
+        if (getattr(self, "_pv_loupe_on", False) and hasattr(self, "pv_img")
+                and obj is self.pv_img):
+            if ev.type() == QtCore.QEvent.MouseMove:
+                self._pv_loupe_at(ev)
+                return False
+            elif ev.type() == QtCore.QEvent.Leave:
+                if hasattr(self, "_pv_loupe"):
+                    self._pv_loupe.hide()
         return super().eventFilter(obj, ev)
+
+    def _pv_loupe_at(self, ev):
+        """Maus ke neeche ke hisse ko bada karke dikhao (loupe)."""
+        try:
+            pm = self.pv_img.pixmap()
+            if pm is None or pm.isNull():
+                return
+            pos = ev.pos()
+            src = 60          # kitna area uthana (px)
+            x = max(0, min(pm.width() - src, pos.x() - src // 2))
+            y = max(0, min(pm.height() - src, pos.y() - src // 2))
+            crop = pm.copy(x, y, src, src).scaled(180, 180,
+                       QtCore.Qt.KeepAspectRatio, QtCore.Qt.FastTransformation)
+            self._pv_loupe.setPixmap(crop)
+            self._pv_loupe.resize(crop.size())
+            gp = self.pv_img.mapToGlobal(pos)
+            self._pv_loupe.move(gp.x() + 16, gp.y() + 16)
+            self._pv_loupe.show()
+        except Exception:
+            pass
 
     def dragEnterEvent(self, e):
         if e.mimeData().hasUrls():
@@ -6403,11 +6824,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
              ("🖼️", _L("Restore", "Restore"), _L("Purani photo saaf", "Restore photo"), self.restore_photo_current, "purple"),
              ("✍️", _L("Sign", "Sign"), _L("Sign/stamp lagao", "Add sign/stamp"), self.place_sign, "purple"),
              ("🆔", _L("ID alag", "Split ID"), _L("ID cards alag karo", "Split ID cards"), self.split_id_cards, "purple")),
-            (("✏️", _L("Rename", "Rename"), _L("Naam sikhao", "Rename"), self.rename_current_page, "slate"),
+            (("🎨", _L("Editor", "Editor"), _L("Crop/miṭao/text/teer/seedha…", "Crop/erase/text/arrow/perspective…"), self._pv_open_image_editor, "purple"),
+             ("✏️", _L("Rename", "Rename"), _L("Naam sikhao", "Rename"), self.rename_current_page, "slate"),
              ("⧉", _L("Copy", "Duplicate"), _L("Is page ki nakal", "Duplicate this page"), self.duplicate_current_page, "slate"),
              ("↶", _L("Undo", "Undo"), _L("Aakhri sudhaar wapas", "Undo last edit"), self._pv_undo, "slate"),
              ("🗑️", _L("Delete", "Delete"), _L("Ye page hatao", "Delete this page"), self.delete_page, "slate"),
-             ("⋯", _L("Aur", "More"), _L("Print/share/khaali-check/Editor…", "Print/share/blank-check/Editor…"), self._pv_more_menu, "slate")),
+             ("⋯", _L("Aur", "More"), _L("Compare/loupe/slideshow/save-as/print…", "Compare/loupe/slideshow/save-as/print…"), self._pv_more_menu, "slate")),
         ):
             _qe = QtWidgets.QHBoxLayout(); _qe.setSpacing(4)
             for _ic, _lb, _tip, _fn, _g in _rowdef:
@@ -9257,19 +9679,26 @@ class ScannerWindow(QtWidgets.QMainWindow):
             szt = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024))
             self.pv_info.setText("%s · %s · %dx%d" %
                                  (name, szt, self._pv_pm.width(), self._pv_pm.height()))
-            # Info tab
-            mode = "-"
+            # Info tab (mode · DPI · tareekh bhi)
+            mode = "-"; dpi = None
             try:
                 with Image.open(path) as im:
                     mode = {"1": "Black & White", "L": "Grayscale", "RGB": "Colour",
                             "RGBA": "Colour"}.get(im.mode, im.mode)
+                    dpi = im.info.get("dpi")
             except Exception:
                 pass
+            try:
+                mt = datetime.datetime.fromtimestamp(os.path.getmtime(path))
+                dt = mt.strftime("%d %b %Y, %I:%M %p")
+            except Exception:
+                dt = "-"
+            dpitxt = ("%d dpi" % int(dpi[0])) if (dpi and dpi[0]) else "—"
             self.pv_info2.setText(
-                "<b>%s</b><br>📄 Page %d / %d<br>📐 %d × %d px<br>🎨 %s<br>💾 %s<br>"
-                "<span style='color:#94a3b8'>%s</span>"
+                "<b>%s</b><br>📄 Page %d / %d<br>📐 %d × %d px<br>🖨 %s<br>🎨 %s<br>"
+                "💾 %s<br>🕒 %s<br><span style='color:#94a3b8'>%s</span>"
                 % (name, row + 1, n, self._pv_pm.width(), self._pv_pm.height(),
-                   mode, szt, path))
+                   dpitxt, mode, szt, dt, path))
             # Text tab: purana text mita do (naya sirf 'Text padho' par)
             self.pv_text.setPlainText("")
         except Exception:
@@ -9550,10 +9979,26 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     def _pv_more_menu(self):
         m = QtWidgets.QMenu(self)
+        m.addAction(self.L("🎨 Sudhaar editor (crop/miṭao/text/teer…)",
+                           "🎨 Edit (crop/erase/text/arrow…)"), self._pv_open_image_editor)
         m.addAction(self.L("🔍 Bade editor me kholo", "🔍 Open big editor"), self._pv_open_editor)
         m.addAction(self.L("🎨 Rang wapas (RGB)", "🎨 Back to colour (RGB)"),
                     lambda: self._to_mode("RGB"))
         m.addSeparator()
+        m.addAction(self.L("↕ Do page saath-saath (compare)", "↕ Compare two pages side by side"),
+                    self._pv_compare)
+        m.addAction(self.L("🔎 Loupe (kaanch) on/off", "🔎 Loupe (magnifier) on/off"),
+                    self._pv_toggle_loupe)
+        m.addAction(self.L("▶ Slideshow (auto page)", "▶ Slideshow (auto-advance)"),
+                    self._pv_slideshow)
+        m.addSeparator()
+        m.addAction(self.L("⬆ Ye page upar karo", "⬆ Move page up"), lambda: self._pv_move(-1))
+        m.addAction(self.L("⬇ Ye page niche karo", "⬇ Move page down"), lambda: self._pv_move(1))
+        m.addSeparator()
+        m.addAction(self.L("📤 Ye page alag save (JPG/PDF)…", "📤 Save this page as (JPG/PDF)…"),
+                    self._pv_save_as)
+        m.addAction(self.L("📋 Is page ki image copy (paste ke liye)",
+                           "📋 Copy this page's image (to paste)"), self._pv_copy_image)
         m.addAction(self.L("🖨 Sirf ye page print karo", "🖨 Print only this page"),
                     self._print_this_page)
         m.addAction(self.L("🟢 Ye page WhatsApp/Email (PDF banakar)", "🟢 Share this page (as PDF)"),
@@ -9562,6 +10007,140 @@ class ScannerWindow(QtWidgets.QMainWindow):
         m.addAction(self.L("📭 Ye page khaali hai kya?", "📭 Is this page blank?"),
                     self._check_blank_page)
         m.exec_(QtGui.QCursor.pos())
+
+    def _pv_open_image_editor(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        path = item.data(QtCore.Qt.UserRole)
+        self._pv_backup([path])
+
+        def _saved():
+            try:
+                self._refresh_item(self.list.currentItem())
+                self._pv_build_filmstrip()
+                self._update_preview_panel()
+                self._dirty = True
+            except Exception:
+                pass
+        ImageEditor(self, path, on_saved=_saved).exec_()
+
+    def _pv_move(self, direction):
+        """Current page ko upar/niche (list me) le jao — crop bigade bina."""
+        row = self.list.currentRow()
+        if row < 0:
+            return
+        new = row + direction
+        if new < 0 or new >= self.list.count():
+            return
+        it = self.list.takeItem(row)
+        self.list.insertItem(new, it)
+        self.list.setCurrentItem(it)
+        self._dirty = True
+        try:
+            self._pv_build_filmstrip()
+            self._update_preview_panel()
+        except Exception:
+            pass
+
+    def _pv_save_as(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        src = item.data(QtCore.Qt.UserRole)
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("Ye page kaha save?", "Save this page as"),
+            os.path.join(self._opts.get("save_folder", os.path.expanduser("~")), "page.pdf"),
+            "PDF (*.pdf);;JPEG (*.jpg);;PNG (*.png)")
+        if not out:
+            return
+        try:
+            ext = os.path.splitext(out)[1].lower()
+            if ext == ".pdf":
+                self._pages_as_pdf([src], out)
+            else:
+                with Image.open(src) as im:
+                    im.convert("RGB").save(out, quality=92)
+            self.status.showMessage(self.L("📤 Save ho gaya: ", "📤 Saved: ")
+                                    + os.path.basename(out), 6000)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _pv_copy_image(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        try:
+            pm = QtGui.QPixmap(item.data(QtCore.Qt.UserRole))
+            if not pm.isNull():
+                QtWidgets.QApplication.clipboard().setPixmap(pm)
+                self.status.showMessage(self.L("📋 Image copy ho gayi — kahin bhi paste karo",
+                                               "📋 Image copied — paste it anywhere"), 5000)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _pv_compare(self):
+        """Current + agla page saath-saath dikhao (pehle-baad milaan)."""
+        row = self.list.currentRow()
+        if row < 0 or self.list.count() < 2:
+            self._warn(self.L("Kam se kam 2 page chahiye.", "Need at least 2 pages."))
+            return
+        other = row + 1 if row + 1 < self.list.count() else row - 1
+        p1 = self.list.item(row).data(QtCore.Qt.UserRole)
+        p2 = self.list.item(other).data(QtCore.Qt.UserRole)
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("↕ Do page saath-saath", "↕ Compare pages"))
+        dlg.resize(1000, 720)
+        h = QtWidgets.QHBoxLayout(dlg)
+        for pth, cap in ((p1, "Page %d" % (row + 1)), (p2, "Page %d" % (other + 1))):
+            col = QtWidgets.QVBoxLayout()
+            lb = QtWidgets.QLabel(cap); lb.setAlignment(QtCore.Qt.AlignCenter)
+            lb.setStyleSheet("font-weight:700;")
+            img = QtWidgets.QLabel(); img.setAlignment(QtCore.Qt.AlignCenter)
+            pm = QtGui.QPixmap(pth)
+            if not pm.isNull():
+                img.setPixmap(pm.scaled(460, 640, QtCore.Qt.KeepAspectRatio,
+                                        QtCore.Qt.SmoothTransformation))
+            sc = QtWidgets.QScrollArea(); sc.setWidgetResizable(True); sc.setWidget(img)
+            col.addWidget(lb); col.addWidget(sc, 1)
+            h.addLayout(col, 1)
+        dlg.exec_()
+
+    def _pv_toggle_loupe(self):
+        self._pv_loupe_on = not getattr(self, "_pv_loupe_on", False)
+        if self._pv_loupe_on:
+            self.pv_img.setMouseTracking(True)
+            if not getattr(self, "_pv_loupe_installed", False):
+                self.pv_img.installEventFilter(self)
+                self._pv_loupe_installed = True
+            if not hasattr(self, "_pv_loupe"):
+                self._pv_loupe = QtWidgets.QLabel(self)
+                self._pv_loupe.setWindowFlags(QtCore.Qt.ToolTip)
+                self._pv_loupe.setStyleSheet("border:2px solid #0f766e;background:#fff;")
+            self.status.showMessage(self.L("🔎 Loupe ON — image par maus le jao",
+                                           "🔎 Loupe ON — hover over the image"), 4000)
+        else:
+            if hasattr(self, "_pv_loupe"):
+                self._pv_loupe.hide()
+            self.status.showMessage(self.L("🔎 Loupe OFF", "🔎 Loupe OFF"), 3000)
+
+    def _pv_slideshow(self):
+        if getattr(self, "_pv_slide_timer", None) and self._pv_slide_timer.isActive():
+            self._pv_slide_timer.stop()
+            self.status.showMessage(self.L("▶ Slideshow band", "▶ Slideshow stopped"), 3000)
+            return
+        self._pv_slide_timer = QtCore.QTimer(self)
+        self._pv_slide_timer.setInterval(2000)
+
+        def _tick():
+            if self.list.count() < 2:
+                self._pv_slide_timer.stop(); return
+            r = (self.list.currentRow() + 1) % self.list.count()
+            self.list.setCurrentRow(r)
+        self._pv_slide_timer.timeout.connect(_tick)
+        self._pv_slide_timer.start()
+        self.status.showMessage(self.L("▶ Slideshow chalu (dobara dabao = band)",
+                                       "▶ Slideshow running (tap again to stop)"), 4000)
 
     def _print_this_page(self):
         item = self._current_item_or_warn()
