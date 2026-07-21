@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "26"
+VERSION = "27"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -2425,27 +2425,48 @@ class EditProfileDialog(QtWidgets.QDialog):
         self.profile = dict(profile) if profile else {
             "name": "", "source_name": None, "dpi": 200, "color": "gray", "duplex": False}
         form = QtWidgets.QFormLayout(self)
+
+        def qh(text, tip):
+            # "?" help-icon wala row-label (Hindi + English hover)
+            h = QtWidgets.QLabel("?")
+            h.setToolTip(tip); h.setCursor(QtCore.Qt.WhatsThisCursor)
+            h.setStyleSheet("QLabel{color:#0f766e;border:1px solid #0f766e;border-radius:9px;"
+                            "min-width:18px;max-width:18px;min-height:18px;max-height:18px;"
+                            "font-weight:bold;qproperty-alignment:AlignCenter;}")
+            r = QtWidgets.QHBoxLayout(); r.setContentsMargins(0, 0, 0, 0); r.setSpacing(6)
+            r.addWidget(QtWidgets.QLabel(text)); r.addWidget(h); r.addStretch(1)
+            w = QtWidgets.QWidget(); w.setLayout(r); return w
         self.name_edit = QtWidgets.QLineEdit(self.profile.get("name", ""))
         self.name_edit.setPlaceholderText("jaise: Documents fast")
-        form.addRow("Display Name:", self.name_edit)
+        self.name_edit.setToolTip("हिन्दी: Is profile ka naam (jaise 'Fast B&W', 'Colour A4'). Toolbar me isi naam se chunoge.\nEnglish: A name for this profile (e.g. 'Fast B&W'); you'll pick it by this name.")
+        form.addRow(qh("Display Name:", self.name_edit.toolTip()), self.name_edit)
         dev_row = QtWidgets.QHBoxLayout()
         self.device_label = QtWidgets.QLabel(self.profile.get("source_name") or "(koi device nahi)")
         btn_dev = QtWidgets.QPushButton("Choose device")
         btn_dev.clicked.connect(self._choose_device)
         dev_row.addWidget(self.device_label, 1); dev_row.addWidget(btn_dev)
         dw = QtWidgets.QWidget(); dw.setLayout(dev_row)
-        form.addRow("Device:", dw)
+        form.addRow(qh("Device:", "हिन्दी: Kaunsa scanner is profile me use hoga (TWAIN device chuno).\nEnglish: Which scanner this profile uses (choose a TWAIN device)."), dw)
         self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.addItems(RESOLUTIONS)
         self.cmb_dpi.setCurrentText(str(self.profile.get("dpi", 200)))
-        form.addRow("Resolution (DPI):", self.cmb_dpi)
+        form.addRow(qh("Resolution (DPI):", "हिन्दी: Scan ki safai. 200 = tez aur text ke liye theek; 300 = behtar (dhima); 600 = photo ke liye.\nEnglish: Scan sharpness. 200 = fast, fine for text; 300 = better (slower); 600 = for photos."), self.cmb_dpi)
         self.cmb_color = QtWidgets.QComboBox(); self.cmb_color.addItems(list(COLOUR_MODES.keys()))
         for label, code in COLOUR_MODES.items():
             if code == self.profile.get("color", "gray"):
                 self.cmb_color.setCurrentText(label)
-        form.addRow("Colour mode:", self.cmb_color)
+        form.addRow(qh("Colour mode:", "हिन्दी: Rangeen = colour, Grayscale = kaala-safed shades, B&W = sirf kaala/safed (sabse chhoti file, tez).\nEnglish: Colour, Grayscale, or pure Black & White (smallest & fastest)."), self.cmb_color)
         self.chk_duplex = QtWidgets.QCheckBox("Duplex (dono taraf)")
         self.chk_duplex.setChecked(bool(self.profile.get("duplex")))
-        form.addRow("", self.chk_duplex)
+        self.chk_duplex.setToolTip("हिन्दी: ON: kaagaz ke dono taraf apne aap scan (duplex ADF scanner me).\nEnglish: ON: scan both sides of the paper automatically (duplex ADF).")
+        _dxr = QtWidgets.QHBoxLayout(); _dxr.setContentsMargins(0, 0, 0, 0); _dxr.setSpacing(6)
+        _dxh = QtWidgets.QLabel("?"); _dxh.setToolTip(self.chk_duplex.toolTip())
+        _dxh.setCursor(QtCore.Qt.WhatsThisCursor)
+        _dxh.setStyleSheet("QLabel{color:#0f766e;border:1px solid #0f766e;border-radius:9px;"
+                           "min-width:18px;max-width:18px;min-height:18px;max-height:18px;"
+                           "font-weight:bold;qproperty-alignment:AlignCenter;}")
+        _dxr.addWidget(self.chk_duplex); _dxr.addWidget(_dxh); _dxr.addStretch(1)
+        _dxw = QtWidgets.QWidget(); _dxw.setLayout(_dxr)
+        form.addRow("", _dxw)
         self.cmb_psize = QtWidgets.QComboBox()
         self._PSIZES = [("Auto (alag-alag size khud pakde)", "auto"),
                         ("A4 (210x297 mm)", "a4"), ("Letter", "letter"),
@@ -2455,7 +2476,7 @@ class EditProfileDialog(QtWidgets.QDialog):
         _ps = (self.profile.get("page_size") or "auto").lower()
         _idx = next((k for k, (_t, c) in enumerate(self._PSIZES) if _ps.startswith(c[:4])), 0)
         self.cmb_psize.setCurrentIndex(_idx)
-        form.addRow("Page size:", self.cmb_psize)
+        form.addRow(qh("Page size:", "हिन्दी: Auto = har page ki asli size khud pakde (mixed/ID/aadha page bhi poora). A4/Letter/Legal/A5 = fixed. Custom = lambi parchi (length Settings me).\nEnglish: Auto = detect each page's real size; A4/Letter/Legal/A5 = fixed; Custom = long receipts."), self.cmb_psize)
         btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         btns.accepted.connect(self._ok); btns.rejected.connect(self.reject)
         form.addRow(btns)
@@ -3295,16 +3316,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
                  "हिन्दी: Page ke text ko padh kar .txt me nikaalo (OCR).\nEnglish: Extract page text to .txt via OCR.")
         pmenu = mf.addMenu("Print")
         pmenu.setToolTipsVisible(True)
-        pmenu.addAction("All print (sabhi pages)", self.print_all)
-        pmenu.addAction("Selected print (chune hue)", self.print_selected)
-        pmenu.addAction("ID print (2 ID ek page par)", self.print_ids)
-        pmenu.addAction("ID print - sirf selected", self.print_ids_selected)
+        self._ma(pmenu, "All print (sabhi pages)", self.print_all,
+                 "हिन्दी: Saare pages print karo.\nEnglish: Print all pages.")
+        self._ma(pmenu, "Selected print (chune hue)", self.print_selected,
+                 "हिन्दी: Sirf chune hue (Ctrl/Shift se) pages print karo.\nEnglish: Print only the selected pages.")
+        self._ma(pmenu, "ID print (2 ID ek page par)", self.print_ids,
+                 "हिन्दी: ID cards ko ek A4 page par 2-2 karke print karo (kaagaz bachega).\nEnglish: Print ID cards two-per-A4-sheet to save paper.")
+        self._ma(pmenu, "ID print - sirf selected", self.print_ids_selected,
+                 "हिन्दी: Sirf chune hue IDs ko 2-per-page print karo.\nEnglish: Print only selected IDs, two per sheet.")
         shmenu = mf.addMenu("Share / Bhejo")
         shmenu.setToolTipsVisible(True)
-        shmenu.addAction("WhatsApp par bhejo…", self.share_whatsapp)
-        shmenu.addAction("Email se bhejo…", self.share_email)
+        self._ma(shmenu, "WhatsApp par bhejo…", self.share_whatsapp,
+                 "हिन्दी: Aakhri save ki hui PDF WhatsApp par bhejo (file copy ho jati hai, chat me Ctrl+V ya drag se attach).\nEnglish: Send the last saved PDF via WhatsApp (file is copied; paste or drag into the chat).")
+        self._ma(shmenu, "Email se bhejo…", self.share_email,
+                 "हिन्दी: PDF ko Email se bhejo (Outlook ho to attachment ke saath draft khulta hai).\nEnglish: Send the PDF by Email (opens an Outlook draft with the attachment if available).")
         self.recent_menu = mf.addMenu("Recent PDFs")
-        mf.addSeparator(); mf.addAction("Exit", self.close)
+        self.recent_menu.setToolTipsVisible(True)
+        mf.addSeparator()
+        self._ma(mf, "Exit", self.close, "हिन्दी: App band karo. (Bina save kiye pages hon to chetavni aayegi.)\nEnglish: Close the app. (Warns if there are unsaved pages.)")
 
         me = mb.addMenu(tr("menu_edit", self._lang)); me.setToolTipsVisible(True)
         self._ma(me, "Rotate left", self.rotate_left, "हिन्दी: Selected page ko baayein ghumao.\nEnglish: Rotate the selected page left.")
@@ -3340,16 +3369,26 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "PDF chhota karo (compress)…", self.compress_pdf_tool, "हिन्दी: Abhi ke pages ya koi purani PDF ko 200KB/500KB/1MB/2MB tak chhota karo (portal upload ke liye).\nEnglish: Shrink current pages or any PDF to a 200KB/500KB/1MB/2MB target for portal uploads.")
         pdft = mt.addMenu("PDF Tools")
         pdft.setToolTipsVisible(True)
-        pdft.addAction("PDF page editor (kram/ghumao/hatao)…", self.pdf_page_editor)
-        pdft.addAction("Sign/Stamp lagao (is page par)…", self.place_sign)
-        pdft.addAction("Page numbers lagao (sab pages par)…", self.add_page_numbers)
-        pdft.addAction("Kisi PDF par watermark…", self.watermark_pdf_tool)
-        pdft.addAction("PDF ka password hatao…", self.remove_pdf_password)
-        pdft.addAction("PDF → Word (.docx)…", self.pdf_to_word)
-        pdft.addAction("PDF → Excel (.xlsx)…", self.pdf_to_excel)
-        pdft.addAction("PDF → JPG images…", self.pdf_to_jpgs)
-        pdft.addAction("Folder ki images → ek PDF…", self.folder_to_pdf)
-        pdft.addAction("Archival PDF (300dpi + metadata)…", self.save_archival_pdf)
+        self._ma(pdft, "PDF page editor (kram/ghumao/hatao)…", self.pdf_page_editor,
+                 "हिन्दी: Kisi bhi PDF ke pages ka kram badlo, ghumao ya hatao — bina quality kharaab kiye (lossless).\nEnglish: Reorder, rotate or remove pages of any PDF, losslessly.")
+        self._ma(pdft, "Sign/Stamp lagao (is page par)…", self.place_sign,
+                 "हिन्दी: Apne signature/mohar ki image current page par lagao (safed background apne aap transparent).\nEnglish: Place your signature/stamp image on the current page (white background auto-transparent).")
+        self._ma(pdft, "Page numbers lagao (sab pages par)…", self.add_page_numbers,
+                 "हिन्दी: Har page par 'Page 1/5' aur chaaho to upar apna header chhapo.\nEnglish: Print 'Page 1/5' on every page, with an optional header.")
+        self._ma(pdft, "Kisi PDF par watermark…", self.watermark_pdf_tool,
+                 "हिन्दी: Kisi purani PDF par apna text-watermark/stamp chhapo.\nEnglish: Stamp a text watermark onto any existing PDF.")
+        self._ma(pdft, "PDF ka password hatao…", self.remove_pdf_password,
+                 "हिन्दी: Password pata ho to us PDF ki bina-password copy banao.\nEnglish: If you know the password, make a password-free copy of the PDF.")
+        self._ma(pdft, "PDF → Word (.docx)…", self.pdf_to_word,
+                 "हिन्दी: PDF/pages ka text OCR karke Word file banao (edit karne layak).\nEnglish: OCR the text into an editable Word document.")
+        self._ma(pdft, "PDF → Excel (.xlsx)…", self.pdf_to_excel,
+                 "हिन्दी: Bill/table wale pages ko OCR karke Excel me nikaalo (best-effort).\nEnglish: Extract bill/table pages into an Excel sheet (best-effort).")
+        self._ma(pdft, "PDF → JPG images…", self.pdf_to_jpgs,
+                 "हिन्दी: Kisi PDF ke har page ko alag JPG image me nikaalo.\nEnglish: Export each page of a PDF as a separate JPG image.")
+        self._ma(pdft, "Folder ki images → ek PDF…", self.folder_to_pdf,
+                 "हिन्दी: Ek folder ki saari images (naam ke kram me) ek PDF me jodo.\nEnglish: Combine all images in a folder (name order) into one PDF.")
+        self._ma(pdft, "Archival PDF (300dpi + metadata)…", self.save_archival_pdf,
+                 "हिन्दी: High-quality PDF (300dpi) poore metadata (title/date) ke saath — lambe samay tak sambhalne ke liye.\nEnglish: High-quality 300dpi PDF with full metadata for long-term archiving.")
         self._ma(mt, "Monthly report…", self.monthly_report, "हिन्दी: Mahine ka scan/claim report banao.\nEnglish: Generate a monthly report.")
         self._ma(mt, "Create desktop shortcut…", self.create_shortcut, "हिन्दी: Desktop par ek-click scan ka shortcut banao.\nEnglish: Make a one-click desktop scan shortcut.")
         self._ma(mt, "Auto-name pages (document ka naam)", self.auto_name_pages, "हिन्दी: Har page ko padh kar uska naam (jaise DISCHARGE SUMMARY, RECEIPT) thumbnail ke neeche likhe. 'Page 1,2' ke bajay asli naam.\nEnglish: Read each page and label it with its document title instead of 'Page 1,2'.")
@@ -4819,16 +4858,22 @@ class ScannerWindow(QtWidgets.QMainWindow):
         tb.addStretch(1)
         tbtn("language", "Language", self.choose_language)
         tbtn("about", tr("about", self._lang), self.show_about)
-        pdfmenu = QtWidgets.QMenu(self.btn_save_pdf)
-        pdfmenu.addAction(tr("save_all", self._lang), self.save_pdf_all)
-        pdfmenu.addAction(tr("save_sel", self._lang), self.save_pdf_selected)
+        pdfmenu = QtWidgets.QMenu(self.btn_save_pdf); pdfmenu.setToolTipsVisible(True)
+        self._ma(pdfmenu, tr("save_all", self._lang), self.save_pdf_all,
+                 "हिन्दी: Sabhi pages ki ek PDF banao.\nEnglish: Save all pages as one PDF.")
+        self._ma(pdfmenu, tr("save_sel", self._lang), self.save_pdf_selected,
+                 "हिन्दी: Sirf chune hue pages ki PDF.\nEnglish: PDF of only the selected pages.")
         self.btn_save_pdf.setMenu(pdfmenu)
         self.btn_save_pdf.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
-        printmenu = QtWidgets.QMenu(self.btn_print)
-        printmenu.addAction("All print (sabhi pages)", self.print_all)
-        printmenu.addAction("Selected print (chune hue)", self.print_selected)
-        printmenu.addAction("ID print (2 ID ek page par)", self.print_ids)
-        printmenu.addAction("ID print - sirf selected", self.print_ids_selected)
+        printmenu = QtWidgets.QMenu(self.btn_print); printmenu.setToolTipsVisible(True)
+        self._ma(printmenu, "All print (sabhi pages)", self.print_all,
+                 "हिन्दी: Saare pages print karo.\nEnglish: Print all pages.")
+        self._ma(printmenu, "Selected print (chune hue)", self.print_selected,
+                 "हिन्दी: Sirf chune hue pages print karo.\nEnglish: Print only the selected pages.")
+        self._ma(printmenu, "ID print (2 ID ek page par)", self.print_ids,
+                 "हिन्दी: ID cards 2-per-A4 print (kaagaz bachega).\nEnglish: Print IDs two per A4 sheet.")
+        self._ma(printmenu, "ID print - sirf selected", self.print_ids_selected,
+                 "हिन्दी: Sirf chune hue IDs 2-per-page.\nEnglish: Selected IDs, two per sheet.")
         self.btn_print.setMenu(printmenu)
         self.btn_print.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         self._classic_toolbar = tbwrap
