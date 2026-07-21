@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "52"
+VERSION = "53"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -4052,11 +4052,20 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if not url:
             self._set_stats_display(None)
             return
-        self._stats_worker = StatsWorker(url, self._get_client_id(), action=action)
+        # DISPLAY hamesha 'stats' (sirf PADHNA) se aata hai — ye tez aur
+        # bharosemand hai. 'ping'/'scan' me server par LIKHAI hoti hai jo
+        # kabhi-kabhi slow/timeout ho jaati thi, jis wajah se sidebar '...'
+        # par atak jata tha. Ab display uspar depend nahi karta.
+        self._stats_worker = StatsWorker(url, self._get_client_id(), action="stats")
         self._stats_worker.got.connect(lambda t, d, o: self._set_stats_display((t, d, o)))
         self._stats_worker.got_full.connect(self._on_world_stats)
         self._stats_worker.failed.connect(self._stats_failed)
         self._stats_worker.start()
+        # ONLINE/USER register karne ke liye 'ping' ALAG se, best-effort —
+        # iska nateeja display ko affect nahi karta.
+        if action == "ping":
+            self._ping_worker = StatsWorker(url, self._get_client_id(), action="ping")
+            self._ping_worker.start()
 
     def _report_scan_stat(self, n):
         url = self._stats_url()
@@ -4066,6 +4075,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._scan_reporter.got.connect(lambda t, d, o: self._set_stats_display((t, d, o)))
         self._scan_reporter.got_full.connect(self._on_world_stats)
         self._scan_reporter.start()
+        # scan-count (LIKHAI) slow ho sakti hai — thodi der baad display ko
+        # 'stats' (PADHNA) se taaza kar do taaki naya count dikh jaye
+        QtCore.QTimer.singleShot(6000, lambda: self._refresh_stats("stats"))
 
     def set_stats_url(self):
         cur = self._stats_url()
@@ -7546,9 +7558,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.files_tree.show()
             return
         terms = [t for t in q.split() if t]
-        # Chuna hua koi subfolder ho to usi me, warna poore panel-folder me
-        sel = self._selected_library_folder()
-        scope = sel if (sel and os.path.isdir(sel)) else self._files_root()
+        # ABHI JO FOLDER khula hai usi ke andar (aur uske sabhi subfolders me)
+        # dhoondo — kisi ek chuni hui subfolder tak seemit nahi (isi wajah se
+        # '07-26' jaise siblings pehle nahi mil rahe the).
+        scope = self._panel_current_dir()
+        if not (scope and os.path.isdir(scope)):
+            scope = self._files_root()
         exts = (".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".docx", ".xlsx")
 
         def job():
