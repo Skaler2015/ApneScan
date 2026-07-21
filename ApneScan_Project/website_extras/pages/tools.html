@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Free Online Image to PDF — ApneScan</title>
+<meta name="description" content="Free online tool: combine JPG/PNG images into a PDF, right in your browser. Nothing is uploaded — everything stays on your device.">
+<link rel="canonical" href="https://apnescan.apnesoft.com/tools.html">
+<link rel="icon" type="image/png" href="apnescan_icon.png">
+<style>
+  :root{--teal:#0f766e;--teal2:#115e59;--ink:#1f2933;--slate:#475569;--line:#e2e8f0;--bg:#f7faf9}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Segoe UI',system-ui,Arial,sans-serif;color:var(--ink);background:var(--bg);line-height:1.6}
+  .wrap{max-width:720px;margin:0 auto;padding:28px 22px 60px}
+  header{border-bottom:1px solid var(--line);background:#fff}
+  .nav{max-width:720px;margin:auto;display:flex;align-items:center;gap:8px;padding:14px 22px}
+  .brand{font-weight:800;font-size:20px}.brand .s{color:var(--teal)}
+  .nav a{margin-left:auto;color:var(--teal);text-decoration:none;font-weight:600}
+  h1{font-size:26px;margin:6px 0 4px}.lead{color:var(--slate);margin-bottom:18px}
+  .drop{border:2px dashed #94d3cb;border-radius:14px;padding:34px;text-align:center;background:#fff;color:var(--slate);cursor:pointer}
+  .drop.over{background:#ecfdf5;border-color:var(--teal)}
+  .list{margin:14px 0;display:flex;flex-wrap:wrap;gap:8px}
+  .list img{width:64px;height:84px;object-fit:cover;border:1px solid var(--line);border-radius:6px}
+  .btn{background:var(--teal);color:#fff;border:none;font-weight:700;padding:12px 24px;border-radius:10px;cursor:pointer;font-size:15px}
+  .btn:disabled{background:#94a3b8;cursor:default}
+  .priv{background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:10px 12px;color:#065f46;font-size:14px;margin:14px 0}
+  .cta{display:inline-block;color:var(--teal);font-weight:700;text-decoration:none;margin-top:18px}
+  footer{border-top:1px solid var(--line);text-align:center;color:var(--slate);font-size:13px;padding:22px;margin-top:24px}
+  a{color:var(--teal)}
+</style>
+</head>
+<body>
+<header><div class="nav"><span class="brand">Apne<span class="s">Scan</span></span><a href="/">← Home</a></div></header>
+<div class="wrap">
+  <h1>Free Online Image → PDF</h1>
+  <p class="lead">Combine JPG/PNG images into one PDF, right here in your browser.</p>
+  <div class="priv">🔒 100% private — your images never leave your device. Everything runs in your browser.</div>
+
+  <div class="drop" id="drop">📷 Click to choose images, or drag &amp; drop here
+    <div style="font-size:13px;margin-top:6px">JPG, PNG — in the order you pick them</div>
+    <input type="file" id="file" accept="image/*" multiple hidden>
+  </div>
+  <div class="list" id="list"></div>
+  <button class="btn" id="make" disabled>⬇ Make PDF</button>
+  <span id="status" style="margin-left:12px;color:#64748b"></span>
+
+  <p style="margin-top:24px;color:#334155">Want compression to 200KB, OCR searchable PDFs, merge/split and WhatsApp sharing?
+  <a class="cta" href="/">⬇ Get the free ApneScan app</a></p>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+  var files = [];
+  var drop = document.getElementById('drop'), input = document.getElementById('file');
+  var listEl = document.getElementById('list'), makeBtn = document.getElementById('make');
+  var statusEl = document.getElementById('status');
+  drop.onclick = function(){ input.click(); };
+  drop.ondragover = function(e){ e.preventDefault(); drop.classList.add('over'); };
+  drop.ondragleave = function(){ drop.classList.remove('over'); };
+  drop.ondrop = function(e){ e.preventDefault(); drop.classList.remove('over'); add(e.dataTransfer.files); };
+  input.onchange = function(){ add(input.files); };
+  function add(fl){
+    for (var i=0;i<fl.length;i++){ if (fl[i].type.indexOf('image')===0) files.push(fl[i]); }
+    render();
+  }
+  function render(){
+    listEl.innerHTML='';
+    files.forEach(function(f){ var img=document.createElement('img'); img.src=URL.createObjectURL(f); listEl.appendChild(img); });
+    makeBtn.disabled = files.length===0;
+    statusEl.textContent = files.length ? (files.length+' image(s) ready') : '';
+  }
+  function loadImg(f){ return new Promise(function(res){ var img=new Image(); img.onload=function(){res(img);}; img.src=URL.createObjectURL(f); }); }
+  makeBtn.onclick = async function(){
+    if (!files.length) return;
+    if (!window.jspdf){ statusEl.textContent='Library load failed — please use the app.'; return; }
+    statusEl.textContent='Making PDF…'; makeBtn.disabled=true;
+    try{
+      var jsPDF = window.jspdf.jsPDF;
+      var doc = null;
+      for (var i=0;i<files.length;i++){
+        var img = await loadImg(files[i]);
+        var w = img.width, h = img.height;
+        var orient = w>h ? 'l' : 'p';
+        if (!doc){ doc = new jsPDF({orientation:orient, unit:'px', format:[w,h]}); }
+        else { doc.addPage([w,h], orient); }
+        var c = document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0);
+        doc.addImage(c.toDataURL('image/jpeg',0.9),'JPEG',0,0,w,h);
+      }
+      doc.save('ApneScan.pdf');
+      statusEl.textContent='✔ Done!';
+    }catch(e){ statusEl.textContent='Error — try the app.'; }
+    makeBtn.disabled=false;
+  };
+</script>
+<footer>© 2026 ApneScan · Free &amp; open-source · Runs entirely in your browser.</footer>
+</body>
+</html>

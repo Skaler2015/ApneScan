@@ -139,7 +139,26 @@
   .band .cta{background:#fff;color:var(--teal)}
 
   footer{border-top:1px solid var(--line);padding:30px 0;color:var(--slate);font-size:14px;text-align:center}
+  footer a{color:var(--teal);text-decoration:none;margin:0 8px}
   .hi{color:var(--slate);font-size:15px;margin-top:6px}
+  /* sticky download */
+  .sticky{position:fixed;right:18px;bottom:18px;z-index:50;background:var(--teal);color:#fff;font-weight:800;
+          padding:13px 22px;border-radius:14px;box-shadow:0 10px 26px rgba(15,118,110,.4);text-decoration:none;font-size:15px}
+  .sticky:hover{background:var(--teal-dark)}
+  /* big counter */
+  .counter{margin:30px auto 0;text-align:center}
+  .counter .big{font-size:40px;font-weight:800;color:var(--teal);letter-spacing:-1px}
+  .counter .lbl{color:var(--slate);font-size:14px}
+  /* testimonials */
+  .quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:28px}
+  .quote{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px}
+  .quote p{color:#334155;font-size:14.5px;font-style:italic}
+  .quote .who{color:var(--slate);font-size:13px;margin-top:10px;font-weight:600}
+  .stars{color:#f59e0b}
+  /* scroll reveal */
+  .reveal{opacity:0;transform:translateY(16px);transition:opacity .5s ease,transform .5s ease}
+  .reveal.in{opacity:1;transform:none}
+  @media(max-width:820px){.quotes{grid-template-columns:1fr}}
   @media(max-width:820px){
     h1{font-size:38px}.features,.steps{grid-template-columns:1fr 1fr}
     .grid-pages{grid-template-columns:repeat(3,1fr)}nav a{display:none}
@@ -154,12 +173,16 @@
     <div class="brand"><span class="badge"></span><span><span class="a">Apne</span><span class="s">Scan</span></span></div>
     <nav>
       <a href="#features">Features</a>
-      <a href="#how">How it works</a>
-      <a href="#help">Help</a>
+      <a href="guides.html">Guides</a>
+      <a href="compare.html">Compare</a>
+      <a href="tools.html">Free tools</a>
+      <a href="#help">FAQ</a>
       <a href="#download">Download</a>
     </nav>
   </div>
 </header>
+
+<a class="sticky" href="ApneScan.exe" download>⬇ Download free</a>
 
 <div class="wrap">
 
@@ -184,6 +207,12 @@
                                " documents scanned worldwide" +
                                (d.users ? " · " + d.users + " users" : "");
               el.style.display = "block";
+              var bc = document.getElementById("bigcount");
+              if (bc) {
+                bc.textContent = Number(d.total).toLocaleString("en-IN") + "+";
+                if (d.users) document.getElementById("biglbl").textContent =
+                  "documents scanned worldwide · " + d.users + " users";
+              }
             }
           }).catch(function(){});
       } catch (e) {}
@@ -208,8 +237,8 @@
   <section id="features">
     <div class="eyebrow">Everything you need</div>
     <h2>Powerful, but simple to use</h2>
-    <p class="lead">Built for clinics, hospitals and offices that scan a lot of paper every day.</p>
-    <div class="features">
+    <p class="lead">Built for shops, offices, clinics and homes that scan a lot of paper every day.</p>
+    <div class="features reveal">
       <div class="card"><div class="ic">⚡</div><h3>One-click scan</h3><p>Save scanner settings as profiles. Pick a profile, hit Scan — the whole feeder in one go.</p></div>
       <div class="card"><div class="ic">🔎</div><h3>Searchable PDF (OCR)</h3><p>Turn scans into PDFs whose text you can search and copy — Hindi + English.</p></div>
       <div class="card"><div class="ic">🗂️</div><h3>Auto-organize</h3><p>Auto-save with date/number naming, year/month folders, and an Excel register of every scan.</p></div>
@@ -227,6 +256,21 @@
       <div class="card"><div class="ic">🎨</div><h3>Your layout</h3><p>Dashboard, status bar, job chips, preview panel, Dark Pro theme, kiosk mode — turn each on or off.</p></div>
       <div class="card"><div class="ic">⚡</div><h3>Never freezes</h3><p>Saving, OCR, compressing — all run in the background, so the app never hangs while you keep working.</p></div>
       <div class="card"><div class="ic">🔄</div><h3>Auto-updates</h3><p>A new version shows a one-click update banner right inside the app — always stay current.</p></div>
+    </div>
+    <div class="counter reveal">
+      <div class="big" id="bigcount">—</div>
+      <div class="lbl" id="biglbl">documents scanned worldwide with ApneScan</div>
+    </div>
+  </section>
+
+  <!-- TESTIMONIALS -->
+  <section class="reveal">
+    <div class="eyebrow">Loved by everyday users</div>
+    <h2>What people say</h2>
+    <div class="quotes">
+      <div class="quote"><div class="stars">★★★★★</div><p>"Finally a free scanner that speaks Hindi and just works. Scan, compress to 200KB, WhatsApp — done."</p><div class="who">— CSC operator, Rajasthan</div></div>
+      <div class="quote"><div class="stars">★★★★★</div><p>"The auto-naming is magic. I name a form once and every next scan names itself."</p><div class="who">— Clinic front-desk, UP</div></div>
+      <div class="quote"><div class="stars">★★★★★</div><p>"No ads, no upload, no cloud. Our documents stay on our PC. Exactly what we needed."</p><div class="who">— Small office, Jaipur</div></div>
     </div>
   </section>
 
@@ -276,10 +320,31 @@
 <footer>
   <div class="wrap">
     <div class="brand" style="justify-content:center;margin-bottom:8px"><span class="badge"></span><span><span class="a">Apne</span><span class="s">Scan</span></span></div>
+    <div style="margin:8px 0">
+      <a href="guides.html">Guides</a> ·
+      <a href="compare.html">Compare</a> ·
+      <a href="use-cases.html">Use cases</a> ·
+      <a href="tools.html">Free tools</a> ·
+      <a href="changelog.html">What's new</a> ·
+      <a href="about.html">About</a> ·
+      <a href="privacy.html">Privacy</a> ·
+      <a href="https://github.com/Skaler2015/ApneScan" target="_blank" rel="noopener">GitHub</a>
+    </div>
     Free document scanning &amp; PDF tool · © 2026 · Made for people who scan a lot of paper.
     <div class="hi">Free and open-source. Your data never leaves your PC. · मुफ़्त और open-source</div>
   </div>
 </footer>
 
+<script>
+  // scroll reveal animation
+  (function(){
+    var els = document.querySelectorAll('.reveal');
+    if (!('IntersectionObserver' in window)) { els.forEach(function(e){e.classList.add('in');}); return; }
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){ if (en.isIntersecting){ en.target.classList.add('in'); io.unobserve(en.target); } });
+    }, {threshold:.12});
+    els.forEach(function(e){ io.observe(e); });
+  })();
+</script>
 </body>
 </html>

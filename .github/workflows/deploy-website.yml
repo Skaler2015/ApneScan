@@ -41,6 +41,11 @@ jobs:
           VERSION=$(grep -oP 'VERSION = "\K[0-9]+' ApneScan_Project/apnescan.py | head -1)
           echo "App version: v$VERSION"
           sed "s/{{VERSION}}/v$VERSION/g" ApneScan_Project/apnescan_website.html > _site/index.html
+          # Extra pages (guides, compare, privacy, about, changelog, tools, faq…)
+          for f in ApneScan_Project/website_extras/pages/*.html; do
+            [ -e "$f" ] || continue
+            sed "s/{{VERSION}}/v$VERSION/g" "$f" > "_site/$(basename "$f")"
+          done
           cp ApneScan_Project/apnescan_logo.png _site/ 2>/dev/null || true
           cp ApneScan_Project/apnescan_logo.svg _site/ 2>/dev/null || true
           cp ApneScan_Project/apnescan_icon.png _site/ 2>/dev/null || true
@@ -54,19 +59,18 @@ jobs:
           # Google Search Console ownership verification
           cp ApneScan_Project/website_extras/google*.html _site/ 2>/dev/null || true
           TODAY=$(date -u +%Y-%m-%d)
-          cat > _site/sitemap.xml <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-            <url>
-              <loc>https://apnescan.apnesoft.com/</loc>
-              <lastmod>$TODAY</lastmod>
-              <changefreq>weekly</changefreq>
-              <priority>1.0</priority>
-            </url>
-          </urlset>
-          EOF
-          # heredoc indentation hatao (yaml ke andar likha tha)
-          sed -i 's/^          //' _site/sitemap.xml
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            echo "  <url><loc>https://apnescan.apnesoft.com/</loc><lastmod>$TODAY</lastmod><priority>1.0</priority></url>"
+            for f in _site/*.html; do
+              b=$(basename "$f")
+              [ "$b" = "index.html" ] && continue
+              case "$b" in google*.html) continue;; esac
+              echo "  <url><loc>https://apnescan.apnesoft.com/$b</loc><lastmod>$TODAY</lastmod><priority>0.7</priority></url>"
+            done
+            echo '</urlset>'
+          } > _site/sitemap.xml
 
       # EXE ko seedha website par rakho — "Download" button click karte hi
       # apnescan.apnesoft.com/ApneScan.exe se download shuru ho jata hai.
