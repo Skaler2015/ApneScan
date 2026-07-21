@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "44"
+VERSION = "45"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -5419,8 +5419,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "QListWidget{outline:0;}"
             "QListWidget::item{padding:5px 4px;border-bottom:1px solid #eef2f7;}"
             "QListWidget::item:selected{background:#e0f2f1;color:#0f172a;}")
-        self.files_results.itemDoubleClicked.connect(
-            lambda it: it.data(QtCore.Qt.UserRole) and self._open_path(it.data(QtCore.Qt.UserRole)))
+        self.files_results.itemDoubleClicked.connect(self._files_result_activated)
         self.files_results.hide()
         fp.addWidget(self.files_results, 1)
         self._files_search_timer = QtCore.QTimer(self)
@@ -7125,6 +7124,17 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
 
+    def _files_result_activated(self, it):
+        """Search-result par double-click: folder ho to panel me usme chale
+        jao (uske andar ki files dikhein), file ho to use kholo."""
+        p = it.data(QtCore.Qt.UserRole)
+        if not p:
+            return
+        if os.path.isdir(p):
+            self._jump_to_folder(p)
+        else:
+            self._open_path(p)
+
     def _run_files_search(self):
         """Advanced search — POORE panel-folder (aur uske andar ke sabhi
         folders) me naam se dhoondo. Bas 2 akshar likhte hi turant natije.
@@ -7142,30 +7152,35 @@ class ScannerWindow(QtWidgets.QMainWindow):
         exts = (".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".docx", ".xlsx")
 
         def job():
-            hits = []
-            for dp, _dn, fn in os.walk(scope):
+            def _rank(name):
+                # naam me match > sirf folder-raaste me; shuru me match sabse upar
+                in_name = all(t in name for t in terms)
+                at_start = any(name.startswith(t) for t in terms)
+                return (0 if in_name else 1, 0 if at_start else 1)
+            dir_hits, file_hits = [], []
+            for dp, dns, fn in os.walk(scope):
+                # FOLDERS bhi — folder ke apne naam me match ho to (jaise 'nirma'
+                # -> 'NIRMALA DE' folder), chahe uske andar abhi koi file na ho.
+                for d in dns:
+                    name = d.lower()
+                    if all(t in name for t in terms):
+                        dir_hits.append((_rank(name), name, os.path.join(dp, d)))
+                # FILES — file-naam ya uske folder-raaste me (beech se bhi)
                 for f in fn:
                     if not f.lower().endswith(exts):
                         continue
+                    full = os.path.join(dp, f)
                     name = f.lower()
-                    # naam + jis folder me hai uska raasta — dono me,
-                    # aur naam/folder ke BEECH me se bhi (substring) dhoondo
-                    rel = os.path.relpath(os.path.join(dp, f), scope).lower()
-                    if not all(t in rel for t in terms):
-                        continue
-                    # Relevance: pehle wo files jinke NAAM me match hai, phir
-                    # wo jo sirf folder-naam se mili; naam ke SHURU me match ho
-                    # to aur upar. (Beech ka match bhi aata hai, bas neeche.)
-                    in_name = all(t in name for t in terms)
-                    at_start = any(name.startswith(t) for t in terms)
-                    rank = (0 if in_name else 1, 0 if at_start else 1)
-                    hits.append((rank, name, os.path.join(dp, f)))
-                    if len(hits) >= 1000:
-                        break
-                if len(hits) >= 1000:
+                    rel = os.path.relpath(full, scope).lower()
+                    if all(t in rel for t in terms):
+                        file_hits.append((_rank(name), name, full))
+                if len(dir_hits) + len(file_hits) >= 1000:
                     break
-            hits.sort(key=lambda h: (h[0], h[1]))
-            return [h[2] for h in hits]
+            dir_hits.sort(key=lambda h: (h[0], h[1]))
+            file_hits.sort(key=lambda h: (h[0], h[1]))
+            # folders pehle (turant us folder me ja sako), phir files
+            return ([("dir", h[2]) for h in dir_hits] +
+                    [("file", h[2]) for h in file_hits])
 
         def done(res):
             if isinstance(res, Exception):
@@ -7173,24 +7188,31 @@ class ScannerWindow(QtWidgets.QMainWindow):
             if self.files_search.text().strip().lower() != q:
                 return                      # tab tak nayi search shuru ho gayi
             self.files_results.clear()
+            n_dir = sum(1 for k, _ in res if k == "dir")
+            n_file = len(res) - n_dir
             head = QtWidgets.QListWidgetItem(
-                self.L("🔎 %d natije mile", "🔎 %d results") % len(res)
+                self.L("🔎 %d folder · %d file" % (n_dir, n_file),
+                       "🔎 %d folders · %d files" % (n_dir, n_file))
                 + ("+" if len(res) >= 1000 else ""))
             head.setFlags(QtCore.Qt.NoItemFlags)
             _hf = head.font(); _hf.setBold(True); head.setFont(_hf)
             head.setForeground(QtGui.QColor("#0f766e"))
             self.files_results.addItem(head)
             _icon = {".pdf": "📕", ".docx": "📘", ".xlsx": "📗"}
-            for p in res:
-                rel = os.path.dirname(os.path.relpath(p, scope))
-                ext = os.path.splitext(p)[1].lower()
+            for kind, p in res:
+                parent = os.path.dirname(os.path.relpath(p, scope))
                 name = os.path.basename(p)
-                # do line: upar naam, neeche chhota-halka folder ka raasta
-                label = _icon.get(ext, "🖼") + "  " + name
-                if rel and rel != ".":
-                    label += "\n       📁 " + rel.replace(os.sep, " › ")
+                if kind == "dir":
+                    # do line: upar folder ka naam, neeche uska raasta
+                    label = "📁  " + name
+                else:
+                    ext = os.path.splitext(p)[1].lower()
+                    label = _icon.get(ext, "🖼") + "  " + name
+                if parent and parent != ".":
+                    label += "\n       ↳ " + parent.replace(os.sep, " › ")
                 it = QtWidgets.QListWidgetItem(label)
-                it.setToolTip(p)
+                it.setToolTip(p + (self.L("   (folder — click karke kholo)",
+                                          "   (folder — click to open)") if kind == "dir" else ""))
                 it.setData(QtCore.Qt.UserRole, p)
                 self.files_results.addItem(it)
             if not res:
