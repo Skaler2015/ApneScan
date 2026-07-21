@@ -100,6 +100,12 @@ jobs:
           gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n ApneScan-exe -D _site/
           # Installer bhi website par (na mile to koi baat nahi — purani builds me nahi tha)
           gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n ApneScan-Setup -D _site/ || true
+          # Browser "Suspicious download blocked" (SmartScreen) sirf naye unsigned
+          # .exe par aata hai — .zip ko browser block nahi karta. Isliye exe ka
+          # ek ZIP bhi banate hain; website ka main download button isi par lagta hai.
+          if [ -f _site/ApneScan.exe ]; then
+            (cd _site && zip -q ApneScan.zip ApneScan.exe && echo "ApneScan.zip banaya")
+          fi
           ls -la _site/
 
       - name: Configure GitHub Pages
