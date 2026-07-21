@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "31"
+VERSION = "32"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -2032,14 +2032,21 @@ def page_ocr_text(path, frac=0.55):
 
 
 def sig_words(text):
-    """Distinctive words that identify a form's FIXED printed layout (letterhead,
-    field labels, form title). Patient-specific data (names, numbers) mostly drops
-    out, so two scans of the SAME form share most of these words."""
-    words = re.findall(r"[a-z]{4,}", (text or "").lower())
+    """Kisi form ki FIXED chhapi layout (letterhead, field-labels, title) ko
+    pehchanne wale khaas shabd. Patient/customer-specific data (naam, number)
+    zyadatar nikal jata hai, isliye SAME form ke do scan inme se zyadatar shabd
+    share karte hain.
+
+    Ab ENGLISH + HINDI (Devanagari) DONO pakadta hai — pehle sirf English tha,
+    isliye Hindi forms ka naam theek se yaad nahi rehta tha."""
+    low = (text or "").lower()
+    en = re.findall(r"[a-z]{3,}", low)          # 3+ (pehle 4+ tha)
+    hi = re.findall(r"[ऀ-ॿ]{2,}", text or "")   # Devanagari shabd
     stop = {"name", "date", "time", "age", "years", "year", "male", "female",
             "address", "sign", "signature", "page", "self", "spouse", "mobile",
-            "phone", "number", "the", "and", "for", "with", "this", "that"}
-    return set(w for w in words if w not in stop)
+            "phone", "number", "the", "and", "for", "with", "this", "that",
+            "नाम", "दिनांक", "पता", "उम्र", "हस्ताक्षर", "मोबाइल", "फोन"}
+    return set(w for w in (en + hi) if w not in stop)
 
 
 def _jaccard(a, b):
@@ -2050,18 +2057,31 @@ def _jaccard(a, b):
     return inter / union if union else 0.0
 
 
+def _containment(sig, stored):
+    """Stored form-signature ka kitna hissa NAYE page me maujood hai (0..1).
+    Ye Jaccard se behtar hai jab naye scan me zyada/kam text ho — kyunki ek hi
+    form dobara scan karne par uska poora signature naye me aa hi jata hai."""
+    if not sig or not stored:
+        return 0.0
+    return len(sig & stored) / float(len(stored))
+
+
 def learned_name_for(text, learned, thr=0.45):
-    """learned = list of (wordset, name). Return the name whose stored signature
-    best overlaps this page's words (>= thr), else None."""
+    """learned = list of (wordset, name). Jis stored signature se ye page sabse
+    zyada milta hai uska naam do (agar kaafi milta ho). Jaccard YA containment —
+    dono me se jo behtar ho use lete hain (thr thoda narm bhi kiya hai)."""
     sig = sig_words(text)
     if not sig:
         return None
     best_name, best_score = None, 0.0
     for words, name in learned:
-        sc = _jaccard(sig, words)
+        ws = words if isinstance(words, set) else set(words)
+        # containment ko halka zyada wazan (same form dobara aane par ~1.0 hota hai)
+        sc = max(_jaccard(sig, ws), _containment(sig, ws) * 0.95)
         if sc > best_score:
             best_score, best_name = sc, name
-    return best_name if best_score >= thr else None
+    # thr=0.40 (narm) — par containment 0.6+ ho to bhi maan lo
+    return best_name if best_score >= 0.40 else None
 
 
 def classify_from_text(text):
@@ -2211,7 +2231,9 @@ class LearnWorker(QtCore.QThread):
 
     def run(self):
         try:
-            words = sorted(sig_words(page_ocr_text(self.path, 0.6)))
+            # Zyada text (0.75) padho taaki form ka signature bharpoor bane —
+            # naam yaad rakhna jitna bharpoor, utna reliable.
+            words = sorted(sig_words(page_ocr_text(self.path, 0.75)))
         except Exception:
             words = []
         self.got.emit(self.name, words)
@@ -3392,6 +3414,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "Monthly report…", self.monthly_report, "हिन्दी: Mahine ka scan/claim report banao.\nEnglish: Generate a monthly report.")
         self._ma(mt, "Create desktop shortcut…", self.create_shortcut, "हिन्दी: Desktop par ek-click scan ka shortcut banao.\nEnglish: Make a one-click desktop scan shortcut.")
         self._ma(mt, "Auto-name pages (document ka naam)", self.auto_name_pages, "हिन्दी: Har page ko padh kar uska naam (jaise DISCHARGE SUMMARY, RECEIPT) thumbnail ke neeche likhe. 'Page 1,2' ke bajay asli naam.\nEnglish: Read each page and label it with its document title instead of 'Page 1,2'.")
+        self._ma(mt, "Seekhe hue naam (manage)…", self.manage_learned_names, "हिन्दी: Aapne F2 se jo naam sikhaye hain unhe dekho/badlo/hatao. Ek baar naam sikhane par agli baar wahi document apne aap us naam se aata hai.\nEnglish: View/edit/remove the names you taught with F2. Once taught, the same document auto-names itself next time.")
 
         ms = mb.addMenu(tr("menu_settings", self._lang)); ms.setToolTipsVisible(True)
         self._ma(ms, tr("options", self._lang), self.open_options, "हिन्दी: App ki saari settings (auto-save, blank hatao, backup, waghera).\nEnglish: All app settings.")
@@ -7845,26 +7868,100 @@ class ScannerWindow(QtWidgets.QMainWindow):
         w.start()
 
     def _store_learned_name(self, name, words):
-        if len(words) < 4:
-            return   # too little text to identify the form reliably
+        if len(words) < 3:
+            self.status.showMessage(
+                self.L("Is page par itna chhapa hua text nahi hai ki naam yaad "
+                       "rakha ja sake (jaise haath se likha page). Naam laga diya "
+                       "hai par 'auto' nahi aayega.",
+                       "Not enough printed text on this page to remember the name "
+                       "(e.g. handwritten). Name applied, but won't auto-fill."), 7000)
+            return
         learned = self._config.setdefault("learned_names", [])
         wset = set(words)
-        # if a very similar signature already exists, update its name; else add new
+        # Bahut milta-julta signature pehle se ho to usi ka naam update karo,
+        # warna naya jodo. (containment se — same form ki thodi alag scan bhi
+        # ek hi entry rahe, bekaar duplicate na banein.)
         for e in learned:
-            if _jaccard(wset, set(e.get("words", []))) >= 0.6:
+            ex = set(e.get("words", []))
+            if max(_jaccard(wset, ex), _containment(wset, ex), _containment(ex, wset)) >= 0.55:
                 e["words"] = words
                 e["name"] = name
                 break
         else:
             learned.append({"words": words, "name": name})
-            # keep the list from growing without bound
-            if len(learned) > 300:
-                del learned[0:len(learned) - 300]
+            if len(learned) > 400:
+                del learned[0:len(learned) - 400]
         try:
             save_config(self._config)
         except Exception:
             pass
-        self.status.showMessage("Naam yaad rakh liya \u2014 agli baar aisa document apne aap '%s' ho jayega." % name, 5000)
+        cnt = len(learned)
+        self.status.showMessage(
+            self.L("\u2714 Naam yaad rakh liya \u2014 agli baar aisa hi document apne aap "
+                   "'%s' ho jayega. (%d naam seekhe hue)" % (name, cnt),
+                   "\u2714 Name learned \u2014 next time a similar document auto-names as "
+                   "'%s'. (%d names learned)" % (name, cnt)), 6000)
+
+    def manage_learned_names(self):
+        """Seekhe hue naam dekho / hatao \u2014 kaunsa document kis naam se yaad hai."""
+        learned = self._config.get("learned_names", []) or []
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("Seekhe hue naam", "Learned names"))
+        dlg.resize(460, 460)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel(self.L(
+            "%d document-naam yaad hain. Kisi ko chun kar hata/badal sakte ho:" % len(learned),
+            "%d document names are remembered. Select one to remove/rename:" % len(learned))))
+        lw = QtWidgets.QListWidget()
+        for e in learned:
+            it = QtWidgets.QListWidgetItem("\ud83d\udcc4 %s   (%d shabd)" %
+                                           (e.get("name", "-"), len(e.get("words", []))))
+            it.setData(QtCore.Qt.UserRole, e)
+            lw.addItem(it)
+        v.addWidget(lw, 1)
+        row = QtWidgets.QHBoxLayout()
+
+        def _rename():
+            it = lw.currentItem()
+            if not it:
+                return
+            e = it.data(QtCore.Qt.UserRole)
+            nn, ok = QtWidgets.QInputDialog.getText(
+                dlg, self.L("Naam badlo", "Rename"), self.L("Naya naam:", "New name:"),
+                text=e.get("name", ""))
+            if ok and nn.strip():
+                e["name"] = underscore_name(nn.strip())
+                it.setText("\ud83d\udcc4 %s   (%d shabd)" % (e["name"], len(e.get("words", []))))
+                save_config(self._config)
+
+        def _del():
+            it = lw.currentItem()
+            if not it:
+                return
+            e = it.data(QtCore.Qt.UserRole)
+            try:
+                learned.remove(e)
+            except ValueError:
+                pass
+            lw.takeItem(lw.row(it))
+            save_config(self._config)
+
+        def _clear():
+            if QtWidgets.QMessageBox.question(
+                    dlg, "Confirm", self.L("Saare seekhe naam hata dein?",
+                                           "Remove all learned names?"),
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes:
+                learned.clear(); lw.clear(); save_config(self._config)
+        for t, fn in ((self.L("\u270f Naam badlo", "\u270f Rename"), _rename),
+                      (self.L("\ud83d\uddd1 Hatao", "\ud83d\uddd1 Remove"), _del),
+                      (self.L("Sab hatao", "Clear all"), _clear)):
+            b = QtWidgets.QPushButton(t); b.clicked.connect(fn); row.addWidget(b)
+        row.addStretch(1)
+        bc = QtWidgets.QPushButton(self.L("Band karo", "Close")); bc.clicked.connect(dlg.accept)
+        row.addWidget(bc)
+        v.addLayout(row)
+        dlg.exec_()
 
     def _list_context_menu_end(self):
         pass
