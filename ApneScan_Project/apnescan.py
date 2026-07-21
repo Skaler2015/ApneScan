@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "49"
+VERSION = "50"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -5568,14 +5568,35 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.pv_scroll.setWidget(self.pv_img)
         self.pv_scroll.setStyleSheet("border:1px solid #cbd5e1;border-radius:8px;background:#fff;")
         _p1l.addWidget(self.pv_scroll, 1)
+        # Saaf, samajhne-yogya buttons: har button par icon + chhota naam.
+        _PVQSS = (
+            "QPushButton{border:1px solid #dbe3ea;border-radius:9px;"
+            "background:#f8fafc;color:#334155;font-size:10px;padding:2px 0px;}"
+            "QPushButton:hover{border-color:#0f766e;background:#ecfdf5;color:#0f766e;}"
+            "QPushButton:pressed{background:#d1faf3;}")
+
+        def _mkbtn(icon, label, tip, fn, h=44):
+            b = QtWidgets.QPushButton(icon + "\n" + label)
+            b.setToolTip(tip)
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setMinimumHeight(h)
+            b.setStyleSheet(_PVQSS)
+            b.clicked.connect(fn)
+            return b
+        self._mk_pv_btn = _mkbtn
+
         # zoom row
-        _zr = QtWidgets.QHBoxLayout()
-        for _t, _tip, _fn in (("➖", self.L("Chhota", "Zoom out"), lambda: self._pv_do_zoom(0.8)),
-                              ("Fit", self.L("Panel me fit", "Fit to panel"), self._pv_fit),
-                              ("➕", self.L("Bada", "Zoom in"), lambda: self._pv_do_zoom(1.25)),
-                              ("⛶", self.L("Poori screen", "Full screen"), self._pv_fullscreen)):
-            _zb = QtWidgets.QPushButton(_t); _zb.setToolTip(_tip); _zb.setFixedHeight(26)
-            _zb.clicked.connect(_fn); _zr.addWidget(_zb)
+        _zr = QtWidgets.QHBoxLayout(); _zr.setSpacing(4)
+        for _ic, _lb, _tip, _fn in (
+                ("➖", self.L("Chhota", "Zoom −"), self.L("Zoom kam", "Zoom out"),
+                 lambda: self._pv_do_zoom(0.8)),
+                ("🔳", self.L("Fit", "Fit"), self.L("Panel me fit", "Fit to panel"),
+                 self._pv_fit),
+                ("➕", self.L("Bada", "Zoom +"), self.L("Zoom zyada", "Zoom in"),
+                 lambda: self._pv_do_zoom(1.25)),
+                ("⛶", self.L("Screen", "Full"), self.L("Poori screen", "Full screen"),
+                 self._pv_fullscreen)):
+            _zr.addWidget(_mkbtn(_ic, _lb, _tip, _fn, h=40))
         _p1l.addLayout(_zr)
         self.pv_tabs.addTab(_p1, self.L("👁 Jhalak", "👁 Preview"))
         # Text tab
@@ -5599,29 +5620,27 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.pv_info2.setStyleSheet("color:#334155;font-size:11px;padding:6px;")
         self.pv_tabs.addTab(self.pv_info2, self.L("ℹ Info", "ℹ Info"))
         pv.addWidget(self.pv_tabs, 1)
-        # quick-edit buttons (2 rows) — sab turant apply
+        # quick-edit buttons (3 rows) — har button par icon + naam, turant apply
         for _rowdef in (
-            (("↺", self.L("Baayein ghumao", "Rotate left"), self.rotate_left),
-             ("↻", self.L("Daayein ghumao", "Rotate right"), self.rotate_right),
-             ("✂", self.L("Border crop", "Auto-crop"), self.autocrop_current),
-             ("📐", self.L("Seedha karo", "Deskew"), self.deskew_current),
-             ("🗑", self.L("Hatao", "Delete"), self.delete_page)),
-            (("☀", self.L("Halka (bright)", "Brighter"), lambda: self._enhance_current(1.12, 1.0)),
-             ("🌑", self.L("Gehra (dim)", "Darker"), lambda: self._enhance_current(0.9, 1.0)),
-             ("◐", self.L("Contrast +", "Contrast +"), lambda: self._enhance_current(1.0, 1.15)),
-             ("✨", self.L("Saaf karo", "Enhance"), self.enhance_current_page),
-             ("⬜", self.L("Backing white", "Whiten backing"), self.whiten_current_page)),
-            (("✒", self.L("Sign/Stamp", "Sign/Stamp"), self.place_sign),
-             ("🖼", self.L("Photo restore", "Restore photo"), self.restore_photo_current),
-             ("🪪", self.L("ID cards alag", "Split IDs"), self.split_id_cards),
-             ("🔤", self.L("Naam sikhao", "Rename"), self.rename_current_page),
-             ("⛶", self.L("Bada editor", "Big editor"), self._pv_open_editor)),
+            (("↩️", self.L("Baayen", "Left"), self.L("Baayein ghumao", "Rotate left"), self.rotate_left),
+             ("↪️", self.L("Dayen", "Right"), self.L("Daayein ghumao", "Rotate right"), self.rotate_right),
+             ("✂️", self.L("Crop", "Crop"), self.L("Border apne aap kaato", "Auto-crop border"), self.autocrop_current),
+             ("📐", self.L("Seedha", "Straight"), self.L("Tedha page seedha karo", "Straighten (deskew)"), self.deskew_current),
+             ("🗑️", self.L("Delete", "Delete"), self.L("Ye page hatao", "Delete this page"), self.delete_page)),
+            (("☀️", self.L("Ujla", "Bright"), self.L("Halka/ujla karo", "Brighter"), lambda: self._enhance_current(1.12, 1.0)),
+             ("🌙", self.L("Gehra", "Dark"), self.L("Gehra karo", "Darker"), lambda: self._enhance_current(0.9, 1.0)),
+             ("🌗", self.L("Contrast", "Contrast"), self.L("Contrast badhao", "More contrast"), lambda: self._enhance_current(1.0, 1.15)),
+             ("✨", self.L("Saaf", "Clean"), self.L("Page saaf/ujla karo", "Auto-enhance"), self.enhance_current_page),
+             ("⬜", self.L("Whiten", "Whiten"), self.L("Gray/black backing safed karo", "Whiten dark backing"), self.whiten_current_page)),
+            (("✍️", self.L("Sign", "Sign"), self.L("Sign ya stamp lagao", "Add sign/stamp"), self.place_sign),
+             ("🖼️", self.L("Restore", "Restore"), self.L("Purani photo saaf karo", "Restore old photo"), self.restore_photo_current),
+             ("🆔", self.L("ID alag", "Split ID"), self.L("Ek page ke kai ID cards alag karo", "Split ID cards"), self.split_id_cards),
+             ("✏️", self.L("Rename", "Rename"), self.L("Is page/doc ka naam sikhao", "Rename / teach name"), self.rename_current_page),
+             ("🔍", self.L("Editor", "Editor"), self.L("Bade editor me kholo", "Open big editor"), self._pv_open_editor)),
         ):
-            _qe = QtWidgets.QHBoxLayout(); _qe.setSpacing(3)
-            for _t, _tip, _fn in _rowdef:
-                _b = QtWidgets.QPushButton(_t); _b.setToolTip(_tip)
-                _b.setFixedHeight(28); _b.clicked.connect(_fn)
-                _qe.addWidget(_b)
+            _qe = QtWidgets.QHBoxLayout(); _qe.setSpacing(4)
+            for _ic, _lb, _tip, _fn in _rowdef:
+                _qe.addWidget(self._mk_pv_btn(_ic, _lb, _tip, _fn))
             pv.addLayout(_qe)
         self.pv_info = QtWidgets.QLabel("")
         self.pv_info.setStyleSheet("color:#64748b;font-size:11px;")
