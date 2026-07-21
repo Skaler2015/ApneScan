@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "33"
+VERSION = "34"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -364,6 +364,7 @@ DEFAULT_OPTIONS = {
     "show_files_panel": True,    # daayan "Meri Files" panel
     "show_left_panel": True,     # baayan scan-settings panel
     "fav_folders": [],           # panel ke ⭐ favourite folders
+    "files_panel_root": "",      # panel me khola gaya doosra folder (khaali = save-folder)
     "sidebar_stats": [],         # khaali = default set dikhega
     "name_append_number": False, # auto-naam me document number bhi jodo
     "name_append_date": False,   # auto-naam me date bhi jodo
@@ -5286,16 +5287,25 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.files_search.textChanged.connect(lambda _t: self._files_search_timer.start())
         self._rebuild_fav_bar()
         _row = QtWidgets.QHBoxLayout()
-        _bnew = QtWidgets.QPushButton(self.L("➕ Naya folder", "➕ New folder"))
+        _bopen = QtWidgets.QPushButton(self.L("📂 Kholo", "📂 Open"))
+        _bopen.setToolTip(self.L("Kahin bhi rakha koi bhi folder is panel me kholo (uske andar ke documents dikhenge).",
+                                 "Open any folder on your PC in this panel."))
+        _bopen.clicked.connect(self.open_existing_folder)
+        _bhome = QtWidgets.QPushButton("🏠")
+        _bhome.setFixedWidth(34)
+        _bhome.setToolTip(self.L("Wapas save-folder par", "Back to the save folder"))
+        _bhome.clicked.connect(self.reset_panel_folder)
+        _bnew = QtWidgets.QPushButton(self.L("➕ Naya", "➕ New"))
+        _bnew.setToolTip(self.L("Chune folder me naya folder banao", "Create a new folder inside the selected one"))
         _bnew.clicked.connect(self.new_library_folder)
-        _row.addWidget(_bnew)
+        _row.addWidget(_bopen); _row.addWidget(_bhome); _row.addWidget(_bnew)
         fp.addLayout(_row)
         self.btn_save_here = QtWidgets.QPushButton(self.L("💾 Yahan save karo", "💾 Save here"))
         self.btn_save_here.setObjectName("primary")
         self.btn_save_here.setMinimumHeight(34)
         self.btn_save_here.clicked.connect(self.save_into_selected_folder)
         fp.addWidget(self.btn_save_here)
-        self.files_panel.setFixedWidth(235)
+        self.files_panel.setFixedWidth(250)
         body.addWidget(self.files_panel)
         if not self._opts.get("show_files_panel", True):
             self.files_panel.hide()
@@ -6560,6 +6570,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     # ---- "Meri Files" right panel ----
     def _files_root(self):
+        # Agar user ne panel me koi doosra folder "kholo" kiya hai to wahi;
+        # warna save-folder.
+        ov = self._opts.get("files_panel_root")
+        if ov and os.path.isdir(ov):
+            return ov
         root = (self._opts.get("save_folder")
                 or os.path.join(os.path.expanduser("~"), "Documents", "NobleScans"))
         try:
@@ -6573,8 +6588,31 @@ class ScannerWindow(QtWidgets.QMainWindow):
             root = self._files_root()
             self.files_model.setRootPath(root)
             self.files_tree.setRootIndex(self.files_model.index(root))
+            if hasattr(self, "foot_folder"):
+                self._update_footer()
         except Exception:
             pass
+
+    def open_existing_folder(self):
+        """Panel me kahin bhi rakha koi bhi folder kholo (uske andar ke documents
+        dikhenge, wahin save bhi kar sakte ho)."""
+        start = self._opts.get("files_panel_root") or self._opts.get("save_folder") or os.path.expanduser("~")
+        f = QtWidgets.QFileDialog.getExistingDirectory(
+            self, self.L("Kaunsa folder kholna hai?", "Which folder to open?"), start)
+        if not f:
+            return
+        self._opts["files_panel_root"] = f
+        self._save_opts()
+        self._refresh_files_root()
+        self.status.showMessage(
+            self.L("📂 Folder khul gaya: %s   (🏠 se wapas save-folder)" % os.path.basename(f),
+                   "📂 Opened: %s   (🏠 to go back to the save folder)" % os.path.basename(f)), 6000)
+
+    def reset_panel_folder(self):
+        """Panel ko wapas save-folder par le jao."""
+        self._opts["files_panel_root"] = ""
+        self._save_opts()
+        self._refresh_files_root()
 
     def _files_tree_open(self, index):
         try:
@@ -6712,6 +6750,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 menu.addAction("✏ Naam badlo…", lambda: self._rename_library_file(path))
                 menu.addAction("🗑 Delete…", lambda: self._delete_library_file(path))
         else:
+            menu.addAction(self.L("📂 Koi folder kholo…", "📂 Open a folder…"), self.open_existing_folder)
+            menu.addAction(self.L("🏠 Wapas save-folder", "🏠 Back to save folder"), self.reset_panel_folder)
             menu.addAction("➕ Naya folder", self.new_library_folder)
         menu.exec_(self.files_tree.viewport().mapToGlobal(pos))
 
