@@ -17,17 +17,30 @@
 ## Main features
 
 - One-click scan profiles; fast mode (200dpi B&W); duplex ADF scanning
-- Blank-page removal; auto-crop; deskew; auto-orient; scanner backing whitened
-- OCR auto-naming of documents (learns names you teach it)
+- Also scan from a webcam / USB camera when no scanner is available
+- Blank-page removal; auto-crop; deskew; auto-orient; auto colour-detect;
+  scanner backing (grey/black) whitened for clean prints
+- Smart auto-naming: teach a document's name once (F2) and the same form is
+  named automatically next time (English + Hindi); optionally appends the
+  detected bill/invoice/claim number and the date; learn a folder per name;
+  export/import learned names between PCs
 - Save as PDF / password PDF / searchable OCR PDF / images; print incl. 2-up ID
 - PDF tools: compress to 200KB–2MB targets, merge, split, page editor,
-  sign/stamp, page numbers, watermark, password removal, PDF→Word/Excel/JPG
+  sign/stamp, page numbers, watermark, password removal, PDF→Word/Excel/JPG,
+  folder→PDF, archival PDF
 - Phone-photo to PDF (shadow removal), book-page split, business-card to
-  contacts (.vcf), old-photo restore
+  contacts (.vcf), old-photo restore, bundle auto-split by blank separator
 - WhatsApp / Email sharing of scanned PDFs
+- Built-in file manager panel (folder tree, in-folder search, drag-and-drop
+  save, favourites) and a live preview editor (zoom, per-page OCR text,
+  one-click rotate/crop/deskew/enhance/whiten/sign)
 - Tags, instant full-text search over saved PDFs (local index)
-- Excel register, monthly report, backups, barcode claim autofill
-- Auto-update, portable mode, settings export/import, touch mode
+- Personal + worldwide statistics dashboard with charts
+- Fully non-blocking: all saving/OCR/compression runs in the background
+- Customizable UI: dashboard, status header, job chips, preview panel,
+  Dark Pro theme, kiosk mode, collapsible sidebars — each toggleable
+- In-app one-click auto-update, portable mode, settings export/import,
+  touch mode, crash reporter, Excel register, monthly report, backups
 
 ## Typical users
 
