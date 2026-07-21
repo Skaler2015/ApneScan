@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "74"
+VERSION = "75"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -355,6 +355,9 @@ DEFAULT_OPTIONS = {
     "auto_crop": False,
     "deskew": False,
     "quality_enhance": False,
+    "clean_edges": False,        # scan ki kaali border / kinare ke chhed saaf karo
+    "split_two_page": False,     # ek glass par do page → apne aap alag karo
+    "searchable_pdf": False,     # har save par PDF ke andar OCR text (Ctrl+F se dhoondo)
     "compress": False,
     "jpeg_quality": 60,
     "watermark": False,
@@ -613,6 +616,66 @@ def auto_enhance(img):
         return rgb
     except Exception:
         return img
+
+
+def clean_edges(img, margin_frac=0.018, dark_level=90):
+    """Scan ke kinaron par aane wali KAALI border aur kinare ke chhed (punch-hole)
+    ke nishan saaf karo. Sirf bahari patti (margin) dekhi jaati hai — beech ka
+    text/stamp bilkul nahi chhua jaata. Margin ke andar ke gehre (dark) pixel
+    safed kar diye jaate hain."""
+    try:
+        rgb = img.convert("RGB")
+        w, h = rgb.size
+        m = max(2, int(min(w, h) * margin_frac))
+        px = rgb.load()
+        white = (255, 255, 255)
+
+        def _row(y):
+            for x in range(w):
+                r, g, b = px[x, y][:3]
+                if (r + g + b) / 3 < dark_level:
+                    px[x, y] = white
+
+        def _col(x):
+            for y in range(h):
+                r, g, b = px[x, y][:3]
+                if (r + g + b) / 3 < dark_level:
+                    px[x, y] = white
+        for y in list(range(0, m)) + list(range(h - m, h)):
+            _row(y)
+        for x in list(range(0, m)) + list(range(w - m, w)):
+            _col(x)
+        return rgb
+    except Exception:
+        return img
+
+
+def split_two_pages(img, min_aspect=1.15):
+    """Ek glass par do page rakhe ho (chaudi/landscape scan) to unhe do alag
+    page me kaato. Beech me sabse safed (khaali) vertical patti dhoondh kar wahi
+    se kaatte hain. Do image ki list lautata hai; kaatne layak na ho to [img]."""
+    try:
+        rgb = img.convert("RGB")
+        w, h = rgb.size
+        if w < h * min_aspect:      # chaudi nahi — split ki zaroorat nahi
+            return [rgb]
+        gray = rgb.convert("L")
+        if HAS_NUMPY:
+            import numpy as _np
+            a = _np.asarray(gray, dtype=_np.float32)
+            col_mean = a.mean(axis=0)                 # har column ki roshni
+            lo, hi = int(w * 0.35), int(w * 0.65)     # beech ke 30% me hi gutter
+            band = col_mean[lo:hi]
+            cut = lo + int(band.argmax())             # sabse safed column
+            if col_mean[cut] < 200:                   # itni safed patti nahi mili
+                cut = w // 2
+        else:
+            cut = w // 2
+        left = rgb.crop((0, 0, cut, h))
+        right = rgb.crop((cut, 0, w, h))
+        return [left, right]
+    except Exception:
+        return [img]
 
 
 def flatten_photo_shadows(img):
@@ -2490,6 +2553,8 @@ class ScanWorker(QtCore.QThread):
                     # size me sheet chhoti ho to backing dikhti hai; print me
                     # kala bilkul nahi aana chahiye.
                     img = whiten_dark_background(img)
+                    if self.opts.get("clean_edges"):
+                        img = clean_edges(img)
                     if self.opts.get("auto_crop"):
                         img = autocrop(img)
                     if self.opts.get("deskew"):
@@ -2503,37 +2568,46 @@ class ScanWorker(QtCore.QThread):
                     if (self.opts.get("auto_colour") and self.pixel_type == "color"
                             and colorfulness(img) < 6.0):
                         img = img.convert("L")
-                    # Save the page. JPEG encodes ~5x faster than PNG (big scan-speed
-                    # win); use it for colour/grey. Keep PNG for 1-bit black&white.
-                    if self.pixel_type == "bw":
-                        fd, out = tempfile.mkstemp(suffix=".png", dir=self.tmpdir)
-                        os.close(fd)
-                        # eSCL me B&W ab grayscale me aata hai (BlackAndWhite1+JPEG
-                        # scanner par jam karta tha) — asli 1-bit yahan banao.
-                        try:
-                            if img.mode != "1":
-                                img = img.convert("L").point(
-                                    lambda v: 255 if v >= 160 else 0, mode="1")
-                        except Exception:
-                            pass
-                        try:
-                            img.save(out, "PNG", compress_level=1)
-                        except Exception:
-                            img.save(out, "PNG")
+                    # Ek glass par do page → do alag page (option ON ho to)
+                    if self.opts.get("split_two_page"):
+                        parts = split_two_pages(img)
                     else:
-                        fd, out = tempfile.mkstemp(suffix=".jpg", dir=self.tmpdir)
-                        os.close(fd)
-                        try:
-                            if img.mode == "L":
-                                img.save(out, "JPEG", quality=88)
-                            else:
-                                img.convert("RGB").save(out, "JPEG", quality=88)
-                        except Exception:
-                            img.convert("RGB").save(out, "JPEG", quality=85)
-                    self.kept += 1
-                    self.page_done.emit(out)
+                        parts = [img]
+                    for _pi in parts:
+                        self._save_and_emit(_pi)
                 except Exception:
                     pass
+
+        def _save_and_emit(im):
+            # Ek image ko temp file me save karke UI ko bhejo. JPEG encode ~5x
+            # tez (bade scan me speed) — colour/grey ke liye JPEG, 1-bit B&W ke
+            # liye PNG.
+            if self.pixel_type == "bw":
+                fd, out = tempfile.mkstemp(suffix=".png", dir=self.tmpdir)
+                os.close(fd)
+                try:
+                    if im.mode != "1":
+                        im = im.convert("L").point(
+                            lambda v: 255 if v >= 160 else 0, mode="1")
+                except Exception:
+                    pass
+                try:
+                    im.save(out, "PNG", compress_level=1)
+                except Exception:
+                    im.save(out, "PNG")
+            else:
+                fd, out = tempfile.mkstemp(suffix=".jpg", dir=self.tmpdir)
+                os.close(fd)
+                try:
+                    if im.mode == "L":
+                        im.save(out, "JPEG", quality=88)
+                    else:
+                        im.convert("RGB").save(out, "JPEG", quality=88)
+                except Exception:
+                    im.convert("RGB").save(out, "JPEG", quality=85)
+            self.kept += 1
+            self.page_done.emit(out)
+        self._save_and_emit = _save_and_emit
 
         consumer = _th.Thread(target=_consumer, daemon=True)
         consumer.start()
@@ -2803,6 +2877,12 @@ class OptionsDialog(QtWidgets.QDialog):
         form.addRow(lblhelp("Save ke baad:", 'हिन्दी: Save ke baad kya ho — kuch nahi / PDF khule / folder khule.\nEnglish: After save — do nothing / open the PDF / open the folder.'), self.cmb_after)
         self.chk_imgtoo = QtWidgets.QCheckBox("Also save a separate image (JPG) for each page")
         self.chk_imgtoo.setChecked(self.opts.get("save_images_too", False)); form.addRow(chkrow(self.chk_imgtoo, 'हिन्दी: ON: PDF ke saath har page ki alag JPG image bhi banegi.\nEnglish: ON: also save each page as a separate JPG image.'))
+        self.chk_searchable = QtWidgets.QCheckBox("Searchable PDF (find text with Ctrl+F)")
+        self.chk_searchable.setChecked(bool(self.opts.get("searchable_pdf")))
+        if not HAS_OCR_LIBS:
+            self.chk_searchable.setEnabled(False)
+            self.chk_searchable.setText("Searchable PDF (needs OCR libraries)")
+        form.addRow(chkrow(self.chk_searchable, 'हिन्दी: ON: har save par PDF ke ANDAR chhupa hua OCR text bhi save hoga — baad me kisi bhi PDF reader me Ctrl+F se mareez ka naam/claim number dhoondh sakoge. (Tesseract chahiye; save thoda dheema hoga.)\nEnglish: ON: every save embeds a hidden OCR text layer so you can later find a patient name/claim number with Ctrl+F in any PDF reader. (Needs Tesseract; save is a little slower.)'))
 
         header("Image cleanup")
         self.chk_blank = QtWidgets.QCheckBox("Remove blank pages")
@@ -2820,6 +2900,10 @@ class OptionsDialog(QtWidgets.QDialog):
         form.addRow(chkrow(self.chk_deskew, 'हिन्दी: ON: tedha scan hua page apne aap seedha ho jayega.\nEnglish: ON: straightens a tilted/skewed page automatically.'))
         self.chk_enhance = QtWidgets.QCheckBox("Auto quality improvement (clean faded documents)")
         self.chk_enhance.setChecked(self.opts["quality_enhance"]); form.addRow(chkrow(self.chk_enhance, 'हिन्दी: ON: feeke/halke documents saaf aur gehre dikhenge.\nEnglish: ON: brightens & sharpens faded documents.'))
+        self.chk_clean_edges = QtWidgets.QCheckBox("Clean scan edges (black border / punch-holes)")
+        self.chk_clean_edges.setChecked(bool(self.opts.get("clean_edges"))); form.addRow(chkrow(self.chk_clean_edges, 'हिन्दी: ON: scan ke kinaron ki kaali border aur kinare ke chhed (punch-hole) ke nishan apne aap safed ho jayenge. Beech ka text/stamp nahi chhua jaata.\nEnglish: ON: whitens the black scan border and edge punch-hole marks. The middle content is never touched.'))
+        self.chk_split2 = QtWidgets.QCheckBox("Split two pages on one glass into two")
+        self.chk_split2.setChecked(bool(self.opts.get("split_two_page"))); form.addRow(chkrow(self.chk_split2, 'हिन्दी: ON: ek glass par do chhote page ek saath rakho — scan hote hi wo do alag page ban jayenge (beech ki safed patti se kaat kar).\nEnglish: ON: put two small pages together on the glass — the scan is auto-split into two separate pages at the white gutter.'))
         self.chk_orient = QtWidgets.QCheckBox("Auto-rotate upside-down pages (via OCR)")
         self.chk_orient.setChecked(bool(self.opts.get("auto_orient")))
         form.addRow(chkrow(self.chk_orient, 'हिन्दी: ON: ulta (90/180/270) scan hua page OCR se pehchan kar apne aap seedha ho jayega (Tesseract chahiye; scan thoda dheema hota hai).\nEnglish: ON: auto-rotates upside-down/sideways pages using OCR (needs Tesseract; slightly slower).'))
@@ -2900,6 +2984,7 @@ class OptionsDialog(QtWidgets.QDialog):
         o["name_append_number"] = self.chk_name_num.isChecked()
         o["name_append_date"] = self.chk_name_date.isChecked()
         o["save_images_too"] = self.chk_imgtoo.isChecked()
+        o["searchable_pdf"] = self.chk_searchable.isChecked()
         o["auto_save"] = self.chk_autosave.isChecked()
         o["save_folder"] = self.folder_edit.text().strip()
         o["filename_template"] = self.tmpl_edit.text().strip() or "{date}_{seq}"
@@ -2911,6 +2996,8 @@ class OptionsDialog(QtWidgets.QDialog):
         o["auto_crop"] = self.chk_crop.isChecked()
         o["deskew"] = self.chk_deskew.isChecked()
         o["quality_enhance"] = self.chk_enhance.isChecked()
+        o["clean_edges"] = self.chk_clean_edges.isChecked()
+        o["split_two_page"] = self.chk_split2.isChecked()
         o["twain_file_xfer"] = self.chk_filexfer.isChecked()
         o["auto_orient"] = self.chk_orient.isChecked()
         o["auto_colour"] = self.chk_autocolour.isChecked()
@@ -5904,6 +5991,25 @@ class ScannerWindow(QtWidgets.QMainWindow):
         pl.addWidget(self.an_box)
         self._an_world = {}
         self._an_update_box()
+        # ---- Speed presets: 1 click me poori scan-setting ----
+        _spd = QtWidgets.QHBoxLayout(); _spd.setSpacing(4)
+        for _sk, _st, _tip in (
+                ("fast", self.L("⚡ Jaldi", "⚡ Fast"),
+                 self.L("150 dpi · Black & White — sabse tez",
+                        "150 dpi · Black & White — fastest")),
+                ("normal", self.L("⚖ Normal", "⚖ Normal"),
+                 self.L("200 dpi · Grayscale — roz ke liye",
+                        "200 dpi · Grayscale — everyday")),
+                ("best", self.L("★ Badhiya", "★ Best"),
+                 self.L("300 dpi · Colour + saaf — sabse achhi quality",
+                        "300 dpi · Colour + clean — best quality"))):
+            _b = QtWidgets.QPushButton(_st); _b.setToolTip(_tip)
+            _b.setStyleSheet("QPushButton{font-size:11px;padding:5px 2px;border:1px solid "
+                             "#cbd5e1;border-radius:8px;background:#fff;}"
+                             "QPushButton:hover{border-color:#0f766e;color:#0f766e;}")
+            _b.clicked.connect(lambda _c, k=_sk: self._apply_speed_preset(k))
+            _spd.addWidget(_b)
+        _spdw = QtWidgets.QWidget(); _spdw.setLayout(_spd); pl.addWidget(_spdw)
         self.btn_scan = QtWidgets.QPushButton("▶  " + tr("scan", self._lang)); self.btn_scan.setObjectName("primary")
         self.btn_scan.setMinimumHeight(38); self.btn_scan.clicked.connect(self.do_scan); pl.addWidget(self.btn_scan)
         self.btn_scan.setToolTip("Start scan (F5)")
@@ -6090,7 +6196,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         fp.addWidget(self.files_results, 1)
         self._files_search_timer = QtCore.QTimer(self)
         self._files_search_timer.setSingleShot(True)
-        self._files_search_timer.setInterval(140)   # 2-3 akshar likhte hi turant
+        self._files_search_timer.setInterval(60)   # index memory me — lagbhag turant
         self._files_search_timer.timeout.connect(self._run_files_search)
         self.files_search.textChanged.connect(lambda _t: self._files_search_timer.start())
         self._rebuild_fav_bar()
@@ -6584,9 +6690,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._set_busy_display("free")
 
     # ---- list ----
-    def _add_item_for_path(self, path, qimg=None):
+    def _add_item_for_path(self, path, qimg=None, at=None):
         # qimg: background worker se pehle se bana-banaya thumbnail (QImage) —
         # UI thread par bhaari decode/scale nahi karna padta.
+        # at: agar diya ho to us position par INSERT karo (warna aakhir me jodo)
         if qimg is not None and not qimg.isNull():
             icon = QtGui.QIcon(QtGui.QPixmap.fromImage(qimg))
         else:
@@ -6599,7 +6706,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # har cell ek jaisa (icon + naam ke liye poori jagah) — chhota doc aane
         # par baaki thumbnails chhote na ho, aur naam hamesha dikhe
         item.setSizeHint(QtCore.QSize(self._thumb_w + 24, self._thumb_h + 52))
-        self.list.addItem(item); self.list.setCurrentItem(item)
+        if at is not None and 0 <= at <= self.list.count():
+            self.list.insertItem(at, item)
+        else:
+            self.list.addItem(item)
+        self.list.setCurrentItem(item)
         self.list.clearSelection()  # nothing "selected" by default; user picks with Ctrl/Shift
         self._dirty = True
         self._update_status(); self._update_empty_state()
@@ -6607,6 +6718,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._pv_build_filmstrip()
         except Exception:
             pass
+        return item
 
     THUMB_HI_W = 360
     THUMB_HI_H = 480
@@ -6651,7 +6763,38 @@ class ScannerWindow(QtWidgets.QMainWindow):
         super().resizeEvent(event)
 
 
+    def _apply_speed_preset(self, name):
+        """Ek click me poori scan-setting badlo (dpi + rang + processing)."""
+        presets = {
+            "fast":   ("150 dpi", "Black & White", False, False),
+            "normal": ("200 dpi", "Grayscale",     False, False),
+            "best":   ("300 dpi", "24-bit Colour",  True,  True),
+        }
+        p = presets.get(name)
+        if not p:
+            return
+        dpi, depth, enhance, clean = p
+        try:
+            self.chk_fast.setChecked(False)   # combo choti driver bane, fast-toggle na
+        except Exception:
+            pass
+        try:
+            self.cmb_dpi.setCurrentText(dpi)
+            self.cmb_depth.setCurrentText(depth)
+        except Exception:
+            pass
+        self._opts["quality_enhance"] = enhance
+        self._opts["clean_edges"] = clean
+        self._save_opts()
+        self.status.showMessage(self.L(
+            "Scan setting: %s · %s" % (dpi, depth),
+            "Scan settings: %s · %s" % (dpi, depth)), 4000)
+
     def do_scan(self):
+        # Rescan/Insert ka pending placement — sirf tab lagega jab scan sach me
+        # shuru ho (guards me return ho gaya to chhup-chaap chhoot jayega).
+        _place = getattr(self, "_pending_place", None)
+        self._pending_place = None
         self._doc_folder_hint = None   # naya scan = folder-hint reset
         method = self._opts.get("scanner_method", "twain")
         prof = self._selected_profile()
@@ -6684,7 +6827,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if self.chk_fast.isChecked():
             dpi, color = 200, "bw"     # keep the user's duplex (both-side) choice
             opts = dict(self._opts)    # lean copy: skip heavy per-page processing
-            for k in ("remove_blank", "auto_crop", "deskew", "quality_enhance"):
+            for k in ("remove_blank", "auto_crop", "deskew", "quality_enhance",
+                      "clean_edges", "split_two_page"):
                 opts[k] = False
         opts = dict(opts)
         opts["page_size"] = self.cmb_pagesize.currentText().strip().lower()
@@ -6701,6 +6845,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
         self._scanning = True
+        self._scan_place = _place        # rescan/insert ab pakka lagega
         try:
             self._state_timer.stop()
         except Exception:
@@ -6709,6 +6854,34 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._set_busy_display("busy")
 
     def _on_page_scanned(self, path):
+        # Rescan / Insert mode: page ko us hi jagah lagao (aakhir me nahi)
+        place = getattr(self, "_scan_place", None)
+        if place:
+            mode, idx = place
+            if mode == "replace":
+                old = self.list.item(idx)
+                if old is not None:
+                    old.setData(QtCore.Qt.UserRole, path)
+                    self._refresh_item(old)
+                    self.list.setCurrentItem(old)
+                    self._dirty = True
+                    row = idx
+                else:
+                    self._add_item_for_path(path, at=idx); row = idx
+                # is page ke baad wale extra pages usi ke aage insert ho
+                self._scan_place = ("insert", idx + 1)
+            else:  # insert
+                self._add_item_for_path(path, at=idx); row = idx
+                self._scan_place = ("insert", idx + 1)
+            self._scan_count += 1
+            self._name_one_page(row, path)
+            try:
+                self._pv_build_filmstrip()
+            except Exception:
+                pass
+            if self._progress:
+                self._progress.set_page(self._scan_count)
+            return
         self._add_item_for_path(path)
         self._scan_count += 1
         # NAAM turant padhna shuru (per-page) — sab pages ke baad delay na ho
@@ -6724,6 +6897,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self.status.showMessage("Claim number found from barcode: %s" % code, 5000)
 
     def _on_scan_done(self, kept, skipped):
+        self._scan_place = None          # rescan/insert mode khatam
         if kept:
             self._pstats_bump(scan_ok=1)
         if self._progress:
@@ -6757,6 +6931,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self._start_next_batch()
 
     def _on_scan_failed(self, msg):
+        self._scan_place = None          # rescan/insert mode khatam
         self._pstats_bump(scan_fail=1)
         self._last_error = msg
         if self._progress:
@@ -6775,6 +6950,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._warn(friendly_error(msg, self._opts.get("language", "en")))
 
     def _cancel_scan(self):
+        self._scan_place = None          # rescan/insert mode khatam
         try:
             if getattr(self, "_worker", None):
                 self._worker.requestInterruption()
@@ -7594,6 +7770,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             return
         self._update_panel_nav()
+        # naya folder khula — search index dobara banao (background me pehle se
+        # taiyaar rakho taaki pehla akshar likhte hi natije turant aayein)
+        self._invalidate_files_index()
+        try:
+            if folder and os.path.isdir(folder):
+                self._ensure_files_index_async(folder)
+        except Exception:
+            pass
 
     def _panel_current_dir(self):
         try:
@@ -8138,43 +8322,116 @@ class ScannerWindow(QtWidgets.QMainWindow):
                               % (name, pm.width(), pm.height(), szt, path))
         self.pv_text.setPlainText("")
 
+    # ---- Fast in-memory index (turant search) ----
+    _FILE_EXTS = (".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".docx", ".xlsx")
+
+    def _invalidate_files_index(self):
+        """Folder badla ya nayi file bani — index dobara banega."""
+        self._files_index = None
+
+    def _build_files_index(self, scope):
+        """scope ke andar sabhi folder+file ka halka index (path + naam).
+        Ye disk-walk sirf EK BAAR hota hai; uske baad har keystroke par sirf
+        is list ko memory me chhaanto (bahut tez)."""
+        idx = []
+        try:
+            for dp, dns, fn in os.walk(scope):
+                for d in dns:
+                    full = os.path.join(dp, d)
+                    idx.append(("dir", full, d.lower(),
+                                os.path.relpath(full, scope).lower()))
+                for f in fn:
+                    if f.lower().endswith(self._FILE_EXTS):
+                        full = os.path.join(dp, f)
+                        idx.append(("file", full, f.lower(),
+                                    os.path.relpath(full, scope).lower()))
+                if len(idx) >= 40000:
+                    break
+        except Exception:
+            pass
+        return idx
+
+    def _ensure_files_index_async(self, scope):
+        """scope ka index memory me tayyar rakho (background me). Jab tak na bane
+        tab tak None rehta hai."""
+        if getattr(self, "_files_index", None) is not None and \
+                getattr(self, "_files_index_scope", None) == scope:
+            return
+
+        def _done(idx):
+            self._files_index = idx
+            self._files_index_scope = scope
+            # index aate hi agar search-box me abhi bhi kuch likha hai to
+            # turant natije dikha do
+            try:
+                if len(self.files_search.text().strip()) >= 2:
+                    self._run_files_search()
+            except Exception:
+                pass
+        self._run_bg_quiet(lambda: self._build_files_index(scope), _done)
+
     def _run_files_search(self):
         """Advanced search — POORE panel-folder (aur uske andar ke sabhi
-        folders) me naam se dhoondo. Bas 2 akshar likhte hi turant natije.
-        Kai shabd likho to sabhi match hone chahiye (jaise 'ram bill'), aur
-        folder ka naam likho to us folder ke andar ki files bhi mil jaati hain."""
+        folders) me naam se dhoondo. Ab TURANT: disk baar-baar nahi padha jaata,
+        ek in-memory index ko memory me chhaanta hai (2 akshar likhte hi natije).
+        Kai shabd (jaise 'ram bill') = sabhi match; folder-naam bhi milta hai."""
         q = self.files_search.text().strip().lower()
         if len(q) < 2:
             self.files_results.hide()
             self.files_tree.show()
             return
         terms = [t for t in q.split() if t]
-        # ABHI JO FOLDER khula hai usi ke andar (aur uske sabhi subfolders me)
-        # dhoondo — kisi ek chuni hui subfolder tak seemit nahi (isi wajah se
-        # '07-26' jaise siblings pehle nahi mil rahe the).
         scope = self._panel_current_dir()
         if not (scope and os.path.isdir(scope)):
             scope = self._files_root()
-        exts = (".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".docx", ".xlsx")
         search_text = self.btn_search_text.isChecked()   # PDF ke andar bhi?
 
+        def _rank(name, by_content=False):
+            if by_content:
+                return (2, 0)
+            in_name = all(t in name for t in terms)
+            at_start = any(name.startswith(t) for t in terms)
+            return (0 if in_name else 1, 0 if at_start else 1)
+
+        # ---- TEZ RAASTA: naam/path search — memory index se turant ----
+        if not search_text:
+            idx = getattr(self, "_files_index", None)
+            if idx is None or getattr(self, "_files_index_scope", None) != scope:
+                # index abhi nahi bana — background me banwao, tab tak "…" dikhao
+                self._ensure_files_index_async(scope)
+                self.files_results.clear()
+                _w = QtWidgets.QListWidgetItem(self.L("⏳ Taiyaari…", "⏳ Indexing…"))
+                _w.setFlags(QtCore.Qt.NoItemFlags)
+                self.files_results.addItem(_w)
+                self.files_tree.hide(); self.files_results.show()
+                return
+            dir_hits, file_hits = [], []
+            for kind, full, name, rel in idx:
+                if kind == "dir":
+                    if all(t in name for t in terms):
+                        dir_hits.append((_rank(name), name, full))
+                else:
+                    if all(t in rel for t in terms):
+                        file_hits.append((_rank(name), name, full))
+                if len(dir_hits) + len(file_hits) >= 1000:
+                    break
+            dir_hits.sort(key=lambda h: (h[0], h[1]))
+            file_hits.sort(key=lambda h: (h[0], h[1]))
+            res = ([("dir", h[2]) for h in dir_hits] +
+                   [("file", h[2]) for h in file_hits])
+            self._render_files_results(res, q)
+            return
+
+        # ---- BHAARI RAASTA: PDF ke andar ka text — background me ----
+        exts = self._FILE_EXTS
+
         def job():
-            def _rank(name, by_content=False):
-                # naam me match > content me > sirf folder-raaste me
-                if by_content:
-                    return (2, 0)
-                in_name = all(t in name for t in terms)
-                at_start = any(name.startswith(t) for t in terms)
-                return (0 if in_name else 1, 0 if at_start else 1)
             dir_hits, file_hits = [], []
             for dp, dns, fn in os.walk(scope):
-                # FOLDERS bhi — folder ke apne naam me match ho to (jaise 'nirma'
-                # -> 'NIRMALA DE' folder), chahe uske andar abhi koi file na ho.
                 for d in dns:
                     name = d.lower()
                     if all(t in name for t in terms):
                         dir_hits.append((_rank(name), name, os.path.join(dp, d)))
-                # FILES — file-naam ya uske folder-raaste me (beech se bhi)
                 for f in fn:
                     if not f.lower().endswith(exts):
                         continue
@@ -8183,8 +8440,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     rel = os.path.relpath(full, scope).lower()
                     if all(t in rel for t in terms):
                         file_hits.append((_rank(name), name, full))
-                    elif search_text and full.lower().endswith(".pdf"):
-                        # naam me nahi mila -> PDF ke ANDAR ke text me dhoondo
+                    elif full.lower().endswith(".pdf"):
                         txt = self._pdf_text_cached(full)
                         if txt and all(t in txt for t in terms):
                             file_hits.append((_rank(name, True), name, full))
@@ -8192,7 +8448,6 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     break
             dir_hits.sort(key=lambda h: (h[0], h[1]))
             file_hits.sort(key=lambda h: (h[0], h[1]))
-            # folders pehle (turant us folder me ja sako), phir files
             return ([("dir", h[2]) for h in dir_hits] +
                     [("file", h[2]) for h in file_hits])
 
@@ -8200,7 +8455,16 @@ class ScannerWindow(QtWidgets.QMainWindow):
             if isinstance(res, Exception):
                 return
             if self.files_search.text().strip().lower() != q:
-                return                      # tab tak nayi search shuru ho gayi
+                return
+            self._render_files_results(res, q)
+        self._run_bg(job, done, self.L("Andar ka text dhoondh rahe…",
+                                       "Searching inside text…"))
+
+    def _render_files_results(self, res, q):
+        """Search ke natije (list) ko panel me folder-wise dikhao."""
+        if self.files_search.text().strip().lower() != q:
+            return                          # tab tak nayi search shuru ho gayi
+        if True:
             self.files_results.clear()
             # FOLDER ke hisaab se group karo: upar folder ka naam (header),
             # neeche usi folder ke documents.
@@ -8249,7 +8513,6 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self.files_results.addItem(it)
             self.files_tree.hide()
             self.files_results.show()
-        self._run_bg(job, done, self.L("Dhoondh rahe hain…", "Searching…"))
 
     def _merge_folder_pdfs(self, folder):
         if not HAS_OCR_LIBS:
@@ -10294,14 +10557,51 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _list_context_menu(self, pos):
         if self.list.count() == 0:
             return
+        item = self.list.itemAt(pos)
         menu = QtWidgets.QMenu(self)
         act_rename = menu.addAction("\u270f Rename")
         act_del = menu.addAction("\U0001f5d1 Delete")
+        act_rescan = act_insert = None
+        if item is not None:
+            menu.addSeparator()
+            act_rescan = menu.addAction(self.L("\ud83d\udd04 Is page ko dobara scan karo",
+                                               "\ud83d\udd04 Rescan this page"))
+            act_insert = menu.addAction(self.L("\u2795 Iske baad naya scan jodo",
+                                               "\u2795 Scan & insert after this"))
         chosen = menu.exec_(self.list.viewport().mapToGlobal(pos))
         if chosen == act_rename:
             self.rename_current_page()
         elif chosen == act_del:
             self.delete_page()
+        elif act_rescan is not None and chosen == act_rescan:
+            self._rescan_page(self.list.row(item))
+        elif act_insert is not None and chosen == act_insert:
+            self._insert_scan_after(self.list.row(item))
+
+    def _rescan_page(self, row):
+        """Us page ko hata kar us HI jagah naya scan lagao (Glass/flatbed ke
+        liye best \u2014 scanner par sahi page rakho, phir scan)."""
+        if row < 0 or row >= self.list.count():
+            return
+        if getattr(self, "_scanning", False):
+            self._warn(self.L("Scan chal raha hai \u2014 ruko.", "A scan is already running."))
+            return
+        self._pending_place = ("replace", row)
+        self.status.showMessage(self.L(
+            "\ud83d\udd04 Scanner par sahi page rakho \u2014 naya page usi jagah lag jayega.",
+            "\ud83d\udd04 Put the correct page on the scanner \u2014 it will replace this one."), 5000)
+        self.do_scan()
+
+    def _insert_scan_after(self, row):
+        """Is page ke BAAD naya scan jodo (cram bigade bina beech me page)."""
+        if getattr(self, "_scanning", False):
+            self._warn(self.L("Scan chal raha hai \u2014 ruko.", "A scan is already running."))
+            return
+        self._pending_place = ("insert", row + 1)
+        self.status.showMessage(self.L(
+            "\u2795 Naya scan is page ke baad jud jayega.",
+            "\u2795 The new scan will be inserted right after this page."), 5000)
+        self.do_scan()
 
     def rename_current_page(self):
         # If SEVERAL pages are selected, rename them ALL to the same name at once.
@@ -10791,7 +11091,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return False
         out = self._build_filename(".pdf")
         try:
-            self._pages_as_pdf(paths, out)
+            if HAS_OCR_LIBS and self._opts.get("searchable_pdf"):
+                self._save_ocr_pdf(paths, out)   # PDF ke andar dhoondhne layak text
+            else:
+                self._pages_as_pdf(paths, out)
         except Exception:
             self._warn("Auto-save failed:\n%s" % traceback.format_exc()); return False
         self._record_save(out, len(paths)); self._dirty = False
@@ -10829,7 +11132,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         if not out.lower().endswith(".pdf"):
             out += ".pdf"
-        ocr = HAS_OCR_LIBS and self.chk_ocr.isChecked()
+        ocr = HAS_OCR_LIBS and (self.chk_ocr.isChecked()
+                                or self._opts.get("searchable_pdf"))
         npages = len(paths)
 
         def job():
@@ -10867,6 +11171,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             idx = self.files_model.index(out)
             self.files_tree.setCurrentIndex(idx)
             self.files_tree.scrollTo(idx)
+            self._invalidate_files_index()   # nayi file bani — index refresh
         except Exception:
             pass
 
