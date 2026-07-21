@@ -164,7 +164,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "62"
+VERSION = "63"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -385,7 +385,7 @@ DEFAULT_OPTIONS = {
     "jobs": [],                  # job-chips: [{name,icon,profile,folder,template}]
     "ui_ribbon": False,          # ribbon toolbar (classic toolbar ki jagah)
     "wia_device_id": None,
-    "language": "hi",            # "hi" ya "en"
+    "language": "en",            # "hi" ya "en" (default English)
     "simple_mode": False,
     "feedback_email": "",
     "fast_mode": False,
@@ -3472,7 +3472,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._barcode_tried = False
         self._dirty = False
         self._undo_stack = []
-        self._lang = self._opts.get("language", "hi")
+        self._lang = self._opts.get("language", "en")
 
         self._build_menu()
         self._build_ui()
@@ -4976,7 +4976,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         return len(data)
 
     def _run_wizard(self):
-        wiz = SetupWizard(self, self._opts.get("language", "hi"))
+        wiz = SetupWizard(self, self._opts.get("language", "en"))
         if wiz.exec_() == QtWidgets.QDialog.Accepted:
             self._opts["scanner_method"] = wiz.result_method
             if wiz.result_method == "wia":
@@ -5026,7 +5026,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             try:
                 devs = list_wia_sources()
             except Exception as exc:
-                self._warn(friendly_error(exc, self._opts.get("language", "hi"))); devs = []
+                self._warn(friendly_error(exc, self._opts.get("language", "en"))); devs = []
             if devs:
                 names = [n for _i, n in devs]
                 name, ok2 = QtWidgets.QInputDialog.getItem(self, "WIA scanner", "Scanner:", names, 0, False)
@@ -5040,7 +5040,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             try:
                 names = list_sources(int(self.winId()))
             except Exception as exc:
-                self._warn(friendly_error(exc, self._opts.get("language", "hi"))); names = []
+                self._warn(friendly_error(exc, self._opts.get("language", "en"))); names = []
             if names:
                 name, ok2 = QtWidgets.QInputDialog.getItem(
                     self, "TWAIN scanner",
@@ -5055,7 +5055,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._save_opts(); self._update_status(); self._refresh_method_label()
 
     def choose_language(self):
-        cur = self._opts.get("language", "hi")
+        cur = self._opts.get("language", "en")
         LANGS = [("Hindi", "hi"), ("English", "en"),
                  ("मराठी Marathi (adhuri)", "mr"), ("ગુજરાતી Gujarati (adhuri)", "gu"),
                  ("ਪੰਜਾਬੀ Punjabi (adhuri)", "pa"), ("தமிழ் Tamil (adhuri)", "ta")]
@@ -5073,7 +5073,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             else "Language changed. Close and reopen the app to fully apply.")
 
     def show_help(self):
-        HelpDialog(self, self._opts.get("language", "hi")).exec_()
+        HelpDialog(self, self._opts.get("language", "en")).exec_()
 
     def run_duplex_test(self):
         """Scan with Both-side ON, then report whether the scanner really
@@ -6569,7 +6569,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._conn_timer.start()
         except Exception:
             pass
-        self._warn(friendly_error(msg, self._opts.get("language", "hi")))
+        self._warn(friendly_error(msg, self._opts.get("language", "en")))
 
     def _cancel_scan(self):
         try:
