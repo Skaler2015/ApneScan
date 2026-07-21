@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "70"
+VERSION = "71"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -4823,25 +4823,33 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             return False
 
+    def _open_whatsapp(self):
+        """WhatsApp Desktop SEEDHA kholo (whatsapp://). Na ho to WhatsApp Web."""
+        try:
+            os.startfile("whatsapp://")     # Desktop app (protocol)
+            return True
+        except Exception:
+            pass
+        try:
+            import webbrowser
+            webbrowser.open("https://web.whatsapp.com/")
+            return True
+        except Exception:
+            return False
+
     def share_whatsapp(self, pdf=None):
         if not isinstance(pdf, str) or not pdf:
             pdf = self._pick_share_pdf()
         if not pdf:
             return
-        copied = self._copy_file_to_clipboard(pdf)
-        self._reveal_in_explorer(pdf)
-        try:
-            import webbrowser
-            # WhatsApp Desktop installed ho to wahi khulega, warna web
-            webbrowser.open("https://wa.me/")
-        except Exception:
-            pass
+        # 1) file clipboard par (Ctrl+V se attach)  2) WhatsApp seedha khol do
+        self._copy_file_to_clipboard(pdf)
+        self._open_whatsapp()
         self._pstats_bump(shared=1)
-        steps = ("WhatsApp khul raha hai. Chat chuno, phir:\n\n"
-                 "1) Chat me Ctrl+V dabao (file copy ho chuki hai)%s\n"
-                 "2) Ya Explorer se PDF ko chat par kheench (drag) kar chhod do.\n\n"
-                 "File: %s") % ("" if copied else " (copy nahi ho payi)", pdf)
-        QtWidgets.QMessageBox.information(self, "Send via WhatsApp", steps)
+        # bina roke chhoti si hint (koi blocking dialog / Explorer popup nahi)
+        self.status.showMessage(self.L(
+            "WhatsApp khul gaya — contact chuno, phir Ctrl+V (file copy ho chuki hai)",
+            "WhatsApp opened — pick a contact, then press Ctrl+V (the file is already copied)"), 9000)
 
     def share_email(self, pdf=None):
         if not isinstance(pdf, str) or not pdf:
