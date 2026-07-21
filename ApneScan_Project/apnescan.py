@@ -164,7 +164,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "60"
+VERSION = "61"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -5986,19 +5986,25 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.pv_scroll.setWidget(self.pv_img)
         self.pv_scroll.setStyleSheet("border:1px solid #cbd5e1;border-radius:8px;background:#fff;")
         _p1l.addWidget(self.pv_scroll, 1)
-        # Saaf, samajhne-yogya buttons: har button par icon + chhota naam.
-        _PVQSS = (
-            "QPushButton{border:1px solid #dbe3ea;border-radius:9px;"
-            "background:#f8fafc;color:#334155;font-size:10px;padding:2px 0px;}"
-            "QPushButton:hover{border-color:#0f766e;background:#ecfdf5;color:#0f766e;}"
-            "QPushButton:pressed{background:#d1faf3;}")
+        # ---------- Attractive, RANG-GROUP wale buttons ----------
+        def _grp_qss(border, hov_bg, hov_txt):
+            return ("QPushButton{border:1px solid %s;border-radius:10px;"
+                    "background:#ffffff;color:#334155;font-size:10px;padding:2px 0;}"
+                    "QPushButton:hover{border-color:%s;background:%s;color:%s;}"
+                    "QPushButton:pressed{background:%s;}"
+                    % (border, hov_txt, hov_bg, hov_txt, hov_bg))
+        _GRP = {
+            "blue":   _grp_qss("#bfdbfe", "#eff6ff", "#1d4ed8"),
+            "green":  _grp_qss("#bbf7d0", "#f0fdf4", "#15803d"),
+            "purple": _grp_qss("#e9d5ff", "#faf5ff", "#7e22ce"),
+            "slate":  _grp_qss("#e2e8f0", "#f1f5f9", "#475569"),
+        }
 
-        def _mkbtn(icon, label, tip, fn, h=44):
+        def _mkbtn(icon, label, tip, fn, h=44, grp="slate"):
             b = QtWidgets.QPushButton(icon + "\n" + label)
-            b.setToolTip(tip)
-            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setToolTip(tip); b.setCursor(QtCore.Qt.PointingHandCursor)
             b.setMinimumHeight(h)
-            b.setStyleSheet(_PVQSS)
+            b.setStyleSheet(_GRP.get(grp, _GRP["slate"]))
             b.clicked.connect(fn)
             return b
         self._mk_pv_btn = _mkbtn
@@ -6014,7 +6020,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                  lambda: self._pv_do_zoom(1.25)),
                 ("⛶", self.L("Screen", "Full"), self.L("Poori screen", "Full screen"),
                  self._pv_fullscreen)):
-            _zr.addWidget(_mkbtn(_ic, _lb, _tip, _fn, h=40))
+            _zr.addWidget(_mkbtn(_ic, _lb, _tip, _fn, h=38, grp="slate"))
         _p1l.addLayout(_zr)
         self.pv_tabs.addTab(_p1, self.L("👁 Jhalak", "👁 Preview"))
         # Text tab
@@ -6029,7 +6035,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         _breadt.clicked.connect(self._pv_read_text)
         _bcopyt = QtWidgets.QPushButton(self.L("📋 Copy", "📋 Copy"))
         _bcopyt.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(self.pv_text.toPlainText()))
-        _tb.addWidget(_breadt); _tb.addWidget(_bcopyt)
+        _btr = QtWidgets.QPushButton(self.L("🌐 Translate", "🌐 Translate"))
+        _btr.clicked.connect(self._pv_translate)
+        _tb.addWidget(_breadt); _tb.addWidget(_bcopyt); _tb.addWidget(_btr)
         _p2l.addLayout(_tb)
         self.pv_tabs.addTab(_p2, self.L("🔤 Text", "🔤 Text"))
         # Info tab
@@ -6038,27 +6046,56 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.pv_info2.setStyleSheet("color:#334155;font-size:11px;padding:6px;")
         self.pv_tabs.addTab(self.pv_info2, self.L("ℹ Info", "ℹ Info"))
         pv.addWidget(self.pv_tabs, 1)
-        # quick-edit buttons (3 rows) — har button par icon + naam, turant apply
+
+        # ---- Filmstrip: sabhi pages ki chhoti jhalak (click = wo page) ----
+        self.pv_strip = QtWidgets.QListWidget()
+        self.pv_strip.setViewMode(QtWidgets.QListView.IconMode)
+        self.pv_strip.setFlow(QtWidgets.QListView.LeftToRight)
+        self.pv_strip.setWrapping(False); self.pv_strip.setMovement(QtWidgets.QListView.Static)
+        self.pv_strip.setFixedHeight(60); self.pv_strip.setIconSize(QtCore.QSize(38, 48))
+        self.pv_strip.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self.pv_strip.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.pv_strip.setStyleSheet("QListWidget{border:1px solid #e2e8f0;border-radius:6px;"
+                                    "background:#fff;}QListWidget::item:selected{"
+                                    "background:#e0f2f1;border:1px solid #0f766e;border-radius:4px;}")
+        self.pv_strip.itemClicked.connect(self._pv_strip_click)
+        pv.addWidget(self.pv_strip)
+
+        # ---- "sab pages par" toggle ----
+        self.pv_apply_all = QtWidgets.QCheckBox(self.L("Edit SABHI pages par lagao",
+                                                       "Apply edits to ALL pages"))
+        self.pv_apply_all.setStyleSheet("font-size:11px;color:#475569;")
+        self.pv_apply_all.setToolTip(self.L(
+            "On karo to neeche ka koi bhi sudhaar (ghumana, saaf, whiten…) SABHI pages par lagega.",
+            "When on, any edit below applies to ALL pages at once."))
+        pv.addWidget(self.pv_apply_all)
+
+        _L = self.L
         for _rowdef in (
-            (("↩️", self.L("Baayen", "Left"), self.L("Baayein ghumao", "Rotate left"), self.rotate_left),
-             ("↪️", self.L("Dayen", "Right"), self.L("Daayein ghumao", "Rotate right"), self.rotate_right),
-             ("✂️", self.L("Crop", "Crop"), self.L("Border apne aap kaato", "Auto-crop border"), self.autocrop_current),
-             ("📐", self.L("Seedha", "Straight"), self.L("Tedha page seedha karo", "Straighten (deskew)"), self.deskew_current),
-             ("🗑️", self.L("Delete", "Delete"), self.L("Ye page hatao", "Delete this page"), self.delete_page)),
-            (("☀️", self.L("Ujla", "Bright"), self.L("Halka/ujla karo", "Brighter"), lambda: self._enhance_current(1.12, 1.0)),
-             ("🌙", self.L("Gehra", "Dark"), self.L("Gehra karo", "Darker"), lambda: self._enhance_current(0.9, 1.0)),
-             ("🌗", self.L("Contrast", "Contrast"), self.L("Contrast badhao", "More contrast"), lambda: self._enhance_current(1.0, 1.15)),
-             ("✨", self.L("Saaf", "Clean"), self.L("Page saaf/ujla karo", "Auto-enhance"), self.enhance_current_page),
-             ("⬜", self.L("Whiten", "Whiten"), self.L("Gray/black backing safed karo", "Whiten dark backing"), self.whiten_current_page)),
-            (("✍️", self.L("Sign", "Sign"), self.L("Sign ya stamp lagao", "Add sign/stamp"), self.place_sign),
-             ("🖼️", self.L("Restore", "Restore"), self.L("Purani photo saaf karo", "Restore old photo"), self.restore_photo_current),
-             ("🆔", self.L("ID alag", "Split ID"), self.L("Ek page ke kai ID cards alag karo", "Split ID cards"), self.split_id_cards),
-             ("✏️", self.L("Rename", "Rename"), self.L("Is page/doc ka naam sikhao", "Rename / teach name"), self.rename_current_page),
-             ("🔍", self.L("Editor", "Editor"), self.L("Bade editor me kholo", "Open big editor"), self._pv_open_editor)),
+            (("↩️", _L("Baayen", "Left"), _L("Baayein ghumao", "Rotate left"), self.rotate_left, "blue"),
+             ("↪️", _L("Dayen", "Right"), _L("Daayein ghumao", "Rotate right"), self.rotate_right, "blue"),
+             ("🎯", _L("Angle", "Angle"), _L("Kisi bhi angle par seedha karo", "Rotate any angle"), self.rotate_any, "blue"),
+             ("✂️", _L("Crop", "Crop"), _L("Border apne aap kaato", "Auto-crop"), self.autocrop_current, "blue"),
+             ("📐", _L("Seedha", "Straight"), _L("Tedha seedha karo", "Deskew"), self.deskew_current, "blue")),
+            (("☀️", _L("Ujla", "Bright"), _L("Ujla karo", "Brighter"), lambda: self._enhance_current(1.12, 1.0), "green"),
+             ("🌙", _L("Gehra", "Dark"), _L("Gehra karo", "Darker"), lambda: self._enhance_current(0.9, 1.0), "green"),
+             ("🌗", _L("Contrast", "Contrast"), _L("Contrast badhao", "More contrast"), lambda: self._enhance_current(1.0, 1.15), "green"),
+             ("✨", _L("Saaf", "Clean"), _L("Auto saaf/ujla", "Auto-enhance"), self.enhance_current_page, "green"),
+             ("⬜", _L("Whiten", "Whiten"), _L("Backing safed karo", "Whiten backing"), self.whiten_current_page, "green")),
+            (("⬛", _L("B&W", "B&W"), _L("Kaala-safed banao", "Black & white"), lambda: self._to_mode("1"), "purple"),
+             ("🩶", _L("Gray", "Gray"), _L("Grayscale banao", "Grayscale"), lambda: self._to_mode("L"), "purple"),
+             ("🖼️", _L("Restore", "Restore"), _L("Purani photo saaf", "Restore photo"), self.restore_photo_current, "purple"),
+             ("✍️", _L("Sign", "Sign"), _L("Sign/stamp lagao", "Add sign/stamp"), self.place_sign, "purple"),
+             ("🆔", _L("ID alag", "Split ID"), _L("ID cards alag karo", "Split ID cards"), self.split_id_cards, "purple")),
+            (("✏️", _L("Rename", "Rename"), _L("Naam sikhao", "Rename"), self.rename_current_page, "slate"),
+             ("⧉", _L("Copy", "Duplicate"), _L("Is page ki nakal", "Duplicate this page"), self.duplicate_current_page, "slate"),
+             ("↶", _L("Undo", "Undo"), _L("Aakhri sudhaar wapas", "Undo last edit"), self._pv_undo, "slate"),
+             ("🗑️", _L("Delete", "Delete"), _L("Ye page hatao", "Delete this page"), self.delete_page, "slate"),
+             ("⋯", _L("Aur", "More"), _L("Print/share/khaali-check/Editor…", "Print/share/blank-check/Editor…"), self._pv_more_menu, "slate")),
         ):
             _qe = QtWidgets.QHBoxLayout(); _qe.setSpacing(4)
-            for _ic, _lb, _tip, _fn in _rowdef:
-                _qe.addWidget(self._mk_pv_btn(_ic, _lb, _tip, _fn))
+            for _ic, _lb, _tip, _fn, _g in _rowdef:
+                _qe.addWidget(self._mk_pv_btn(_ic, _lb, _tip, _fn, grp=_g))
             pv.addLayout(_qe)
         self.pv_info = QtWidgets.QLabel("")
         self.pv_info.setStyleSheet("color:#64748b;font-size:11px;")
@@ -6353,6 +6390,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.list.clearSelection()  # nothing "selected" by default; user picks with Ctrl/Shift
         self._dirty = True
         self._update_status(); self._update_empty_state()
+        try:
+            self._pv_build_filmstrip()
+        except Exception:
+            pass
 
     THUMB_HI_W = 360
     THUMB_HI_H = 480
@@ -8272,6 +8313,19 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _update_preview_panel(self):
         if not getattr(self, "preview_panel", None) or not self.preview_panel.isVisible():
             return
+        # filmstrip me current page highlight rakho
+        try:
+            if hasattr(self, "pv_strip"):
+                cur = self.list.currentRow()
+                if self.pv_strip.count() != self.list.count():
+                    self._pv_build_filmstrip()
+                if 0 <= cur < self.pv_strip.count():
+                    self.pv_strip.blockSignals(True)
+                    self.pv_strip.setCurrentRow(cur)
+                    self.pv_strip.scrollToItem(self.pv_strip.item(cur))
+                    self.pv_strip.blockSignals(False)
+        except Exception:
+            pass
         it = self.list.currentItem()
         if it is None:
             self.pv_img.clear(); self.pv_info.setText("")
@@ -8381,24 +8435,86 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.pv_text.setPlainText("" if isinstance(res, Exception) else (res or ""))
         self._run_bg(job, done, self.L("Text padh rahe hain…", "Reading text…"))
 
-    def _edit_current_bg(self, transform, busy_msg):
-        """Current page par ek image-transform BACKGROUND me chalao — UI ek pal
-        ke liye bhi nahi rukti. transform: PIL.Image(RGB) -> PIL.Image."""
+    def _pv_backup(self, paths):
+        """Undo ke liye: edit se pehle in pages ki asli copy rakh lo (1 level)."""
+        self._pv_undo_backup = {}
+        for p in paths:
+            try:
+                fd, tmp = tempfile.mkstemp(suffix=os.path.splitext(p)[1] or ".png")
+                os.close(fd)
+                shutil.copy2(p, tmp)
+                self._pv_undo_backup[p] = tmp
+            except Exception:
+                pass
+
+    def _pv_undo(self):
+        """Aakhri edit wapas lo — backup se pages bahal karo."""
+        bak = getattr(self, "_pv_undo_backup", None)
+        if not bak:
+            self.status.showMessage(self.L("Undo ke liye kuch nahi", "Nothing to undo"), 3000)
+            return
+        n = 0
+        for p, tmp in list(bak.items()):
+            try:
+                if os.path.exists(tmp):
+                    shutil.copy2(tmp, p)
+                    os.remove(tmp)
+                    n += 1
+            except Exception:
+                pass
+        self._pv_undo_backup = {}
+        self._refresh_all_thumbs()
+        self._update_preview_panel()
+        self.status.showMessage(self.L("↶ %d page wapas aaye" % n,
+                                       "↶ Reverted %d page(s)" % n), 3000)
+
+    def _edit_targets(self):
+        """Edit kispar lage: apply-all on ho to SAB pages, warna current."""
+        if getattr(self, "pv_apply_all", None) and self.pv_apply_all.isChecked():
+            paths = self._ordered_paths()
+            return paths, True
         item = self._current_item_or_warn()
         if not item:
+            return [], False
+        return [item.data(QtCore.Qt.UserRole)], False
+
+    def _refresh_all_thumbs(self):
+        for i in range(self.list.count()):
+            try:
+                self._refresh_item(self.list.item(i))
+            except Exception:
+                pass
+        self._pv_build_filmstrip()
+
+    def _edit_current_bg(self, transform, busy_msg):
+        """Image-transform BACKGROUND me — UI nahi rukti. Apply-all ho to sab
+        pages par; undo ke liye pehle backup. transform: PIL.Image(RGB)->Image."""
+        paths, allmode = self._edit_targets()
+        if not paths:
             return
-        path = item.data(QtCore.Qt.UserRole)
+        self._pv_backup(paths)
 
         def job():
-            with Image.open(path) as im:
-                transform(im.convert("RGB")).save(path, "PNG")
-            return path
+            for p in paths:
+                try:
+                    with Image.open(p) as im:
+                        transform(im.convert("RGB")).save(p, "PNG")
+                except Exception:
+                    pass
+            return True
 
         def on_done(res):
             if isinstance(res, Exception):
                 self._warn(self.L("Edit fail: %s", "Edit failed: %s") % res)
                 return
-            self._refresh_item(item)
+            if allmode:
+                self._refresh_all_thumbs()
+            else:
+                try:
+                    self._refresh_item(self.list.currentItem())
+                except Exception:
+                    pass
+                self._pv_build_filmstrip()
             self._update_preview_panel()
             self._dirty = True
         self._run_bg(job, on_done, busy_msg)
@@ -8414,6 +8530,175 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def whiten_current_page(self):
         self._edit_current_bg(lambda im: whiten_dark_background(im),
                               self.L("Backing safed kar rahe hain…", "Whitening…"))
+
+    def rotate_any(self):
+        """Kisi bhi angle (jaise 2°, -3°) par ghumakar seedha karo."""
+        deg, ok = QtWidgets.QInputDialog.getDouble(
+            self, self.L("Kitne degree?", "How many degrees?"),
+            self.L("Ghumao (+ = daayein, − = baayein):", "Rotate (+ = right, − = left):"),
+            0.0, -180.0, 180.0, 1)
+        if not ok or abs(deg) < 0.01:
+            return
+        self._edit_current_bg(
+            lambda im: im.rotate(-deg, expand=True, fillcolor=(255, 255, 255),
+                                 resample=Image.BICUBIC),
+            self.L("Ghuma rahe hain…", "Rotating…"))
+
+    def _to_mode(self, mode):
+        """Page ko B&W ('1') / Grayscale ('L') me badlo (RGB me wapas dikhega)."""
+        def _t(im):
+            if mode == "1":
+                return im.convert("L").point(lambda x: 255 if x > 150 else 0, "1").convert("RGB")
+            if mode == "L":
+                return im.convert("L").convert("RGB")
+            return im
+        self._edit_current_bg(_t, self.L("Badal rahe hain…", "Converting…"))
+
+    def duplicate_current_page(self):
+        """Current page ki ek nakal uske theek baad jod do."""
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        src = item.data(QtCore.Qt.UserRole)
+        try:
+            fd, dst = tempfile.mkstemp(suffix=os.path.splitext(src)[1] or ".png", dir=self._tmpdir)
+            os.close(fd)
+            shutil.copy2(src, dst)
+        except Exception as exc:
+            self._warn("Copy fail: %s" % exc); return
+        row = self.list.row(item)
+        self._add_item_for_path(dst)               # end me add hota hai
+        # use theek current ke baad le aao
+        last = self.list.count() - 1
+        it2 = self.list.takeItem(last)
+        self.list.insertItem(row + 1, it2)
+        self.list.setCurrentItem(it2)
+        self._renumber_pages()
+        self._pv_build_filmstrip()
+        self.status.showMessage(self.L("⧉ Page ki nakal ban gayi", "⧉ Page duplicated"), 3000)
+
+    def _pv_translate(self):
+        txt = self.pv_text.toPlainText().strip()
+        if not txt:
+            self._pv_read_text()
+            QtCore.QTimer.singleShot(1200, self._pv_translate_now)
+            return
+        self._pv_translate_now()
+
+    def _pv_translate_now(self):
+        txt = self.pv_text.toPlainText().strip()
+        if not txt:
+            self.status.showMessage(self.L("Pehle 'Text padho' dabao", "Press 'Read text' first"), 3000)
+            return
+
+        def job():
+            try:
+                import urllib.request as U, urllib.parse as P, json as J, ssl
+                ctx = ssl._create_unverified_context()
+                q = P.urlencode({"client": "gtx", "sl": "auto", "tl": "en",
+                                 "dt": "t", "q": txt[:1800]})
+                url = "https://translate.googleapis.com/translate_a/single?" + q
+                r = U.urlopen(U.Request(url, headers={"User-Agent": "Mozilla/5.0"}),
+                              timeout=15, context=ctx)
+                data = J.loads(r.read().decode("utf-8", "ignore"))
+                return "".join(seg[0] for seg in data[0] if seg and seg[0])
+            except Exception as e:
+                return e
+
+        def done(res):
+            if isinstance(res, Exception) or not res:
+                self.status.showMessage(self.L("Translate nahi ho paya", "Translate failed"), 3000)
+                return
+            self.pv_tabs.setCurrentIndex(1)
+            self.pv_text.setPlainText(res)
+        self._run_bg(job, done, self.L("Translate ho raha hai…", "Translating…"))
+
+    def _pv_strip_click(self, item):
+        r = item.data(QtCore.Qt.UserRole)
+        if isinstance(r, int) and 0 <= r < self.list.count():
+            self.list.setCurrentRow(r)
+
+    def _pv_build_filmstrip(self):
+        if not hasattr(self, "pv_strip"):
+            return
+        try:
+            self.pv_strip.blockSignals(True)
+            self.pv_strip.clear()
+            for i in range(self.list.count()):
+                src = self.list.item(i)
+                it = QtWidgets.QListWidgetItem(src.icon(), str(i + 1))
+                it.setData(QtCore.Qt.UserRole, i)
+                it.setTextAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignBottom)
+                self.pv_strip.addItem(it)
+            cur = self.list.currentRow()
+            if 0 <= cur < self.pv_strip.count():
+                self.pv_strip.setCurrentRow(cur)
+            self.pv_strip.blockSignals(False)
+        except Exception:
+            pass
+
+    def _pv_more_menu(self):
+        m = QtWidgets.QMenu(self)
+        m.addAction(self.L("🔍 Bade editor me kholo", "🔍 Open big editor"), self._pv_open_editor)
+        m.addAction(self.L("🎨 Rang wapas (RGB)", "🎨 Back to colour (RGB)"),
+                    lambda: self._to_mode("RGB"))
+        m.addSeparator()
+        m.addAction(self.L("🖨 Sirf ye page print karo", "🖨 Print only this page"),
+                    self._print_this_page)
+        m.addAction(self.L("🟢 Ye page WhatsApp/Email (PDF banakar)", "🟢 Share this page (as PDF)"),
+                    self._share_this_page)
+        m.addSeparator()
+        m.addAction(self.L("📭 Ye page khaali hai kya?", "📭 Is this page blank?"),
+                    self._check_blank_page)
+        m.exec_(QtGui.QCursor.pos())
+
+    def _print_this_page(self):
+        item = self._current_item_or_warn()
+        if item:
+            self._do_print([item.data(QtCore.Qt.UserRole)], per_page=1)
+
+    def _share_this_page(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        try:
+            out = os.path.join(self._tmpdir, "page_share.pdf")
+            self._pages_as_pdf([item.data(QtCore.Qt.UserRole)], out)
+        except Exception as exc:
+            self._warn("Fail: %s" % exc); return
+        self.share_whatsapp(out)
+
+    def _check_blank_page(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        path = item.data(QtCore.Qt.UserRole)
+
+        def job():
+            try:
+                with Image.open(path) as im:
+                    g = im.convert("L")
+                    hist = g.histogram()
+                    total = sum(hist) or 1
+                    dark = sum(hist[:200])          # kitne pixel likhai-jaise (dark)
+                    return dark / float(total)
+            except Exception as e:
+                return e
+
+        def done(res):
+            if isinstance(res, Exception):
+                return
+            if res < 0.012:
+                if QtWidgets.QMessageBox.question(
+                        self, self.L("Khaali page", "Blank page"),
+                        self.L("Ye page lagbhag khaali lagta hai. Hata dein?",
+                               "This page looks almost blank. Delete it?"),
+                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                        QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes:
+                    self.delete_page()
+            else:
+                self.status.showMessage(self.L("Ye page khaali nahi hai", "This page is not blank"), 3000)
+        self._run_bg(job, done, self.L("Jaanch rahe hain…", "Checking…"))
 
     def _rebuild_jobs_bar(self):
         while self._jobs_lay.count():
@@ -9229,17 +9514,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         return item
 
     def _rotate(self, angle):
-        item = self._current_item_or_warn()
-        if not item:
-            return
-        path = item.data(QtCore.Qt.UserRole)
-        try:
-            with Image.open(path) as im:
-                im.rotate(angle, expand=True).save(path)
-        except Exception as exc:
-            self._warn("Rotate fail:\n%s" % exc); return
-        self._dirty = True
-        self._refresh_item(item)
+        # ab _edit_current_bg se — undo + 'sab pages par' dono chalte hain
+        self._edit_current_bg(lambda im: im.rotate(angle, expand=True),
+                              self.L("Ghuma rahe hain…", "Rotating…"))
 
     def rotate_left(self):
         self._rotate(90)
@@ -9248,21 +9525,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._rotate(-90)
 
     def _enhance_current(self, brightness, contrast):
-        item = self._current_item_or_warn()
-        if not item:
-            return
-        path = item.data(QtCore.Qt.UserRole)
-
-        def job():
-            return enhance_image(path, brightness, contrast)
-
-        def on_done(res):
-            if isinstance(res, Exception):
-                return
-            self._refresh_item(item)
-            self._update_preview_panel()
-            self._dirty = True
-        self._run_bg(job, on_done, self.L("Badlav ho raha hai…", "Applying…"))
+        from PIL import ImageEnhance
+        def _t(im):
+            im = ImageEnhance.Brightness(im).enhance(brightness)
+            im = ImageEnhance.Contrast(im).enhance(contrast)
+            return im
+        self._edit_current_bg(_t, self.L("Badlav ho raha hai…", "Applying…"))
 
     def autocrop_current(self):
         self._edit_current_bg(lambda im: autocrop(im),
