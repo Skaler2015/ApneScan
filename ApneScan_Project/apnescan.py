@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "50"
+VERSION = "51"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -298,7 +298,7 @@ RESOLUTIONS = ["150", "200", "300", "600"]
 # (id, label, default key) — all reassignable via Settings -> Keyboard Shortcuts
 SHORTCUTS = [
     ("scan", "Scan", "Return"),
-    ("import", "Import images / PDF", "Ctrl+O"),
+    ("import", "Import images / PDF", "Ctrl+I"),
     ("rename", "Rename page", "F2"),
     ("save_all", "Save all as PDF", "Ctrl+S"),
     ("save_sel", "Save selected as PDF", "Space"),
@@ -1021,7 +1021,17 @@ class StatsWorker(QtCore.QThread):
                                       context=ssl._create_unverified_context())
                         data = J.loads(r.read().decode("utf-8", "ignore"))
                     except Exception:
-                        data = None
+                        # aakhri koshish: system-proxy ko BYPASS karke (kabhi
+                        # office/hospital ka galat proxy app ko rok deta hai,
+                        # jabki browser chal jata hai)
+                        try:
+                            opener = U.build_opener(
+                                U.ProxyHandler({}),
+                                U.HTTPSHandler(context=ssl._create_unverified_context()))
+                            r = opener.open(req, timeout=25)
+                            data = J.loads(r.read().decode("utf-8", "ignore"))
+                        except Exception:
+                            data = None
             if data and data.get("ok"):
                 self.got.emit(int(data.get("total", 0)),
                               int(data.get("today", 0)),
@@ -3598,6 +3608,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, tr("scan_method", self._lang) + "…", self.choose_scan_method, "हिन्दी: Scan ka tareeka: escl (network duplex), twain (USB duplex), ya wia.\nEnglish: Scan method: escl (network duplex), twain (USB), or wia.")
         self._ma(ms, tr("language", self._lang) + "…", self.choose_language, "हिन्दी: App ki bhasha badlo (Hindi/English).\nEnglish: Change the app language.")
         self._ma(ms, "Stats server URL…", self.set_stats_url, "हिन्दी: Worldwide stats ke liye Google Apps Script ka URL daalein (kitne scan hue, kitne online).\nEnglish: Set the stats server URL (worldwide scan counts + online users).")
+        self._ma(ms, "🔌 Stats connection test…", self.test_stats_connection, "हिन्दी: Worldwide stats server se connection jaancho — kya galti aa rahi hai, wo saaf dikhega.\nEnglish: Test the connection to the stats server and show the exact error, if any.")
         self._ma(ms, "🔍 Scanner auto-detect (LAN + USB)…", self.auto_detect_scanner, "हिन्दी: Scanner KHUD pehchano — LAN (network) par hai ya USB par, dono dhoondh kar sabse behtar chun leta hai. Kuch sochna nahi padta.\nEnglish: Auto-detect the scanner — finds it on LAN or USB automatically and picks the best.")
         self._ma(ms, "Scanner khud dhoondo (sirf network)…", self.find_scanners, "हिन्दी: Sirf network (eSCL) par scanner dhoondho.\nEnglish: Discover only network (eSCL) scanners.")
         self._ma(ms, "Scanner IP…", self.set_scanner_ip, "हिन्दी: Network scanner ka IP set karo (jaise 192.168.1.8).\nEnglish: Set the network scanner IP.")
@@ -4071,6 +4082,92 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
         self._set_stats_display(None)
         self._refresh_stats()
+
+    def test_stats_connection(self):
+        """Stats server se connection ka LIVE test — exact galti dikhata hai
+        (taaki 'worldwide stats aa nahi rahe' ki asli wajah pata chale)."""
+        import urllib.request as U
+        import urllib.parse as P
+        import ssl
+        url = self._stats_url()
+        if not url:
+            self._warn(self.L("Stats URL khaali hai (Settings → Stats server URL).",
+                              "Stats URL is empty (Settings → Stats server URL)."))
+            return
+        full = url + ("&" if "?" in url else "?") + P.urlencode({"action": "stats"})
+        lines = ["App version: v%s" % VERSION, "URL:", full, ""]
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            for label, ctx in (("1) Normal (verified)", None),
+                               ("2) Bina-verify (unverified)", ssl._create_unverified_context())):
+                try:
+                    req = U.Request(full, headers={"User-Agent": "ApneScan/%s" % VERSION})
+                    if ctx is None:
+                        r = U.urlopen(req, timeout=15)
+                    else:
+                        r = U.urlopen(req, timeout=15, context=ctx)
+                    body = r.read().decode("utf-8", "ignore")[:400]
+                    lines.append("%s: ✅ OK (HTTP %s)" % (label, getattr(r, "status", "?")))
+                    lines.append("   " + body)
+                except Exception as e:
+                    lines.append("%s: ❌ FAIL" % label)
+                    lines.append("   " + repr(e)[:400])
+                lines.append("")
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("Stats connection test", "Stats connection test"))
+        dlg.resize(620, 380)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel(self.L(
+            "Ye nateeja copy karke bhej dein — isse asli galti pata chal jayegi:",
+            "Copy this result and send it — it pinpoints the exact problem:")))
+        te = QtWidgets.QPlainTextEdit("\n".join(lines))
+        te.setReadOnly(True)
+        v.addWidget(te, 1)
+        bb = QtWidgets.QHBoxLayout()
+        bcopy = QtWidgets.QPushButton(self.L("📋 Copy", "📋 Copy"))
+        bcopy.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText("\n".join(lines)))
+        bok = QtWidgets.QPushButton("OK"); bok.clicked.connect(dlg.accept)
+        bb.addWidget(bcopy); bb.addStretch(1); bb.addWidget(bok)
+        v.addLayout(bb)
+        dlg.exec_()
+
+    def _paste_from_clipboard(self):
+        """Ctrl+V: clipboard se image/PDF ya copy ki hui file(s) app me laao.
+        Agar kisi text-box me likh rahe hain to wahan normal paste ho."""
+        fw = QtWidgets.QApplication.focusWidget()
+        if isinstance(fw, (QtWidgets.QLineEdit, QtWidgets.QPlainTextEdit, QtWidgets.QTextEdit)):
+            try:
+                fw.paste()
+            except Exception:
+                pass
+            return
+        cb = QtWidgets.QApplication.clipboard()
+        md = cb.mimeData()
+        exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".pdf")
+        if md is not None and md.hasUrls():
+            files = [u.toLocalFile() for u in md.urls()
+                     if u.toLocalFile().lower().endswith(exts)]
+            if files:
+                self._start_import(files, "normal")
+                self.status.showMessage(self.L("📋 Paste se %d file aayi" % len(files),
+                                               "📋 Pasted %d file(s)" % len(files)), 4000)
+                return
+        img = cb.image()
+        if img is not None and not img.isNull():
+            try:
+                fd, tmp = tempfile.mkstemp(suffix=".png")
+                os.close(fd)
+                img.save(tmp, "PNG")
+                self._start_import([tmp], "normal")
+                self.status.showMessage(self.L("📋 Clipboard ki image aa gayi",
+                                               "📋 Pasted image from clipboard"), 4000)
+                return
+            except Exception:
+                pass
+        self.status.showMessage(self.L("Clipboard me image/PDF nahi mila",
+                                       "No image/PDF found in clipboard"), 3000)
 
     def set_scanner_ip(self):
         ip, ok = QtWidgets.QInputDialog.getText(self, "Scanner IP", "Scanner IP:", text=self.ip_field.text())
@@ -5752,6 +5849,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._state_timer.timeout.connect(self._tick_scanner_state)
         self._state_timer.start()
         QtCore.QTimer.singleShot(800, self._tick_scanner_state)
+        # Ctrl+O = koi folder kholo (sidebar me) · Ctrl+V = clipboard se paste
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+O"), self, self.open_existing_folder)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+V"), self, self._paste_from_clipboard)
         self._stats_timer = QtCore.QTimer(self)
         self._stats_timer.setInterval(90000)
         self._stats_timer.timeout.connect(lambda: self._refresh_stats("ping"))
@@ -7119,7 +7219,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 "📥 Imported %d file(s)" % n), 4000)
         self._run_bg(job, on_done, self.L("Laa rahe hain…", "Importing…"))
 
-    def _save_pages_to_folder(self, folder, paths, ask_name=True):
+    def _save_pages_to_folder(self, folder, paths, ask_name=True, merge_same=False):
         if not paths:
             self._warn(tr("scan_first", self._lang))
             return
@@ -7136,14 +7236,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
             default = name.strip()
         base = sanitize(underscore_name(default))
         out = os.path.join(folder, base + ".pdf")
-        n = 2
-        while os.path.exists(out):          # duplicate par khud numbering
-            out = os.path.join(folder, "%s_%d.pdf" % (base, n))
-            n += 1
-        if not self._validate_claim_ok() or not self._duplicate_ok():
+        # merge_same (drag-drop save): usi naam ki PDF ho to naye pages usi me
+        # jod do (ek hi PDF). Warna duplicate par _2, _3… numbering.
+        merge_into = out if (merge_same and os.path.exists(out) and HAS_OCR_LIBS) else None
+        if not merge_into:
+            n = 2
+            while os.path.exists(out):
+                out = os.path.join(folder, "%s_%d.pdf" % (base, n))
+                n += 1
+        if not self._validate_claim_ok():
+            return
+        if not merge_into and not self._duplicate_ok():
             return
         try:
-            self._pages_as_pdf(paths, out)
+            if merge_into:
+                self._append_pages_to_pdf(merge_into, paths)
+                out = merge_into
+            else:
+                self._pages_as_pdf(paths, out)
         except Exception:
             self._warn("Save fail:\n%s" % traceback.format_exc())
             return
@@ -7152,34 +7262,60 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._record_save(out, len(paths))
         self._dirty = False
         self._after_save_action(out)
+        # Save hote hi wahi folder sidebar me khol do (aur file select)
         try:
+            self._panel_show(folder)
             self.files_tree.setCurrentIndex(self.files_model.index(out))
         except Exception:
             pass
-        self.status.showMessage("✔ Save ho gayi: %s" % out, 7000)
+        msg = ("✔ Isi PDF me jud gaya: %s" if merge_into else "✔ Save ho gayi: %s") % out
+        self.status.showMessage(msg, 7000)
+
+    def _append_pages_to_pdf(self, pdf_path, paths):
+        """Naye pages ko ek maujooda PDF ke aage jodo (same-naam merge)."""
+        fd, tmp = tempfile.mkstemp(suffix=".pdf")
+        os.close(fd)
+        try:
+            self._pages_as_pdf(paths, tmp)
+            writer = PdfWriter()
+            for src in (pdf_path, tmp):
+                for pg in PdfReader(src).pages:
+                    writer.add_page(pg)
+            with open(pdf_path, "wb") as fh:
+                writer.write(fh)
+        finally:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
 
     def _on_pages_dropped(self, idx):
         """Pages ko folder par DROP karo = turant wahan save (auto naam se).
-        Jo pages select hain wahi; kuch select na ho to saare."""
+        Kuch folder par na chhoda ho to ABHI KHULE folder me. Agar usi naam ki
+        PDF pehle se hai to naye pages usi me jud jaate hain (ek hi PDF)."""
         try:
-            p = self.files_model.filePath(idx) if idx.isValid() else self._files_root()
+            p = self.files_model.filePath(idx) if idx.isValid() else self._panel_current_dir()
         except Exception:
-            p = self._files_root()
+            p = self._panel_current_dir()
         folder = p if os.path.isdir(p) else os.path.dirname(p)
         paths = self._selected_paths() or self._ordered_paths()
-        self._save_pages_to_folder(folder, paths, ask_name=False)
+        self._save_pages_to_folder(folder, paths, ask_name=False, merge_same=True)
 
     def _files_sel_changed(self, cur, _prev):
-        # Folder chunte hi status me uska hisaab: kitni files, kitni jagah
+        # Folder chunte hi status me hisaab; FILE chunte hi uska preview
         try:
             p = self.files_model.filePath(cur)
-            if p and os.path.isdir(p):
+            if not p:
+                return
+            if os.path.isdir(p):
                 files = [f for f in os.listdir(p)
                          if os.path.isfile(os.path.join(p, f))]
                 sz = sum(os.path.getsize(os.path.join(p, f)) for f in files)
                 self.status.showMessage(
                     "📁 %s — %d files, %.1f MB" %
                     (os.path.basename(p) or p, len(files), sz / 1048576.0), 4000)
+            elif os.path.isfile(p):
+                self._preview_file_in_panel(p)   # PDF/image ka preview panel me
         except Exception:
             pass
 
