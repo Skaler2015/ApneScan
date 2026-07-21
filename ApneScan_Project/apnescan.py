@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "32"
+VERSION = "33"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -365,6 +365,8 @@ DEFAULT_OPTIONS = {
     "show_left_panel": True,     # baayan scan-settings panel
     "fav_folders": [],           # panel ke ⭐ favourite folders
     "sidebar_stats": [],         # khaali = default set dikhega
+    "name_append_number": False, # auto-naam me document number bhi jodo
+    "name_append_date": False,   # auto-naam me date bhi jodo
     "ui_dashboard": True,        # khaali screen par bade action-cards
     "ui_fab": False,             # floating gol Scan button
     "ui_header": True,           # toolbar ke neeche status-patti
@@ -2084,6 +2086,23 @@ def learned_name_for(text, learned, thr=0.45):
     return best_name if best_score >= 0.40 else None
 
 
+def extract_doc_number(text):
+    """Page ke text me se sabse sambhavit 'document number' (invoice/bill/claim/
+    receipt no.) nikaalo. 'No/No./Number/Bill/Invoice/Claim/Receipt' ke aage wala
+    number pehle dekha jata hai; na mile to koi lamba alphanumeric code."""
+    t = text or ""
+    m = re.search(r"(?:invoice|bill|claim|receipt|ref(?:erence)?|no|number|"
+                  r"बिल|रसीद|क्लेम|संख्या|नंबर)\.?\s*(?:संख्या|नंबर|no|number)?\.?"
+                  r"\s*[:#-]?\s*([A-Za-z]{0,4}\d[\w\-/]{2,20})",
+                  t, re.IGNORECASE)
+    if m:
+        return re.sub(r"[^A-Za-z0-9\-]", "", m.group(1))[:24]
+    m = re.search(r"\b([A-Z]{2,5}[-/]?\d{3,})\b", t)   # jaise INV-1234, ABC/2026/45
+    if m:
+        return re.sub(r"[^A-Za-z0-9\-]", "", m.group(1))[:24]
+    return ""
+
+
 def classify_from_text(text):
     t = " " + re.sub(r"\s+", " ", (text or "").lower()) + " "
     scores = []
@@ -2617,6 +2636,12 @@ class OptionsDialog(QtWidgets.QDialog):
         self.chk_autoname = QtWidgets.QCheckBox("Document ka naam apne aap padho (OCR)")
         self.chk_autoname.setChecked(self.opts.get("auto_name", False))
         form.addRow(chkrow(self.chk_autoname, "हिन्दी: ON: scan ke baad har page ka naam (document ka title, jaise DISCHARGE SUMMARY / RECEIPT) apne aap padh kar likh dega — 'Page 1,2' ke bajay. (OCR/Tesseract chahiye.)\nEnglish: ON: after scanning, auto-labels each page with its document title (needs OCR)."))
+        self.chk_name_num = QtWidgets.QCheckBox("Naam me document number bhi jodo")
+        self.chk_name_num.setChecked(self.opts.get("name_append_number", False))
+        form.addRow(chkrow(self.chk_name_num, "हिन्दी: ON: auto-naam me bill/invoice/claim number bhi apne aap jud jayega (jaise Bill_INV1234). Page ke text se number padha jata hai.\nEnglish: ON: appends the detected bill/invoice/claim number to the auto name (e.g. Bill_INV1234)."))
+        self.chk_name_date = QtWidgets.QCheckBox("Naam me aaj ki date bhi jodo")
+        self.chk_name_date.setChecked(self.opts.get("name_append_date", False))
+        form.addRow(chkrow(self.chk_name_date, "हिन्दी: ON: auto-naam ke aage aaj ki date lag jayegi (jaise Bill_2026-07-21).\nEnglish: ON: appends today's date to the auto name (e.g. Bill_2026-07-21)."))
 
         header("Save")
         self.chk_autosave = QtWidgets.QCheckBox("Scan ke baad PDF apne aap save karo")
@@ -2732,6 +2757,8 @@ class OptionsDialog(QtWidgets.QDialog):
         o["theme"] = ["light", "dark", "darkpro"][self.cmb_theme.currentIndex()]
         o["show_page_numbers"] = self.chk_pagenum.isChecked()
         o["auto_name"] = self.chk_autoname.isChecked()
+        o["name_append_number"] = self.chk_name_num.isChecked()
+        o["name_append_date"] = self.chk_name_date.isChecked()
         o["save_images_too"] = self.chk_imgtoo.isChecked()
         o["auto_save"] = self.chk_autosave.isChecked()
         o["save_folder"] = self.folder_edit.text().strip()
@@ -3658,11 +3685,39 @@ class ScannerWindow(QtWidgets.QMainWindow):
             # if this same document was saved before, reuse THAT saved name
             remembered = (self._config.get("doc_names", {}) or {}).get(key)
             label = remembered or underscore_name(title)
+            # #5: naam me document-number aur/ya date apne aap jodo
+            try:
+                path = it.data(QtCore.Qt.UserRole)
+                extra = []
+                if self._opts.get("name_append_number"):
+                    num = extract_doc_number(page_ocr_text(path, 0.75))
+                    if num:
+                        extra.append(num)
+                if self._opts.get("name_append_date"):
+                    extra.append(datetime.datetime.now().strftime("%Y-%m-%d"))
+                if extra:
+                    label = underscore_name(label + "_" + "_".join(extra))
+            except Exception:
+                pass
             it.setData(TITLE_ROLE, label)
             it.setData(NAMEKEY_ROLE, key)
             it.setText(label)
             self._named_count = getattr(self, "_named_count", 0) + 1
             self._pstats_bump(ocr_named=1)
+            # #2: is naam ke liye folder yaad ho to save wahin default ho
+            self._apply_folder_hint_for(title)
+
+    def _apply_folder_hint_for(self, title):
+        """Seekhe naam ke saath jo folder yaad hai (agar hai) use save-hint bana do."""
+        try:
+            base = underscore_name(title).lower()
+            for e in (self._config.get("learned_names", []) or []):
+                if e.get("folder") and underscore_name(e.get("name", "")).lower() in base:
+                    if os.path.isdir(e["folder"]):
+                        self._doc_folder_hint = e["folder"]
+                        return
+        except Exception:
+            pass
 
     def _on_naming_done(self):
         got = getattr(self, "_named_count", 0)
@@ -5672,6 +5727,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
 
     def do_scan(self):
+        self._doc_folder_hint = None   # naya scan = folder-hint reset
         method = self._opts.get("scanner_method", "twain")
         prof = self._selected_profile()
         if method == "escl":
@@ -7913,13 +7969,30 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "%d document-naam yaad hain. Kisi ko chun kar hata/badal sakte ho:" % len(learned),
             "%d document names are remembered. Select one to remove/rename:" % len(learned))))
         lw = QtWidgets.QListWidget()
+
+        def _row_text(e):
+            fol = ("  \u2192  \ud83d\udcc1 " + os.path.basename(e["folder"])) if e.get("folder") else ""
+            return "\ud83d\udcc4 %s   (%d shabd)%s" % (e.get("name", "-"), len(e.get("words", [])), fol)
         for e in learned:
-            it = QtWidgets.QListWidgetItem("\ud83d\udcc4 %s   (%d shabd)" %
-                                           (e.get("name", "-"), len(e.get("words", []))))
+            it = QtWidgets.QListWidgetItem(_row_text(e))
             it.setData(QtCore.Qt.UserRole, e)
             lw.addItem(it)
         v.addWidget(lw, 1)
         row = QtWidgets.QHBoxLayout()
+
+        def _set_folder():
+            it = lw.currentItem()
+            if not it:
+                return
+            e = it.data(QtCore.Qt.UserRole)
+            f = QtWidgets.QFileDialog.getExistingDirectory(
+                dlg, self.L("Is naam ke documents kis folder me save hon?",
+                            "Save documents with this name to which folder?"),
+                e.get("folder") or self._opts.get("save_folder", ""))
+            if f:
+                e["folder"] = f
+                it.setText(_row_text(e))
+                save_config(self._config)
 
         def _rename():
             it = lw.currentItem()
@@ -7953,14 +8026,63 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                     QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes:
                 learned.clear(); lw.clear(); save_config(self._config)
+        def _export():
+            out, _ = QtWidgets.QFileDialog.getSaveFileName(
+                dlg, self.L("Seekhe naam export", "Export learned names"),
+                os.path.join(os.path.expanduser("~"), "apnescan_names.json"),
+                "Names (*.json)")
+            if not out:
+                return
+            try:
+                with open(out, "w", encoding="utf-8") as fh:
+                    json.dump(learned, fh, ensure_ascii=False)
+                QtWidgets.QMessageBox.information(dlg, "OK", self.L(
+                    "Export ho gaya:\n%s\n\nNaye PC par Import se le aana." % out,
+                    "Exported:\n%s\n\nUse Import on another PC." % out))
+            except Exception as exc:
+                self._warn("Export fail: %s" % exc)
+
+        def _import():
+            f, _ = QtWidgets.QFileDialog.getOpenFileName(
+                dlg, self.L("Naam file chuno", "Choose names file"),
+                os.path.expanduser("~"), "Names (*.json)")
+            if not f:
+                return
+            try:
+                with open(f, "r", encoding="utf-8") as fh:
+                    incoming = json.load(fh)
+                added = 0
+                for e in incoming:
+                    if not isinstance(e, dict) or not e.get("name"):
+                        continue
+                    ex = set(e.get("words", []))
+                    dup = any(_containment(ex, set(o.get("words", []))) >= 0.7
+                              for o in learned)
+                    if not dup:
+                        learned.append(e); added += 1
+                save_config(self._config)
+                lw.clear()
+                for e in learned:
+                    it = QtWidgets.QListWidgetItem(_row_text(e))
+                    it.setData(QtCore.Qt.UserRole, e); lw.addItem(it)
+                QtWidgets.QMessageBox.information(dlg, "OK", self.L(
+                    "%d naye naam aa gaye." % added, "%d new names imported." % added))
+            except Exception as exc:
+                self._warn("Import fail: %s" % exc)
         for t, fn in ((self.L("\u270f Naam badlo", "\u270f Rename"), _rename),
+                      (self.L("\ud83d\udcc1 Folder set", "\ud83d\udcc1 Set folder"), _set_folder),
                       (self.L("\ud83d\uddd1 Hatao", "\ud83d\uddd1 Remove"), _del),
                       (self.L("Sab hatao", "Clear all"), _clear)):
             b = QtWidgets.QPushButton(t); b.clicked.connect(fn); row.addWidget(b)
         row.addStretch(1)
-        bc = QtWidgets.QPushButton(self.L("Band karo", "Close")); bc.clicked.connect(dlg.accept)
-        row.addWidget(bc)
         v.addLayout(row)
+        row2 = QtWidgets.QHBoxLayout()
+        be = QtWidgets.QPushButton(self.L("\ud83d\udce4 Export", "\ud83d\udce4 Export")); be.clicked.connect(_export)
+        bi = QtWidgets.QPushButton(self.L("\ud83d\udce5 Import", "\ud83d\udce5 Import")); bi.clicked.connect(_import)
+        row2.addWidget(be); row2.addWidget(bi); row2.addStretch(1)
+        bc = QtWidgets.QPushButton(self.L("Band karo", "Close")); bc.clicked.connect(dlg.accept)
+        row2.addWidget(bc)
+        v.addLayout(row2)
         dlg.exec_()
 
     def _list_context_menu_end(self):
@@ -8028,6 +8150,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
 
     def _target_folder(self):
+        # #2: is document ke naam ke liye folder yaad ho to wahi (sabse pehle)
+        hint = getattr(self, "_doc_folder_hint", None)
+        if hint and os.path.isdir(hint):
+            return hint
         # If the user isn't using auto-organizing folders, reopen wherever they
         # saved last time.
         last = self._config.get("last_save_dir")
