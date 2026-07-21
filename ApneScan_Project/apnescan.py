@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "38"
+VERSION = "39"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -957,6 +957,25 @@ class EsclTestWorker(QtCore.QThread):
         self.done.emit("\n".join(lines))
 
 
+def _urlopen_safe(req, timeout=20):
+    """HTTPS open jo Windows/PyInstaller build me bhi chale. Kai baar frozen
+    .exe ko CA-certificate store nahi milta -> SSL verify fail hota hai aur
+    HTTPS request chup-chaap error de deti hai (isi wajah se sidebar ke
+    worldwide stats '...' par atak jaate the). Aise me — sirf public ginti/
+    version ke liye — bina-verify dobara try karte hain, taaki numbers aur
+    update-check hamesha chalein."""
+    import urllib.request as U
+    import urllib.error as E
+    import ssl
+    try:
+        return U.urlopen(req, timeout=timeout)
+    except E.URLError as ex:
+        if isinstance(getattr(ex, "reason", None), ssl.SSLError):
+            return U.urlopen(req, timeout=timeout,
+                             context=ssl._create_unverified_context())
+        raise
+
+
 class StatsWorker(QtCore.QThread):
     """Talk to the ApneScan stats server (Google Apps Script). action:
     'ping' (mark online + fetch), 'scan' (add scans + fetch), 'stats' (fetch).
@@ -984,7 +1003,8 @@ class StatsWorker(QtCore.QThread):
             if self.action == "scan":
                 q["n"] = str(self.n)
             full = self.url + ("&" if "?" in self.url else "?") + P.urlencode(q)
-            r = U.urlopen(full, timeout=12)
+            req = U.Request(full, headers={"User-Agent": "ApneScan/%s" % VERSION})
+            r = _urlopen_safe(req, timeout=20)
             data = J.loads(r.read().decode("utf-8", "ignore"))
             if data.get("ok"):
                 self.got.emit(int(data.get("total", 0)),
@@ -1010,7 +1030,7 @@ class UpdateChecker(QtCore.QThread):
         try:
             req = U.Request("https://apnescan.apnesoft.com/version.txt",
                             headers={"User-Agent": "ApneScan"})
-            tag = U.urlopen(req, timeout=10).read().decode("utf-8", "ignore").strip()[:20]
+            tag = _urlopen_safe(req, timeout=10).read().decode("utf-8", "ignore").strip()[:20]
             if re.search(r"\d", tag or ""):
                 self.result.emit(tag, DOWNLOAD_PAGE)
                 return
@@ -1019,7 +1039,7 @@ class UpdateChecker(QtCore.QThread):
         try:
             import json as J
             req = U.Request(UPDATE_API, headers={"User-Agent": "ApneScan"})
-            data = J.loads(U.urlopen(req, timeout=10).read().decode("utf-8", "ignore"))
+            data = J.loads(_urlopen_safe(req, timeout=10).read().decode("utf-8", "ignore"))
             self.result.emit(str(data.get("tag_name") or ""),
                              str(data.get("html_url") or DOWNLOAD_PAGE))
         except Exception:
@@ -4121,7 +4141,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             fd, tmp = tempfile.mkstemp(suffix=".exe")
             os.close(fd)
             req = U.Request(url, headers={"User-Agent": "ApneScan"})
-            with U.urlopen(req, timeout=180) as r, open(tmp, "wb") as fh:
+            with _urlopen_safe(req, timeout=180) as r, open(tmp, "wb") as fh:
                 shutil.copyfileobj(r, fh)
             if os.path.getsize(tmp) < 5_000_000:
                 raise RuntimeError("Download adhoora laga (%d bytes)" % os.path.getsize(tmp))
