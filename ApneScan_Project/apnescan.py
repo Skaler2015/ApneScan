@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "51"
+VERSION = "52"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -6592,21 +6592,31 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "(.vcf ko phone me bhejo — kholte hi contact save ho jata hai.)" % (len(rows), got))
 
     def restore_photo_current(self):
-        """Selected page/photo ko sudharo (purani feeki photo wala mode)."""
+        """Selected page/photo ko sudharo — BACKGROUND me, app nahi rukti."""
         items = self.list.selectedItems() or ([self.list.currentItem()] if self.list.currentItem() else [])
         if not items:
             self._warn("Pehle koi page select karein."); return
-        for it in items:
-            path = it.data(QtCore.Qt.UserRole)
-            try:
-                with Image.open(path) as im:
-                    out = restore_photo(im)
-                out.save(path, "PNG")
-                self._refresh_item(it)
-            except Exception:
-                pass
-        self._dirty = True
-        self.status.showMessage("Photo sudhar di gayi.", 4000)
+        paths = [it.data(QtCore.Qt.UserRole) for it in items]
+
+        def job():
+            for path in paths:
+                try:
+                    with Image.open(path) as im:
+                        restore_photo(im).save(path, "PNG")
+                except Exception:
+                    pass
+            return True
+
+        def on_done(_res):
+            for it in items:
+                try:
+                    self._refresh_item(it)
+                except Exception:
+                    pass
+            self._update_preview_panel()
+            self._dirty = True
+            self.status.showMessage("Photo sudhar di gayi.", 4000)
+        self._run_bg(job, on_done, self.L("Photo sudhaar rahe hain…", "Restoring photo…"))
 
     def show_history(self):
         """Save folder ki saari PDFs — nayi se purani, search ke saath."""
@@ -7248,28 +7258,37 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         if not merge_into and not self._duplicate_ok():
             return
-        try:
+        # PDF banana/merge karna BACKGROUND me — app ek pal ke liye bhi na ruke
+        npages = len(paths)
+        target = merge_into or out
+
+        def job():
             if merge_into:
                 self._append_pages_to_pdf(merge_into, paths)
-                out = merge_into
             else:
                 self._pages_as_pdf(paths, out)
-        except Exception:
-            self._warn("Save fail:\n%s" % traceback.format_exc())
-            return
-        self._remember_save_dir(out)
-        self._remember_doc_name(out)
-        self._record_save(out, len(paths))
-        self._dirty = False
-        self._after_save_action(out)
-        # Save hote hi wahi folder sidebar me khol do (aur file select)
-        try:
-            self._panel_show(folder)
-            self.files_tree.setCurrentIndex(self.files_model.index(out))
-        except Exception:
-            pass
-        msg = ("✔ Isi PDF me jud gaya: %s" if merge_into else "✔ Save ho gayi: %s") % out
-        self.status.showMessage(msg, 7000)
+            return target
+
+        def on_done(res):
+            if isinstance(res, Exception):
+                self._warn("Save fail:\n%s" % res)
+                return
+            saved = res
+            self._remember_save_dir(saved)
+            self._remember_doc_name(saved)
+            self._record_save(saved, npages)
+            self._dirty = False
+            self._after_save_action(saved)
+            # Save hote hi wahi folder sidebar me khol do (aur file select)
+            try:
+                self._panel_show(folder)
+                self.files_tree.setCurrentIndex(self.files_model.index(saved))
+            except Exception:
+                pass
+            m = ("✔ Isi PDF me jud gaya: %s" if merge_into else "✔ Save ho gayi: %s") % saved
+            self.status.showMessage(m, 7000)
+        self._run_bg(job, on_done, self.L("Save ho raha hai… (app chalti rahegi)",
+                                          "Saving… (app stays usable)"))
 
     def _append_pages_to_pdf(self, pdf_path, paths):
         """Naye pages ko ek maujooda PDF ke aage jodo (same-naam merge)."""
@@ -7795,41 +7814,39 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.pv_text.setPlainText("" if isinstance(res, Exception) else (res or ""))
         self._run_bg(job, done, self.L("Text padh rahe hain…", "Reading text…"))
 
-    def deskew_current(self):
+    def _edit_current_bg(self, transform, busy_msg):
+        """Current page par ek image-transform BACKGROUND me chalao — UI ek pal
+        ke liye bhi nahi rukti. transform: PIL.Image(RGB) -> PIL.Image."""
         item = self._current_item_or_warn()
         if not item:
             return
         path = item.data(QtCore.Qt.UserRole)
-        try:
+
+        def job():
             with Image.open(path) as im:
-                deskew(im.convert("RGB")).save(path, "PNG")
-            self._refresh_item(item); self._update_preview_panel(); self._dirty = True
-        except Exception as exc:
-            self._warn("Deskew fail: %s" % exc)
+                transform(im.convert("RGB")).save(path, "PNG")
+            return path
+
+        def on_done(res):
+            if isinstance(res, Exception):
+                self._warn(self.L("Edit fail: %s", "Edit failed: %s") % res)
+                return
+            self._refresh_item(item)
+            self._update_preview_panel()
+            self._dirty = True
+        self._run_bg(job, on_done, busy_msg)
+
+    def deskew_current(self):
+        self._edit_current_bg(lambda im: deskew(im),
+                              self.L("Seedha kar rahe hain…", "Straightening…"))
 
     def enhance_current_page(self):
-        item = self._current_item_or_warn()
-        if not item:
-            return
-        path = item.data(QtCore.Qt.UserRole)
-        try:
-            with Image.open(path) as im:
-                auto_enhance(im.convert("RGB")).save(path, "PNG")
-            self._refresh_item(item); self._update_preview_panel(); self._dirty = True
-        except Exception as exc:
-            self._warn("Enhance fail: %s" % exc)
+        self._edit_current_bg(lambda im: auto_enhance(im),
+                              self.L("Saaf kar rahe hain…", "Enhancing…"))
 
     def whiten_current_page(self):
-        item = self._current_item_or_warn()
-        if not item:
-            return
-        path = item.data(QtCore.Qt.UserRole)
-        try:
-            with Image.open(path) as im:
-                whiten_dark_background(im.convert("RGB")).save(path, "PNG")
-            self._refresh_item(item); self._update_preview_panel(); self._dirty = True
-        except Exception as exc:
-            self._warn("Whiten fail: %s" % exc)
+        self._edit_current_bg(lambda im: whiten_dark_background(im),
+                              self.L("Backing safed kar rahe hain…", "Whitening…"))
 
     def _rebuild_jobs_bar(self):
         while self._jobs_lay.count():
@@ -8667,20 +8684,22 @@ class ScannerWindow(QtWidgets.QMainWindow):
         item = self._current_item_or_warn()
         if not item:
             return
-        if enhance_image(item.data(QtCore.Qt.UserRole), brightness, contrast):
+        path = item.data(QtCore.Qt.UserRole)
+
+        def job():
+            return enhance_image(path, brightness, contrast)
+
+        def on_done(res):
+            if isinstance(res, Exception):
+                return
             self._refresh_item(item)
+            self._update_preview_panel()
+            self._dirty = True
+        self._run_bg(job, on_done, self.L("Badlav ho raha hai…", "Applying…"))
 
     def autocrop_current(self):
-        item = self._current_item_or_warn()
-        if not item:
-            return
-        path = item.data(QtCore.Qt.UserRole)
-        try:
-            with Image.open(path) as im:
-                autocrop(im.convert("RGB")).save(path, "PNG")
-        except Exception as exc:
-            self._warn("Crop fail:\n%s" % exc); return
-        self._refresh_item(item)
+        self._edit_current_bg(lambda im: autocrop(im),
+                              self.L("Crop ho raha hai…", "Cropping…"))
 
     def _list_context_menu(self, pos):
         if self.list.count() == 0:
