@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "73"
+VERSION = "74"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -427,6 +427,23 @@ DEFAULT_OPTIONS = {
     "footer_disk": True,          # status-bar: free disk
     "footer_version": True,       # status-bar: version
     "footer_scanner": True,       # status-bar: scanner/busy
+    # ---- v74: aur customize (presets, branding, footer-extra, window…) ----
+    "ui_corners": "rounded",      # rounded / sharp
+    "high_contrast": False,       # saaf gaadhe rang (kam nazar ke liye)
+    "window_opacity": 100,        # poori window ki paardarshita (60-100)
+    "brand_name": "",             # header me hospital/clinic ka naam
+    "brand_logo": "",             # header me logo image ka path
+    "remember_window": True,      # window ka size/jagah yaad rakho
+    "win_geometry": "",           # (auto) saved window geometry
+    "auto_update_check": True,    # apne aap update jaanchna
+    "dbl_action": "edit",         # thumbnail double-click: edit / preview
+    "files_panel_side": "right",  # 'Meri Files' panel right / left
+    "sound_on_done": False,       # scan poora hote hi 'ting'
+    "confirm_exit": False,        # band karte samay pucho
+    "footer_clock": False,        # status-bar: ghadi/date
+    "footer_today": False,        # status-bar: aaj ke scan
+    "footer_online": False,       # status-bar: online log
+    "footer_msg": "",             # status-bar: apna sandesh
 }
 
 
@@ -5781,13 +5798,20 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "#uiheader QLabel{font-size:12px;color:#115e59;}")
         _hb = QtWidgets.QHBoxLayout(self.ui_header)
         _hb.setContentsMargins(10, 3, 10, 3)
+        # Branding: hospital/clinic ka logo + naam (customize se set hota hai)
+        self.hdr_logo = QtWidgets.QLabel("")
+        self.hdr_brand = QtWidgets.QLabel("")
+        self.hdr_brand.setStyleSheet("font-weight:700;font-size:13px;")
         self.hdr_scanner = QtWidgets.QLabel("●")
         self.hdr_profile = QtWidgets.QLabel("")
         self.hdr_today = QtWidgets.QLabel("")
+        _hb.addWidget(self.hdr_logo)
+        _hb.addWidget(self.hdr_brand)
         _hb.addWidget(self.hdr_scanner)
         _hb.addWidget(self.hdr_profile)
         _hb.addStretch(1)
         _hb.addWidget(self.hdr_today)
+        self._apply_branding()
         self.ui_header.setVisible(bool(self._opts.get("ui_header", True)))
         outer.addWidget(self.ui_header)
         # ---- UI #10: Job-chips bar (ek click me profile+folder+naming set) ----
@@ -5804,6 +5828,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
         # ---------- Body: left settings panel | thumbnails ----------
         body = QtWidgets.QHBoxLayout(); body.setContentsMargins(0, 0, 0, 0); body.setSpacing(0)
+        self._body_layout = body   # files-panel side swap ke liye reference
         panel = QtWidgets.QWidget(); panel.setObjectName("panel"); panel.setFixedWidth(252)
         self.left_panel = panel
         if not self._opts.get("show_left_panel", True):
@@ -5946,7 +5971,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         _dv.addStretch(1)
         self._dash.hide()
         self.list.viewport().installEventFilter(self)
-        self.list.itemDoubleClicked.connect(self._open_preview_dialog)
+        self.list.itemDoubleClicked.connect(self._on_thumb_dblclick)
         self.list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._list_context_menu)
         body.addWidget(self.list, 1)
@@ -6318,8 +6343,17 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.L("Aakhri save ki hui file — click karke kholo",
                    "Last saved file — click to open"))
         self.status.addWidget(self.foot_last)
+        # v74 extra (customize se on/off): aaj ke scan · online · apna sandesh
+        self.foot_today = _foot(None, self.L("Aaj kitne pages scan hue",
+                                             "Pages scanned today"))
+        self.status.addWidget(self.foot_today)
+        self.foot_online = _foot(None, self.L("Abhi kitne log online (poori duniya)",
+                                              "People online now (worldwide)"))
+        self.status.addWidget(self.foot_online)
+        self.foot_msg = _foot(None, self.L("Aapka apna sandesh", "Your custom message"))
+        self.status.addWidget(self.foot_msg)
 
-        # RIGHT side (permanent): disk · version · busy · scanner
+        # RIGHT side (permanent): disk · version · busy · scanner · ghadi
         # (Analytics hata diya gaya — 'aaj/streak' footer element bhi hata diya)
         self.foot_disk = _foot(None, self.L("Save-drive par kitni jagah bachi hai",
                                             "Free space on the save drive"))
@@ -6334,9 +6368,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.lbl_busy = QtWidgets.QLabel(); self.lbl_busy.setTextFormat(QtCore.Qt.RichText)
         self.status.addPermanentWidget(self.lbl_busy)
         self._set_busy_display("unknown")
-        # footer ko har 30 sec + zaroori events par refresh karo
+        self.status.addPermanentWidget(_sep())
+        self.foot_clock = _foot(None, self.L("Ghadi aur tareekh", "Clock and date"))
+        self.status.addPermanentWidget(self.foot_clock)
+        # footer ko har 30 sec + zaroori events par refresh karo (ghadi har 20 sec)
         self._foot_timer = QtCore.QTimer(self)
-        self._foot_timer.setInterval(30000)
+        self._foot_timer.setInterval(20000)
         self._foot_timer.timeout.connect(self._update_footer)
         self._foot_timer.start()
         try:
@@ -6365,11 +6402,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._an_timer.timeout.connect(lambda: (self._an_report("ping"), self._an_refresh()))
         self._an_timer.start()
         # Naya version aaya ho to sidebar me banner dikhao — startup par aur
-        # phir har 6 ghante (lambi chalti app bhi update dekh legi)
-        QtCore.QTimer.singleShot(4000, lambda: self.check_updates(True))
+        # phir har 6 ghante (lambi chalti app bhi update dekh legi).
+        # (customize se 'auto update-check' band ho to nahi jaanchega)
+        QtCore.QTimer.singleShot(4000, lambda: self._opts.get("auto_update_check", True)
+                                 and self.check_updates(True))
         self._upd_timer = QtCore.QTimer(self)
         self._upd_timer.setInterval(6 * 3600 * 1000)
-        self._upd_timer.timeout.connect(lambda: self.check_updates(True))
+        self._upd_timer.timeout.connect(lambda: self._opts.get("auto_update_check", True)
+                                        and self.check_updates(True))
         self._upd_timer.start()
         # Mahine ki pehli baar kholne par "Aapka Mahina" summary
         QtCore.QTimer.singleShot(6000, self._maybe_month_wrap)
@@ -6390,6 +6430,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # footer, spacing…) startup par ek baar laga do taaki restart ke baad
         # bhi user ki pasand yaad rahe.
         QtCore.QTimer.singleShot(0, self._apply_ui_live)
+        # Window ka size/jagah pichhli baar jaisa (agar yaad rakhna on ho)
+        if self._opts.get("remember_window", True) and self._opts.get("win_geometry"):
+            try:
+                self.restoreGeometry(QtCore.QByteArray.fromBase64(
+                    self._opts["win_geometry"].encode("ascii")))
+            except Exception:
+                pass
         if self._opts.get("start_maximized"):
             QtCore.QTimer.singleShot(50, self.showMaximized)
 
@@ -6696,6 +6743,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if skipped:
             msg += " (%d blank hataye)" % skipped
         self.status.showMessage(msg, 5000)
+        if kept and self._opts.get("sound_on_done"):
+            try:
+                QtWidgets.QApplication.beep()
+            except Exception:
+                pass
         self._an_report("scan", n=kept)      # worldwide scan-count + refresh
         # (naam har page ke scan hote hi background me padh liya gaya —
         #  isliye yahan bulk naming ka intezaar nahi)
@@ -9056,17 +9108,220 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # 10) Status-bar footer ke hisse
         for attr, key in (("foot_folder", "footer_folder"), ("foot_pages", "footer_pages"),
                           ("foot_last", "footer_last"), ("foot_disk", "footer_disk"),
-                          ("foot_ver", "footer_version"), ("lbl_busy", "footer_scanner")):
+                          ("foot_ver", "footer_version"), ("lbl_busy", "footer_scanner"),
+                          ("foot_clock", "footer_clock"), ("foot_today", "footer_today"),
+                          ("foot_online", "footer_online")):
             try:
-                getattr(self, attr).setVisible(bool(o.get(key, True)))
+                getattr(self, attr).setVisible(bool(o.get(key, True) if key in
+                        ("footer_folder", "footer_pages", "footer_last", "footer_disk",
+                         "footer_version", "footer_scanner") else o.get(key, False)))
             except Exception:
                 pass
-        # 11) dependent views refresh
-        for m in ("_update_preview_panel", "_update_empty_state", "_update_sidebar_stats"):
+        try:
+            self.foot_msg.setVisible(bool(str(o.get("footer_msg", "")).strip()))
+        except Exception:
+            pass
+        # 11) Window paardarshita (transparency)
+        try:
+            op = max(60, min(100, int(o.get("window_opacity", 100) or 100)))
+            self.setWindowOpacity(op / 100.0)
+        except Exception:
+            pass
+        # 12) Rounded/sharp corners + high-contrast (theme ke upar)
+        try:
+            extra = ""
+            if o.get("ui_corners") == "sharp":
+                extra += ("QPushButton,QToolButton,QLineEdit,QComboBox,QSpinBox,"
+                          "#panel,#statsbox{border-radius:0px;}")
+            if o.get("high_contrast"):
+                extra += ("QLabel{color:#000;} QMainWindow,QWidget{background:#ffffff;}"
+                          "QPushButton,QLineEdit,QComboBox{border:2px solid #000;color:#000;}"
+                          "QListWidget::item:selected{background:#000;color:#fff;}")
+            if extra:
+                self.setStyleSheet(self.styleSheet() + extra)
+        except Exception:
+            pass
+        # 13) 'Meri Files' panel ki side (right/left)
+        try:
+            self._apply_files_side()
+        except Exception:
+            pass
+        # 14) Branding (hospital naam + logo)
+        try:
+            self._apply_branding()
+        except Exception:
+            pass
+        # 15) dependent views refresh
+        for m in ("_update_preview_panel", "_update_empty_state", "_update_sidebar_stats",
+                  "_update_footer"):
             try:
                 getattr(self, m)()
             except Exception:
                 pass
+
+    def _apply_branding(self):
+        """Header me hospital/clinic ka naam + logo lagao (customize se)."""
+        o = self._opts
+        try:
+            name = str(o.get("brand_name", "") or "").strip()
+            self.hdr_brand.setText(name)
+            self.hdr_brand.setVisible(bool(name))
+        except Exception:
+            pass
+        try:
+            logo = str(o.get("brand_logo", "") or "").strip()
+            if logo and os.path.exists(logo):
+                pm = QtGui.QPixmap(logo)
+                if not pm.isNull():
+                    self.hdr_logo.setPixmap(pm.scaledToHeight(
+                        22, QtCore.Qt.SmoothTransformation))
+                    self.hdr_logo.setVisible(True)
+                else:
+                    self.hdr_logo.clear(); self.hdr_logo.setVisible(False)
+            else:
+                self.hdr_logo.clear(); self.hdr_logo.setVisible(False)
+        except Exception:
+            pass
+        # window title me bhi naam
+        try:
+            base = "%s v%s" % (APP_NAME, VERSION)
+            nm = str(o.get("brand_name", "") or "").strip()
+            self.setWindowTitle(("%s — %s" % (nm, base)) if nm else base)
+        except Exception:
+            pass
+
+    def _apply_files_side(self):
+        """'Meri Files' panel ko dayein ya bayein rakho (customize se)."""
+        body = getattr(self, "_body_layout", None)
+        if body is None:
+            return
+        try:
+            want_left = (self._opts.get("files_panel_side") == "left")
+            idx = body.indexOf(self.files_panel)
+            if idx < 0:
+                return
+            is_left = (idx == 0)
+            if want_left == is_left:
+                return   # pehle se sahi jagah — kuch mat karo
+            body.removeWidget(self.files_panel)
+            if want_left:
+                body.insertWidget(0, self.files_panel)
+            else:
+                body.addWidget(self.files_panel)
+        except Exception:
+            pass
+
+    def _on_thumb_dblclick(self, item):
+        """Thumbnail double-click: customize ke hisaab se — 'edit' (badi editor
+        window) ya 'preview' (sirf daayan preview panel me jhalak)."""
+        try:
+            if self._opts.get("dbl_action", "edit") == "preview":
+                # preview panel me dikhao (agar band ho to chalu karke)
+                if not self.preview_panel.isVisible():
+                    self._opts["ui_preview"] = True
+                    self.preview_panel.setVisible(True)
+                self.list.setCurrentItem(item)
+                try:
+                    self._update_preview_panel()
+                except Exception:
+                    pass
+                return
+        except Exception:
+            pass
+        self._open_preview_dialog(item)
+
+    # ---- Presets (ek-click poora look) ----
+    UI_PRESETS = {
+        "reception": {"theme": "light", "accent": "teal", "font_scale": 115,
+                      "thumb_size": 175, "ui_spacing": "roomy", "ui_dashboard": True,
+                      "ui_header": True, "touch_mode": True, "toolbar_style": "icon_text"},
+        "doctor": {"theme": "dark", "accent": "blue", "font_scale": 100,
+                   "ui_preview": True, "preview_panel_w": 360, "ui_filmstrip": True,
+                   "ui_dashboard": False, "thumb_size": 150, "ui_spacing": "normal"},
+        "night": {"theme": "darkpro", "accent": "purple", "font_scale": 100,
+                  "window_opacity": 96, "high_contrast": False, "ui_spacing": "normal"},
+    }
+
+    def _apply_preset(self, key, dlg=None):
+        p = self.UI_PRESETS.get(key)
+        if not p:
+            return
+        self._opts.update(p)
+        self._apply_ui_live()
+        self._save_opts()
+        self.status.showMessage(
+            self.L("Preset laga diya — pasand aaye to rehne do, warna Cancel/Reset.",
+                   "Preset applied — keep it, or Cancel/Reset."), 4000)
+        if dlg is not None:
+            dlg.accept()
+
+    def _reset_ui_defaults(self, dlg=None):
+        r = QtWidgets.QMessageBox.question(
+            self, APP_NAME,
+            self.L("Saari UI settings wapas shuruaati (default) par le aayein?",
+                   "Reset all UI settings back to default?"),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
+        if r != QtWidgets.QMessageBox.Yes:
+            return
+        # sirf UI-wale keys reset karo (baaki scanner/profile settings chhedo mat)
+        for k in self._UI_KEYS:
+            if k in DEFAULT_OPTIONS:
+                self._opts[k] = DEFAULT_OPTIONS[k]
+        self._lang = self._opts.get("language", "en")
+        self._apply_ui_live()
+        self._save_opts()
+        if dlg is not None:
+            dlg.accept()
+
+    def _export_ui_settings(self):
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("Settings save karo", "Save settings"),
+            os.path.join(os.path.expanduser("~"), "ApneScan_UI.json"),
+            "JSON (*.json)")
+        if not path:
+            return
+        try:
+            data = {k: self._opts.get(k) for k in self._UI_KEYS if k in self._opts}
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, ensure_ascii=False, indent=2)
+            self.status.showMessage(self.L("Settings save ho gayi.", "Settings saved."), 4000)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _import_ui_settings(self, dlg=None):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, self.L("Settings file chuno", "Choose settings file"),
+            os.path.expanduser("~"), "JSON (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            for k in self._UI_KEYS:
+                if k in data:
+                    self._opts[k] = data[k]
+            self._lang = self._opts.get("language", "en")
+            self._apply_ui_live()
+            self._save_opts()
+            self.status.showMessage(self.L("Settings aayi — laga di.", "Settings imported."), 4000)
+            if dlg is not None:
+                dlg.accept()
+        except Exception as e:
+            self._warn(str(e))
+
+    # customize me shaamil UI-keys (reset/export/import in par kaam karte hain)
+    _UI_KEYS = (
+        "theme", "accent", "font_scale", "touch_mode", "ui_animations", "ui_tooltips",
+        "start_maximized", "ui_ribbon", "toolbar_style", "ui_header", "ui_dashboard",
+        "ui_jobs", "thumb_size", "ui_spacing", "show_page_numbers", "show_left_panel",
+        "left_panel_w", "show_files_panel", "files_panel_w", "ui_preview",
+        "preview_panel_w", "ui_filmstrip", "ui_graph", "ui_analytics", "footer_folder",
+        "footer_pages", "footer_last", "footer_disk", "footer_version", "footer_scanner",
+        "after_save", "ui_confirm_delete", "language", "ui_corners", "high_contrast",
+        "window_opacity", "brand_name", "brand_logo", "remember_window",
+        "auto_update_check", "dbl_action", "files_panel_side", "sound_on_done",
+        "confirm_exit", "footer_clock", "footer_today", "footer_online", "footer_msg",
+    )
 
     def customize_ui(self):
         """UI customize — 40+ settings tabs me, LIVE-PREVIEW ke saath (v73).
@@ -9135,6 +9390,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
             f.addRow(label, row)
             return s
 
+        def _line(f, label, key, placeholder=""):
+            e = QtWidgets.QLineEdit(str(self._opts.get(key, "") or ""))
+            e.setPlaceholderText(placeholder)
+            e.textChanged.connect(lambda t, k=key: _set(k, t))
+            f.addRow(label, e)
+            return e
+
         # ---------- TAB: Look ----------
         f = _tab(L("🎨 Roop", "🎨 Look"))
         _combo(f, L("Theme:", "Theme:"), "theme",
@@ -9143,6 +9405,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
                [("teal", "🟢 Teal"), ("blue", "🔵 Blue"), ("green", "🟩 Green"),
                 ("purple", "🟣 Purple"), ("orange", "🟧 Orange"), ("rose", "🌹 Rose")], "teal")
         _slider(f, L("Font size:", "Font size:"), "font_scale", 70, 180, 100, "%")
+        _combo(f, L("Kone (corners):", "Corners:"), "ui_corners",
+               [("rounded", L("Gol (rounded)", "Rounded")),
+                ("sharp", L("Seedhe (sharp)", "Sharp"))], "rounded")
+        _slider(f, L("Window paardarshita:", "Window opacity:"),
+                "window_opacity", 60, 100, 100, "%")
+        _check(f, "high_contrast", "Hai-contrast (saaf gaadhe rang, kam nazar ke liye)",
+               "High-contrast (bold clear colours, low vision)", False)
         _check(f, "touch_mode", "Touch / buzurg mode (bada sab kuch)",
                "Touch / large mode (bigger everything)", False)
         _check(f, "ui_animations", "Halke animations", "Smooth animations", True)
@@ -9174,6 +9443,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 ("roomy", L("Khula (roomy)", "Roomy"))], "normal")
         _check(f, "show_page_numbers", "Har page ke niche naam/number dikhao",
                "Show name/number under each page", True)
+        _combo(f, L("Double-click par:", "Double-click opens:"), "dbl_action",
+               [("edit", L("Editor window (rotate/crop)", "Editor window (rotate/crop)")),
+                ("preview", L("Sirf preview panel me jhalak", "Just show in preview panel"))],
+               "edit")
 
         # ---------- TAB: Panels ----------
         f = _tab(L("🗂 Panels", "🗂 Panels"))
@@ -9192,6 +9465,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
                "7-day graph in the sidebar", True)
         _check(f, "ui_analytics", "Sidebar me analytics card",
                "Analytics card in the sidebar", True)
+        _combo(f, L("'Meri Files' panel ki side:", "'My Files' panel side:"),
+               "files_panel_side",
+               [("right", L("Daayein (right)", "Right")),
+                ("left", L("Baayein (left)", "Left"))], "right")
 
         # ---------- TAB: Status bar ----------
         f = _tab(L("📊 Status", "📊 Status bar"))
@@ -9201,6 +9478,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
         _check(f, "footer_disk", "Khaali disk", "Free disk", True)
         _check(f, "footer_version", "Version", "Version", True)
         _check(f, "footer_scanner", "Scanner / busy", "Scanner / busy", True)
+        _check(f, "footer_clock", "Ghadi / tareekh", "Clock / date", False)
+        _check(f, "footer_today", "Aaj ke scan", "Today's scans", False)
+        _check(f, "footer_online", "Online log (worldwide)", "People online (worldwide)", False)
+        _line(f, L("Apna sandesh:", "Custom message:"), "footer_msg",
+              L("jaise: OPD 9 se 2", "e.g. OPD 9am-2pm"))
 
         # ---------- TAB: Behaviour ----------
         f = _tab(L("⚙ Vyavhaar", "⚙ Behaviour"))
@@ -9210,6 +9492,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 ("open", L("File kholo", "Open file"))], "nothing")
         _check(f, "ui_confirm_delete", "Delete se pehle pucho",
                "Ask before delete", True)
+        _check(f, "confirm_exit", "Band karte samay pucho",
+               "Ask before closing the app", False)
+        _check(f, "sound_on_done", "Scan poora hote hi 'ting' awaaz",
+               "Beep when a scan finishes", False)
+        _check(f, "remember_window", "Window ka size/jagah yaad rakho",
+               "Remember window size/position", True)
+        _check(f, "auto_update_check", "Apne aap update jaancho",
+               "Auto-check for updates", True)
         _combo(f, L("Bhasha / Language:", "Language:"), "language",
                [("en", "English"), ("hi", "हिन्दी (Hindi)")], "en")
         bkiosk = QtWidgets.QPushButton(L("🖥 Kiosk mode ab chalu karo (bade buttons)",
@@ -9223,6 +9513,57 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "language after a restart.</span>"))
         note.setTextFormat(QtCore.Qt.RichText); note.setWordWrap(True)
         f.addRow(note)
+
+        # ---------- TAB: Presets + Branding ----------
+        f = _tab(L("🎁 Presets", "🎁 Presets"))
+        f.addRow(QtWidgets.QLabel(L(
+            "<b>Ek-click look</b> — pasand aaye to rehne do, warna Cancel/Reset.",
+            "<b>One-click looks</b> — keep it, or Cancel/Reset.")))
+        _prow = QtWidgets.QHBoxLayout()
+        for _pk, _pt in (("reception", L("🏥 Reception", "🏥 Reception")),
+                         ("doctor", L("🩺 Doctor", "🩺 Doctor")),
+                         ("night", L("🌙 Night", "🌙 Night"))):
+            _pb = QtWidgets.QPushButton(_pt)
+            _pb.clicked.connect(lambda _c, k=_pk: self._apply_preset(k))
+            _prow.addWidget(_pb)
+        _pw = QtWidgets.QWidget(); _pw.setLayout(_prow); f.addRow(_pw)
+        # Branding
+        f.addRow(QtWidgets.QLabel(L("<b>Branding</b> (header me dikhega):",
+                                    "<b>Branding</b> (shows in the header):")))
+        _line(f, L("Hospital/clinic naam:", "Hospital/clinic name:"), "brand_name",
+              L("jaise: Noble Hospital", "e.g. Noble Hospital"))
+        _logo_row = QtWidgets.QHBoxLayout()
+        _logo_lbl = QtWidgets.QLabel(os.path.basename(self._opts.get("brand_logo", "")) or
+                                     L("(koi logo nahi)", "(no logo)"))
+        _logo_lbl.setStyleSheet("color:#64748b;font-size:11px;")
+
+        def _pick_logo():
+            p, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self, L("Logo image chuno", "Choose logo image"),
+                os.path.expanduser("~"), "Images (*.png *.jpg *.jpeg *.bmp)")
+            if p:
+                _set("brand_logo", p)
+                _logo_lbl.setText(os.path.basename(p))
+
+        def _clr_logo():
+            _set("brand_logo", "")
+            _logo_lbl.setText(L("(koi logo nahi)", "(no logo)"))
+        _blogo = QtWidgets.QPushButton(L("📁 Logo chuno", "📁 Choose logo"))
+        _blogo.clicked.connect(_pick_logo)
+        _bclr = QtWidgets.QPushButton("✖"); _bclr.setFixedWidth(30); _bclr.clicked.connect(_clr_logo)
+        _logo_row.addWidget(_blogo); _logo_row.addWidget(_bclr); _logo_row.addWidget(_logo_lbl, 1)
+        _lw = QtWidgets.QWidget(); _lw.setLayout(_logo_row); f.addRow(_lw)
+        # Reset / Export / Import
+        f.addRow(QtWidgets.QLabel(L("<b>Settings sambhaalo</b>:", "<b>Manage settings</b>:")))
+        _mrow = QtWidgets.QHBoxLayout()
+        _breset = QtWidgets.QPushButton(L("↺ Reset (default)", "↺ Reset to default"))
+        _breset.clicked.connect(lambda: self._reset_ui_defaults(dlg))
+        _bexp = QtWidgets.QPushButton(L("⬇ Export", "⬇ Export"))
+        _bexp.clicked.connect(self._export_ui_settings)
+        _bimp = QtWidgets.QPushButton(L("⬆ Import", "⬆ Import"))
+        _bimp.clicked.connect(lambda: self._import_ui_settings(dlg))
+        _mrow.addWidget(_breset); _mrow.addWidget(_bexp); _mrow.addWidget(_bimp)
+        _mw = QtWidgets.QWidget(); _mw.setLayout(_mrow); f.addRow(_mw)
 
         # ---------- OK / Cancel ----------
         bb = QtWidgets.QDialogButtonBox(
@@ -10950,6 +11291,39 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 % (root if 'root' in dir() else "", pname))
         except Exception:
             pass
+        # v74 footer extra: ghadi/date · aaj ke scan · online · apna sandesh
+        try:
+            if self.foot_clock.isVisible():
+                now = QtCore.QDateTime.currentDateTime()
+                self.foot_clock.setText("🕒 " + now.toString("ddd d MMM  hh:mm"))
+        except Exception:
+            pass
+        try:
+            if self.foot_today.isVisible():
+                t = 0
+                try:
+                    t = int((self._an_world or {}).get("today", 0))
+                except Exception:
+                    t = 0
+                self.foot_today.setText(L("📈 Aaj: %d", "📈 Today: %d") % t)
+        except Exception:
+            pass
+        try:
+            if self.foot_online.isVisible():
+                on = 0
+                try:
+                    on = int((self._an_world or {}).get("online", 0))
+                except Exception:
+                    on = 0
+                self.foot_online.setText(L("🌍 %d online", "🌍 %d online") % on)
+        except Exception:
+            pass
+        try:
+            m = str(self._opts.get("footer_msg", "") or "").strip()
+            self.foot_msg.setText(("📌 " + m) if m else "")
+            self.foot_msg.setVisible(bool(m))
+        except Exception:
+            pass
 
     def _warn(self, msg):
         QtWidgets.QMessageBox.warning(self, APP_NAME, msg)
@@ -10963,6 +11337,22 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
             if r != QtWidgets.QMessageBox.Yes:
                 event.ignore(); return
+        elif self._opts.get("confirm_exit"):
+            r = QtWidgets.QMessageBox.question(
+                self, APP_NAME,
+                self.L("Kya pakka software band karna hai?",
+                       "Are you sure you want to close?"),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
+            if r != QtWidgets.QMessageBox.Yes:
+                event.ignore(); return
+        # Window ka size/jagah yaad rakho (agli baar wahi khule)
+        if self._opts.get("remember_window", True):
+            try:
+                self._opts["win_geometry"] = bytes(
+                    self.saveGeometry().toBase64()).decode("ascii")
+                self._save_opts()
+            except Exception:
+                pass
         try:
             self._conn_timer.stop()
         except Exception:
