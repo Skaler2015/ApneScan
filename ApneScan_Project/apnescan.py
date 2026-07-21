@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "27"
+VERSION = "28"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -3428,7 +3428,48 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mh, tr("feedback", self._lang), self.send_feedback, "हिन्दी: Sujhav/shikayat bhejo.\nEnglish: Send feedback.")
         self._ma(mh, tr("about", self._lang), self.show_about, "हिन्दी: App ke baare me.\nEnglish: About this app.")
 
+        # AUTOMATIC: har menu/submenu ke har option par "?" + Hindi/English hover
+        # PAKKA karo — aage koi naya option seedhe addAction se bhi joda jaye to
+        # bhi ye use chhoot-ne nahi dega (chhupa hua safety-jaal).
+        self._finalize_menu_help()
         self._build_shortcuts()
+
+    def _finalize_menu_help(self):
+        """Poore menu-tree ko scan karke jis bhi option par abhi tak '?' /
+        tooltip nahi hai, uspar khud laga do. Ye function baar-baar chalana
+        safe hai (dobara prefix nahi lagta)."""
+        MARK = "❓ "
+
+        def walk(menu):
+            try:
+                menu.setToolTipsVisible(True)
+            except Exception:
+                pass
+            for act in menu.actions():
+                if act.isSeparator():
+                    continue
+                sub = act.menu()
+                if sub is not None:
+                    walk(sub)
+                    continue
+                t = act.text()
+                if not t:
+                    continue
+                clean = t[len(MARK):] if t.startswith(MARK) else t
+                if not t.startswith(MARK):
+                    act.setText(MARK + t)
+                # tooltip na ho (ya sirf label ki copy ho) to ek default bilingual
+                # explanation laga do
+                if not act.toolTip() or act.toolTip() in (t, clean):
+                    label = clean.replace("&", "").replace("…", "").strip()
+                    act.setToolTip("हिन्दी: %s — is option ko chalata hai.\n"
+                                   "English: Runs the \"%s\" action." % (label, label))
+        try:
+            for act in self.menuBar().actions():
+                if act.menu() is not None:
+                    walk(act.menu())
+        except Exception:
+            pass
 
     def _refresh_recent_menu(self):
         self.recent_menu.clear()
