@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "68"
+VERSION = "69"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -3896,7 +3896,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 pass
             it.setData(TITLE_ROLE, label)
             it.setData(NAMEKEY_ROLE, key)
-            it.setText(label)
+            # naam khaali reh gaya to bhi kuch dikhe — 'Page N' fallback
+            it.setText(label if (label and label.strip())
+                       else ("Page %d" % (row + 1)))
             self._named_count = getattr(self, "_named_count", 0) + 1
             self._pstats_bump(ocr_named=1)
             # #2: is naam ke liye folder yaad ho to save wahin default ho
@@ -4547,7 +4549,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         h = int(w * 4 / 3)
         self._thumb_w, self._thumb_h = w, h
         self.list.setIconSize(QtCore.QSize(w, h))
-        self.list.setGridSize(QtCore.QSize(w + 24, h + 34))
+        # naam ke liye neeche zyada jagah (2 line ka naam bhi poora dikhe)
+        self.list.setGridSize(QtCore.QSize(w + 24, h + 52))
 
     def _zoom_thumbs(self, factor):
         self._apply_thumb_zoom(self._thumb_w * factor)
@@ -5863,6 +5866,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.list.setMovement(QtWidgets.QListView.Snap)
         self.list.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
         self.list.setSpacing(10); self.list.setUniformItemSizes(True)
+        self.list.setWordWrap(True)          # naam poora dikhe (kate nahi, 2 line me)
         self.list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self._thumb_w, self._thumb_h = self.THUMB_W, self.THUMB_H   # zoomable display size
         self._apply_thumb_zoom(self.THUMB_W)
@@ -6498,7 +6502,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
             icon = QtGui.QIcon(QtGui.QPixmap.fromImage(qimg))
         else:
             icon = QtGui.QIcon(self._make_thumb(path))
-        _lbl = ("Page %d" % (self.list.count() + 1)) if self._opts.get("show_page_numbers", True) else ""
+        # Har page ke neeche kuch na kuch dikhe — jab tak naam nahi aata,
+        # 'Page N' dikhta hai (khaali kabhi nahi).
+        _lbl = "Page %d" % (self.list.count() + 1)
         item = QtWidgets.QListWidgetItem(icon, _lbl)
         item.setData(QtCore.Qt.UserRole, path); item.setTextAlignment(QtCore.Qt.AlignHCenter)
         self.list.addItem(item); self.list.setCurrentItem(item)
