@@ -164,7 +164,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "65"
+VERSION = "66"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -3638,6 +3638,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, "Import settings…", self.import_settings, "हिन्दी: Export ki hui settings file se sab wapas le aao.\nEnglish: Import settings from an exported file.")
 
         mh = mb.addMenu(tr("menu_help", self._lang)); mh.setToolTipsVisible(True)
+        self._ma(mh, "📖 Complete Guide (all options)…", self.show_guide, "हिन्दी: Poore software ki complete guide — har option kahan hai aur kya karta hai (Hindi + English). Ye list app ke menus se KHUD banti hai, isliye har update me apne aap up-to-date rehti hai.\nEnglish: The complete guide — every option, where it is and what it does (Hindi + English). Built automatically from the app's menus, so it stays up to date on every update.", "F1")
         self._ma(mh, tr("help_guide", self._lang), self.show_help, "हिन्दी: App istemal karne ki guide.\nEnglish: How-to guide.")
         self._ma(mh, "Setup wizard", self._run_wizard, "हिन्दी: Pehli baar wala setup dobara chalao.\nEnglish: Re-run the first-time setup.")
         self._ma(mh, tr("whatsnew", self._lang), self.show_whatsnew, "हिन्दी: Naye badlav/features.\nEnglish: What's new.")
@@ -5459,6 +5460,93 @@ class ScannerWindow(QtWidgets.QMainWindow):
         b_close.clicked.connect(dlg.accept)
         row.addWidget(b_copy); row.addWidget(b_save); row.addStretch(1); row.addWidget(b_close)
         lay.addLayout(row)
+        dlg.exec_()
+
+    def show_guide(self):
+        """Complete guide — app ke SAARE menus ko khud padhkar har option ki
+        list banata hai (kahan hai + kya karta hai, Hindi + English). Ye menus
+        se auto-ban-ti hai, isliye har update me apne aap up-to-date rehti hai."""
+        import html as _html
+        rows = []   # (menu_path, label, hi, en)
+
+        def _split_tip(tip):
+            hi = en = ""
+            for line in (tip or "").split("\n"):
+                s = line.strip()
+                if s.startswith("हिन्दी:"):
+                    hi = s.split(":", 1)[1].strip()
+                elif s.startswith("English:"):
+                    en = s.split(":", 1)[1].strip()
+            if not hi and not en:
+                en = (tip or "").strip()
+            return hi, en
+
+        def walk(menu, path):
+            for act in menu.actions():
+                if act.isSeparator():
+                    continue
+                label = act.text().replace("&", "").replace("❓ ", "").strip()
+                sub = act.menu()
+                if sub is not None:
+                    walk(sub, path + " › " + label)
+                    continue
+                if not label:
+                    continue
+                hi, en = _split_tip(act.toolTip())
+                rows.append((path, label, hi, en))
+
+        for act in self.menuBar().actions():
+            m = act.menu()
+            if m is not None:
+                walk(m, act.text().replace("&", "").strip())
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("📖 Complete Guide — ApneScan v%s" % VERSION)
+        dlg.resize(780, 660)
+        v = QtWidgets.QVBoxLayout(dlg)
+        search = QtWidgets.QLineEdit()
+        search.setPlaceholderText("🔍 Search any option / koi bhi option dhoondo…")
+        search.setClearButtonEnabled(True)
+        v.addWidget(search)
+        view = QtWidgets.QTextBrowser()
+        view.setOpenExternalLinks(True)
+        v.addWidget(view, 1)
+
+        def render(q=""):
+            q = (q or "").strip().lower()
+            out = ["<style>h3{color:#0f766e;margin:16px 0 6px;font-size:15px;}"
+                   ".opt{margin:7px 0;padding:6px 10px;border-left:3px solid #99f6e4;background:#f8fafc;}"
+                   ".lbl{font-weight:700;color:#0f172a;}.loc{color:#94a3b8;font-size:11px;}"
+                   ".hi{color:#334155;}.en{color:#475569;}</style>"]
+            cur = None
+            cnt = 0
+            for path, label, hi, en in rows:
+                hay = (path + " " + label + " " + hi + " " + en).lower()
+                if q and q not in hay:
+                    continue
+                top = path.split(" › ")[0]
+                if top != cur:
+                    cur = top
+                    out.append("<h3>📂 %s</h3>" % _html.escape(top))
+                out.append("<div class='opt'><span class='lbl'>%s</span> "
+                           "<span class='loc'>— %s</span><br>"
+                           "<span class='hi'>🇮🇳 %s</span><br>"
+                           "<span class='en'>🇬🇧 %s</span></div>"
+                           % (_html.escape(label), _html.escape(path),
+                              _html.escape(hi or "—"), _html.escape(en or "—")))
+                cnt += 1
+            out.insert(1, "<p style='color:#64748b;'>%d options</p>" % cnt)
+            if not cnt:
+                out.append("<p>Nothing found.</p>")
+            view.setHtml("".join(out))
+        search.textChanged.connect(render)
+        render()
+        v.addWidget(QtWidgets.QLabel(
+            "<span style='color:#94a3b8;font-size:11px;'>This guide is built "
+            "automatically from the app's menus — it stays up to date on every "
+            "update. / Ye list menus se khud banti hai, har update me up-to-date.</span>"))
+        b = QtWidgets.QPushButton("Close"); b.clicked.connect(dlg.accept)
+        v.addWidget(b)
         dlg.exec_()
 
     def show_about(self):
