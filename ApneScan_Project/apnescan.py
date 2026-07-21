@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "29"
+VERSION = "30"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -5279,9 +5279,71 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.lbl_conn = QtWidgets.QLabel(); self.lbl_conn.setTextFormat(QtCore.Qt.RichText)
         self._set_conn_display(None, tr("checking", self._lang))
         self.status.addWidget(self.lbl_conn)
+
+        def _sep():
+            s = QtWidgets.QLabel("│"); s.setStyleSheet("color:#cbd5e1;")
+            return s
+
+        def _foot(clickfn=None, tip=""):
+            l = QtWidgets.QLabel("")
+            l.setTextFormat(QtCore.Qt.RichText)
+            if tip:
+                l.setToolTip(tip)
+            if clickfn:
+                l.setCursor(QtCore.Qt.PointingHandCursor)
+                l.mousePressEvent = lambda _e: clickfn()
+            return l
+
+        # LEFT side: folder (click→kholo) · pages/selection
+        self.status.addWidget(_sep())
+        self.foot_folder = _foot(
+            lambda: self._open_path(self._files_root()),
+            self.L("Save folder — click karke kholo", "Save folder — click to open"))
+        self.status.addWidget(self.foot_folder)
+        self.status.addWidget(_sep())
+        self.foot_pages = _foot(None, self.L("Pages / selected ki ginti + banne wali PDF ka size",
+                                             "Pages / selected count + size of the resulting PDF"))
+        self.status.addWidget(self.foot_pages)
+        self.foot_last = _foot(
+            lambda: self._recent and self._open_path(self._recent[0]),
+            self.L("Aakhri save ki hui file — click karke kholo",
+                   "Last saved file — click to open"))
+        self.status.addWidget(self.foot_last)
+
+        # RIGHT side (permanent): today+streak · worldwide-mini · disk · version · busy · scanner
+        self.foot_today = _foot(self.show_stats_dashboard,
+                                self.L("Aaj ka kaam + streak — click = Stats Dashboard",
+                                       "Today's work + streak — click for the Stats Dashboard"))
+        self.status.addPermanentWidget(self.foot_today)
+        self.status.addPermanentWidget(_sep())
+        self.foot_world = _foot(self.show_stats_dashboard,
+                                self.L("Worldwide: total scans · abhi online",
+                                       "Worldwide: total scans · online now"))
+        self.status.addPermanentWidget(self.foot_world)
+        self.status.addPermanentWidget(_sep())
+        self.foot_disk = _foot(None, self.L("Save-drive par kitni jagah bachi hai",
+                                            "Free space on the save drive"))
+        self.status.addPermanentWidget(self.foot_disk)
+        self.status.addPermanentWidget(_sep())
+        self.foot_ver = _foot(lambda: self.check_updates(False),
+                              self.L("App version — click = update check",
+                                     "App version — click to check for updates"))
+        self.foot_ver.setText("v%s" % VERSION)
+        self.status.addPermanentWidget(self.foot_ver)
+        self.status.addPermanentWidget(_sep())
         self.lbl_busy = QtWidgets.QLabel(); self.lbl_busy.setTextFormat(QtCore.Qt.RichText)
         self.status.addPermanentWidget(self.lbl_busy)
         self._set_busy_display("unknown")
+        # footer ko har 30 sec + zaroori events par refresh karo
+        self._foot_timer = QtCore.QTimer(self)
+        self._foot_timer.setInterval(30000)
+        self._foot_timer.timeout.connect(self._update_footer)
+        self._foot_timer.start()
+        try:
+            self.list.itemSelectionChanged.connect(self._update_footer)
+        except Exception:
+            pass
+        QtCore.QTimer.singleShot(1200, self._update_footer)
         self._state_timer = QtCore.QTimer(self)
         self._state_timer.setInterval(6000)
         self._state_timer.timeout.connect(self._tick_scanner_state)
@@ -6226,6 +6288,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             self._world_stats = {}
         self._update_sidebar_stats()
+        try:
+            self._update_footer()
+        except Exception:
+            pass
 
     # ---- Stats Dashboard ----
     def show_stats_dashboard(self):
@@ -8299,13 +8365,81 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._warn("Shortcut fail:\n%s" % exc)
 
     def _update_status(self):
-        prof = self._selected_profile()
-        pname = prof.get("name") if prof else tr("none_profile", self._lang)
-        flags = [k for k in ("auto_save", "batch_mode", "remove_blank", "auto_crop",
-                             "deskew", "quality_enhance", "watermark", "compress",
-                             "excel_log", "backup") if self._opts.get(k)]
-        tail = ("   |   " + ", ".join(flags)) if flags else ""
-        self.status.showMessage("%s: %d   |   %s: %s%s" % (tr("st_pages", self._lang), self.list.count(), tr("st_profile", self._lang), pname, tail))
+        self._update_footer()
+
+    def _update_footer(self):
+        """Smart footer — sab ek nazar me. (kisi bhi hisse me error aaye to
+        baaki footer chalta rahe.)"""
+        L = self.L
+        # folder
+        try:
+            root = self._files_root()
+            self.foot_folder.setText("📁 " + (os.path.basename(root.rstrip("/\\")) or root))
+        except Exception:
+            pass
+        # pages + selection + estimated size
+        try:
+            n = self.list.count()
+            sel = len(self.list.selectedItems())
+            total = 0
+            for i in range(n):
+                try:
+                    total += os.path.getsize(self.list.item(i).data(QtCore.Qt.UserRole))
+                except Exception:
+                    pass
+            mb = total / 1048576.0
+            szt = ("~%.0f KB" % (total / 1024.0)) if mb < 1 else ("~%.1f MB" % mb)
+            seltxt = (" · <b>%d selected</b>" % sel) if sel else ""
+            self.foot_pages.setText("📄 %d pages%s · %s" % (n, seltxt, szt) if n else
+                                    L("📄 koi page nahi", "📄 no pages"))
+        except Exception:
+            pass
+        # last saved
+        try:
+            if self._recent:
+                self.foot_last.setText(" · ✔ " + os.path.basename(self._recent[0]))
+            else:
+                self.foot_last.setText("")
+        except Exception:
+            pass
+        # today + streak
+        try:
+            d = (self._pstats().get("days") or {}).get(
+                datetime.datetime.now().strftime("%Y-%m-%d"), {})
+            self.foot_today.setText(
+                L("📅 Aaj: <b>%d</b>p · <b>%d</b> PDF 🔥%d",
+                  "📅 Today: <b>%d</b>p · <b>%d</b> PDF 🔥%d")
+                % (d.get("pages", 0), d.get("pdfs", 0), self._pstats_streak()))
+        except Exception:
+            pass
+        # worldwide mini
+        try:
+            w = getattr(self, "_world_stats", {}) or {}
+            if w.get("total") is not None:
+                self.foot_world.setText("🌍 %s · 🟢 %s" %
+                                        ("{:,}".format(int(w.get("total", 0))),
+                                         w.get("online", 0)))
+            else:
+                self.foot_world.setText("🌍 …")
+        except Exception:
+            pass
+        # disk space
+        try:
+            root = self._files_root()
+            free = shutil.disk_usage(root).free / (1024.0 ** 3)
+            self.foot_disk.setText("💽 %.0f GB" % free)
+        except Exception:
+            pass
+        # profile flags -> transient message (hover-tip friendly)
+        try:
+            prof = self._selected_profile()
+            pname = prof.get("name") if prof else tr("none_profile", self._lang)
+            self.foot_folder.setToolTip(
+                L("Save folder: %s\nProfile: %s — click karke folder kholo",
+                  "Save folder: %s\nProfile: %s — click to open the folder")
+                % (root if 'root' in dir() else "", pname))
+        except Exception:
+            pass
 
     def _warn(self, msg):
         QtWidgets.QMessageBox.warning(self, APP_NAME, msg)
