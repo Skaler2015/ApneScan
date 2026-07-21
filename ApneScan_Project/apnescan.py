@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "36"
+VERSION = "37"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -5274,8 +5274,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.L("🔍 Dhoondo… (chune folder ke andar)", "🔍 Search… (inside selected folder)"))
         self.files_search.setClearButtonEnabled(True)
         fp.addWidget(self.files_search)
+        # ⭐ Favourites — ek dropdown (foran kisi bhi favourite folder par jao)
         self.fav_bar = QtWidgets.QHBoxLayout()
         self.fav_bar.setSpacing(4)
+        self.fav_combo = QtWidgets.QComboBox()
+        self.fav_combo.setToolTip(self.L(
+            "⭐ Favourite folders — chuno aur foran us folder par jao.\n"
+            "Kisi folder ko favourite banane ke liye use chuno phir ⭐ dabao.",
+            "⭐ Favourite folders — pick one to jump straight there.\n"
+            "To favourite a folder, select it then press ⭐."))
+        self.fav_combo.activated.connect(self._on_fav_selected)
+        self.fav_star = QtWidgets.QToolButton()
+        self.fav_star.setText("⭐")
+        self.fav_star.setToolTip(self.L(
+            "Chune folder ko favourite banao / hatao",
+            "Add / remove the selected folder as a favourite"))
+        self.fav_star.clicked.connect(self._fav_star_clicked)
+        self.fav_bar.addWidget(self.fav_combo, 1)
+        self.fav_bar.addWidget(self.fav_star)
         fp.addLayout(self.fav_bar)
         _root = self._files_root()
         self.files_model = LibraryModel(self)
@@ -5307,7 +5323,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         fp.addWidget(self.files_results, 1)
         self._files_search_timer = QtCore.QTimer(self)
         self._files_search_timer.setSingleShot(True)
-        self._files_search_timer.setInterval(350)
+        self._files_search_timer.setInterval(140)   # 2-3 akshar likhte hi turant
         self._files_search_timer.timeout.connect(self._run_files_search)
         self.files_search.textChanged.connect(lambda _t: self._files_search_timer.start())
         self._rebuild_fav_bar()
@@ -6889,28 +6905,50 @@ class ScannerWindow(QtWidgets.QMainWindow):
         favs = self._opts.setdefault("fav_folders", [])
         if path in favs:
             favs.remove(path)
+            msg = self.L("⭐ Favourite hata diya", "⭐ Removed from favourites")
         else:
             favs.append(path)
-            while len(favs) > 4:
+            while len(favs) > 12:
                 favs.pop(0)
+            msg = self.L("⭐ Favourite me jud gaya", "⭐ Added to favourites")
         self._save_opts()
         self._rebuild_fav_bar()
+        try:
+            self.status.showMessage(msg, 3000)
+        except Exception:
+            pass
 
     def _rebuild_fav_bar(self):
-        while self.fav_bar.count():
-            it = self.fav_bar.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                w.deleteLater()
-        for p in (self._opts.get("fav_folders") or []):
-            if not os.path.isdir(p):
-                continue
-            b = QtWidgets.QPushButton("⭐ " + (os.path.basename(p) or p)[:12])
-            b.setToolTip(p)
-            b.setStyleSheet("padding:3px 8px; font-size:11px;")
-            b.clicked.connect(lambda _c=False, pp=p: self._jump_to_folder(pp))
-            self.fav_bar.addWidget(b)
-        self.fav_bar.addStretch(1)
+        """Favourites ko dropdown me bharo (galat/hata diye gaye folder chhod do)."""
+        if not hasattr(self, "fav_combo"):
+            return
+        self.fav_combo.blockSignals(True)
+        self.fav_combo.clear()
+        favs = [p for p in (self._opts.get("fav_folders") or []) if os.path.isdir(p)]
+        if favs:
+            self.fav_combo.addItem(self.L("⭐ Favourites… (chuno)", "⭐ Favourites… (pick)"), "")
+            for p in favs:
+                self.fav_combo.addItem("⭐ " + (os.path.basename(p) or p), p)
+            self.fav_combo.setEnabled(True)
+        else:
+            self.fav_combo.addItem(self.L("⭐ (koi favourite nahi)", "⭐ (no favourites yet)"), "")
+            self.fav_combo.setEnabled(False)
+        self.fav_combo.setCurrentIndex(0)
+        self.fav_combo.blockSignals(False)
+
+    def _on_fav_selected(self, _idx):
+        p = self.fav_combo.currentData()
+        if p:
+            self._jump_to_folder(p)
+        # wapas placeholder par le aao taaki dobara wahi chuna ja sake
+        self.fav_combo.blockSignals(True)
+        self.fav_combo.setCurrentIndex(0)
+        self.fav_combo.blockSignals(False)
+
+    def _fav_star_clicked(self):
+        p = self._selected_library_folder()
+        if p and os.path.isdir(p):
+            self._toggle_fav(p)
 
     def _jump_to_folder(self, p):
         try:
@@ -6923,23 +6961,34 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
 
     def _run_files_search(self):
-        """Panel ki search: chune folder ke andar (ya poore save-folder me)
-        naam se file dhoondo — background me, turant results."""
+        """Advanced search — POORE panel-folder (aur uske andar ke sabhi
+        folders) me naam se dhoondo. Bas 2 akshar likhte hi turant natije.
+        Kai shabd likho to sabhi match hone chahiye (jaise 'ram bill'), aur
+        folder ka naam likho to us folder ke andar ki files bhi mil jaati hain."""
         q = self.files_search.text().strip().lower()
         if len(q) < 2:
             self.files_results.hide()
             self.files_tree.show()
             return
-        scope = self._selected_library_folder()
+        terms = [t for t in q.split() if t]
+        # Chuna hua koi subfolder ho to usi me, warna poore panel-folder me
+        sel = self._selected_library_folder()
+        scope = sel if (sel and os.path.isdir(sel)) else self._files_root()
+        exts = (".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".docx", ".xlsx")
 
         def job():
             hits = []
             for dp, _dn, fn in os.walk(scope):
                 for f in fn:
-                    if q in f.lower():
+                    if not f.lower().endswith(exts):
+                        continue
+                    # naam + jis folder me hai uska raasta — dono me dhoondo
+                    rel = os.path.relpath(os.path.join(dp, f), scope).lower()
+                    if all(t in rel for t in terms):
                         hits.append(os.path.join(dp, f))
-                        if len(hits) >= 400:
+                        if len(hits) >= 600:
                             return hits
+            hits.sort(key=lambda p: os.path.basename(p).lower())
             return hits
 
         def done(res):
@@ -6948,6 +6997,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
             if self.files_search.text().strip().lower() != q:
                 return                      # tab tak nayi search shuru ho gayi
             self.files_results.clear()
+            head = QtWidgets.QListWidgetItem(
+                self.L("🔎 %d natije mile", "🔎 %d results") % len(res)
+                + ("+" if len(res) >= 600 else ""))
+            head.setFlags(QtCore.Qt.NoItemFlags)
+            _hf = head.font(); _hf.setBold(True); head.setFont(_hf)
+            self.files_results.addItem(head)
             for p in res:
                 rel = os.path.dirname(os.path.relpath(p, scope))
                 label = "📄 " + os.path.basename(p)
@@ -6958,12 +7013,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 it.setData(QtCore.Qt.UserRole, p)
                 self.files_results.addItem(it)
             if not res:
-                it = QtWidgets.QListWidgetItem("(kuch nahi mila)")
+                it = QtWidgets.QListWidgetItem(self.L("(kuch nahi mila)", "(nothing found)"))
                 it.setFlags(QtCore.Qt.NoItemFlags)
                 self.files_results.addItem(it)
             self.files_tree.hide()
             self.files_results.show()
-        self._run_bg(job, done, "Dhoondh rahe hain…")
+        self._run_bg(job, done, self.L("Dhoondh rahe hain…", "Searching…"))
 
     def _merge_folder_pdfs(self, folder):
         if not HAS_OCR_LIBS:
