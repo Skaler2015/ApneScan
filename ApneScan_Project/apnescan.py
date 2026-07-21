@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "56"
+VERSION = "57"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -4054,57 +4054,104 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # network na ho to bhi personal stats dikhti rahein
         self._update_sidebar_stats()
 
-    def _start_stat_worker(self, action, n=0, imp=0, prt=0, want_display=True):
-        """StatsWorker ko is tarah chalao ki wo GC (garbage-collect) na ho jaye
-        jab tak khatam na ho — warna signal kabhi nahi pahunchta tha aur sidebar
-        '...' par atka reh jata tha. Har worker ko list me rakhte hain aur
-        finish hone par hata dete hain."""
-        url = self._stats_url()
-        if not url:
-            return None
-        self._stat_workers = getattr(self, "_stat_workers", [])
-        w = StatsWorker(url, self._get_client_id(), action=action, n=n, imp=imp, prt=prt)
-        self._stat_workers.append(w)
+    # ================= STATS (naya, seedha-saada) =================
+    # NOTE: Pehle alag 'StatsWorker' (QThread + custom signals) istemal hota
+    # tha — kisi wajah se uska signal sidebar tak nahi pahunchta tha aur
+    # worldwide numbers '...' par atke reh jate the (jabki network theek tha).
+    # Ab wahi PROVEN background system (FuncWorker, jo save/edit me chalta hai)
+    # se fetch karte hain — ye bharosemand hai.
 
-        def _cleanup(wk=w):
+    def _run_bg_quiet(self, fn, on_done):
+        """_run_bg jaisa hi — par bina 'busy' pill ke (background stats/poll ke
+        liye). FuncWorker ko list me rakhta hai taaki GC na ho."""
+        self._bg_workers = getattr(self, "_bg_workers", [])
+        w = FuncWorker(fn)
+
+        def _fin(res, w=w):
             try:
-                self._stat_workers.remove(wk)
+                self._bg_workers.remove(w)
+            except ValueError:
+                pass
+            try:
+                on_done(res)
             except Exception:
                 pass
-        if want_display:
-            w.got.connect(lambda t, d, o: self._set_stats_display((t, d, o)))
-            w.got_full.connect(self._on_world_stats)
-            w.failed.connect(self._stats_failed)
-        w.finished.connect(_cleanup)
+        w.done.connect(_fin)
+        self._bg_workers.append(w)
         w.start()
-        return w
 
-    def _refresh_stats(self, action="ping"):
+    def _stats_fetch(self, action="stats", n=0, imp=0, prt=0, want_display=True):
+        """Stats server se ek request — background me (UI nahi rukti)."""
         url = self._stats_url()
         if not url:
+            return
+        client = self._get_client_id()
+        ver = VERSION
+        try:
+            country = (QtCore.QLocale().name().split("_") + [""])[1][:2]
+        except Exception:
+            country = ""
+
+        def fn():
+            import urllib.request as U
+            import urllib.parse as P
+            import json as J
+            import ssl
+            q = {"action": action, "client": client, "v": ver, "c": country}
+            if action == "scan" and n:
+                q["n"] = str(n)
+            if imp:
+                q["imp"] = str(imp)
+            if prt:
+                q["prt"] = str(prt)
+            full = url + ("&" if "?" in url else "?") + P.urlencode(q)
+            req = U.Request(full, headers={"User-Agent": "ApneScan/%s" % ver})
+            # verified -> unverified -> no-proxy: teeno me se jo chale
+            for mk in (lambda: U.urlopen(req, timeout=20),
+                       lambda: U.urlopen(req, timeout=20, context=ssl._create_unverified_context()),
+                       lambda: U.build_opener(
+                           U.ProxyHandler({}),
+                           U.HTTPSHandler(context=ssl._create_unverified_context())).open(req, timeout=25)):
+                try:
+                    r = mk()
+                    return J.loads(r.read().decode("utf-8", "ignore"))
+                except Exception:
+                    continue
+            return None
+
+        def on_done(data):
+            if not want_display:
+                return
+            if isinstance(data, dict) and data.get("ok"):
+                self._on_world_stats(data)
+                self._set_stats_display((int(data.get("total", 0)),
+                                         int(data.get("today", 0)),
+                                         int(data.get("online", 0))))
+            else:
+                self._stats_failed()
+        self._run_bg_quiet(fn, on_done)
+
+    def _refresh_stats(self, action="ping"):
+        if not self._stats_url():
             self._set_stats_display(None)
             return
         # DISPLAY hamesha 'stats' (sirf PADHNA) se — tez aur bharosemand.
-        self._start_stat_worker("stats", want_display=True)
-        # ONLINE/USER register: 'ping' ALAG se best-effort (display iss par
-        # depend nahi karta).
+        self._stats_fetch("stats", want_display=True)
+        # ONLINE/USER register: 'ping' ALAG se best-effort.
         if action == "ping":
-            self._start_stat_worker("ping", want_display=False)
+            self._stats_fetch("ping", want_display=False)
 
     def _report_scan_stat(self, n):
         if not self._stats_url() or n <= 0:
             return
-        # scan-count server par bhejo (LIKHAI) — GC-safe worker se
-        self._start_stat_worker("scan", n=n, want_display=True)
-        # LIKHAI slow ho sakti hai — thodi der baad display ko 'stats' se taaza karo
+        self._stats_fetch("scan", n=n, want_display=True)
         QtCore.QTimer.singleShot(6000, lambda: self._refresh_stats("stats"))
 
     def _report_event(self, imports=0, prints=0):
-        """Worldwide analytics ke liye import/print ki ginti server par bhejo
-        (best-effort). Display baad me 'stats' se taaza ho jata hai."""
+        """Worldwide analytics — import/print ki ginti server par bhejo."""
         if not self._stats_url() or (imports <= 0 and prints <= 0):
             return
-        self._start_stat_worker("event", imp=imports, prt=prints, want_display=True)
+        self._stats_fetch("event", imp=imports, prt=prints, want_display=True)
         QtCore.QTimer.singleShot(6000, lambda: self._refresh_stats("stats"))
 
     def set_stats_url(self):
