@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "47"
+VERSION = "48"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -365,6 +365,7 @@ DEFAULT_OPTIONS = {
     "show_left_panel": True,     # baayan scan-settings panel
     "fav_folders": [],           # panel ke ⭐ favourite folders
     "files_panel_root": "",      # panel me khola gaya doosra folder (khaali = save-folder)
+    "files_sort": "name_asc",    # panel ki list kis tarah sort ho (user pasand)
     "sidebar_stats": [],         # khaali = default set dikhega
     "name_append_number": False, # auto-naam me document number bhi jodo
     "name_append_date": False,   # auto-naam me date bhi jodo
@@ -5396,9 +5397,15 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.L("🔍 Dhoondo… (chune folder ke andar)", "🔍 Search… (inside selected folder)"))
         self.files_search.setClearButtonEnabled(True)
         fp.addWidget(self.files_search)
-        # ⭐ Favourites — ek dropdown (foran kisi bhi favourite folder par jao)
+        # ⬅ Peeche · ⭐ Favourites (dropdown) · ⇅ Sort
         self.fav_bar = QtWidgets.QHBoxLayout()
         self.fav_bar.setSpacing(4)
+        self.btn_panel_back = QtWidgets.QToolButton()
+        self.btn_panel_back.setText("⬅")
+        self.btn_panel_back.setToolTip(self.L("Peeche (upar wale folder me) jao",
+                                              "Back (up one folder)"))
+        self.btn_panel_back.clicked.connect(self._panel_back)
+        self.btn_panel_back.setEnabled(False)
         self.fav_combo = QtWidgets.QComboBox()
         self.fav_combo.setToolTip(self.L(
             "⭐ Favourite folders — chuno aur foran us folder par jao.\n"
@@ -5412,9 +5419,23 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "Chune folder ko favourite banao / hatao",
             "Add / remove the selected folder as a favourite"))
         self.fav_star.clicked.connect(self._fav_star_clicked)
+        self.btn_panel_sort = QtWidgets.QToolButton()
+        self.btn_panel_sort.setText("⇅")
+        self.btn_panel_sort.setToolTip(self.L(
+            "List ko apne hisaab se sort karo (naam/date/size). Aapki pasand save rahegi.",
+            "Sort the list your way (name/date/size). Your choice is saved."))
+        self.btn_panel_sort.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.btn_panel_sort.setMenu(self._build_sort_menu())
+        self.fav_bar.addWidget(self.btn_panel_back)
         self.fav_bar.addWidget(self.fav_combo, 1)
         self.fav_bar.addWidget(self.fav_star)
+        self.fav_bar.addWidget(self.btn_panel_sort)
         fp.addLayout(self.fav_bar)
+        # Abhi kis folder me ho — chhoti si patti (breadcrumb)
+        self.lbl_panel_cwd = QtWidgets.QLabel("")
+        self.lbl_panel_cwd.setStyleSheet("color:#0f766e;font-size:11px;font-weight:600;")
+        self.lbl_panel_cwd.setWordWrap(True)
+        fp.addWidget(self.lbl_panel_cwd)
         _root = self._files_root()
         self.files_model = LibraryModel(self)
         self.files_model.setRootPath(_root)
@@ -5428,16 +5449,22 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.files_tree.hideColumn(_c)
         self.files_tree.setHeaderHidden(True)
         self.files_tree.setAnimated(True)
+        # Ek baar me sirf ek folder — andar jaane ke liye folder par 2x click
+        # (poori tree ek saath nahi khulti). Wapas ke liye ⬅ button.
+        self.files_tree.setItemsExpandable(False)
+        self.files_tree.setRootIsDecorated(False)
+        self.files_tree.setExpandsOnDoubleClick(False)
         self.files_tree.doubleClicked.connect(self._files_tree_open)
         self.files_tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.files_tree.customContextMenuRequested.connect(self._files_tree_menu)
         self.files_tree.selectionModel().currentChanged.connect(self._files_sel_changed)
-        self.files_tree.setToolTip("Folder chuno → 'Yahan save' dabao, ya pages ko\n"
-                                   "kheench kar folder par chhod do.\n"
-                                   "Kisi file ko KHEENCH kar beech ke doc-area me\n"
-                                   "chhodo = wo turant import ho jayegi.\n"
-                                   "Right-click = share/rename/delete/merge.\n"
-                                   "File par double-click = kholo. Hari = aaj ki file.")
+        self._apply_files_sort()          # user ki saved sort-pasand lagao
+        self._update_panel_nav()          # breadcrumb + back-button
+        self.files_tree.setToolTip("Folder par 2x click = uske ANDAR jao (sirf wahi\n"
+                                   "dikhega). ⬅ button se wapas peeche.\n"
+                                   "File par 2x click = kholo. Ek click = save/favourite\n"
+                                   "ke liye chuno. Pages ko folder par chhodo = wahin save.\n"
+                                   "File ko doc-area me kheencho = import. Hari = aaj ki file.")
         fp.addWidget(self.files_tree, 1)
         # search ke results (search karte hi tree ki jagah dikhte hain)
         self.files_results = UrlListWidget()      # yahan se file drag = import
@@ -6854,6 +6881,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
             root = self._files_root()
             self.files_model.setRootPath(root)
             self.files_tree.setRootIndex(self.files_model.index(root))
+            self._apply_files_sort()
+            self._update_panel_nav()
             if hasattr(self, "foot_folder"):
                 self._update_footer()
         except Exception:
@@ -6885,8 +6914,85 @@ class ScannerWindow(QtWidgets.QMainWindow):
             path = self.files_model.filePath(index)
         except Exception:
             return
-        if path and os.path.isfile(path):
+        if not path:
+            return
+        if os.path.isdir(path):
+            self._panel_show(path)      # folder ke ANDAR chalo (sirf uski cheezein)
+        elif os.path.isfile(path):
             self._open_path(path)
+
+    # ---- Panel navigation: ek baar me ek hi folder (drill-in / back) ----
+    def _panel_show(self, folder):
+        try:
+            self.files_model.setRootPath(folder)
+            self.files_tree.setRootIndex(self.files_model.index(folder))
+        except Exception:
+            return
+        self._update_panel_nav()
+
+    def _panel_current_dir(self):
+        try:
+            p = self.files_model.filePath(self.files_tree.rootIndex())
+            if p and os.path.isdir(p):
+                return p
+        except Exception:
+            pass
+        return self._files_root()
+
+    def _panel_back(self):
+        cur = self._panel_current_dir()
+        base = self._files_root()
+        if os.path.normpath(cur) == os.path.normpath(base):
+            return                       # base par hain — isse upar nahi
+        self._panel_show(os.path.dirname(os.path.normpath(cur)))
+
+    def _update_panel_nav(self):
+        cur = self._panel_current_dir()
+        base = self._files_root()
+        at_top = os.path.normpath(cur) == os.path.normpath(base)
+        if hasattr(self, "btn_panel_back"):
+            self.btn_panel_back.setEnabled(not at_top)
+        if hasattr(self, "lbl_panel_cwd"):
+            self.lbl_panel_cwd.setText("📂 " + (os.path.basename(cur) or cur))
+
+    # ---- List sort (user ki pasand save rehti hai) ----
+    SORT_MODES = [
+        ("name_asc",  "Naam: A → Z",        "Name: A → Z",        0, QtCore.Qt.AscendingOrder),
+        ("name_desc", "Naam: Z → A",        "Name: Z → A",        0, QtCore.Qt.DescendingOrder),
+        ("date_desc", "Date: nayi pehle",   "Date: newest first", 3, QtCore.Qt.DescendingOrder),
+        ("date_asc",  "Date: purani pehle", "Date: oldest first", 3, QtCore.Qt.AscendingOrder),
+        ("size_desc", "Size: badi pehle",   "Size: largest first",1, QtCore.Qt.DescendingOrder),
+        ("size_asc",  "Size: chhoti pehle", "Size: smallest first",1, QtCore.Qt.AscendingOrder),
+    ]
+
+    def _build_sort_menu(self):
+        menu = QtWidgets.QMenu(self)
+        grp = QtWidgets.QActionGroup(menu); grp.setExclusive(True)
+        cur = self._opts.get("files_sort", "name_asc")
+        for key, hi, en, _col, _order in self.SORT_MODES:
+            act = menu.addAction(self.L(hi, en))
+            act.setCheckable(True)
+            act.setChecked(key == cur)
+            act.triggered.connect(lambda _c=False, k=key: self._set_files_sort(k))
+            grp.addAction(act)
+        return menu
+
+    def _set_files_sort(self, key):
+        self._opts["files_sort"] = key
+        self._save_opts()
+        self._apply_files_sort()
+
+    def _apply_files_sort(self):
+        key = self._opts.get("files_sort", "name_asc")
+        col, order = 0, QtCore.Qt.AscendingOrder
+        for k, _hi, _en, c, o in self.SORT_MODES:
+            if k == key:
+                col, order = c, o
+                break
+        try:
+            self.files_model.sort(col, order)
+        except Exception:
+            pass
 
     def _selected_library_folder(self):
         try:
@@ -6896,7 +7002,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 return p if os.path.isdir(p) else os.path.dirname(p)
         except Exception:
             pass
-        return self._files_root()
+        return self._panel_current_dir()   # kuch chuna na ho to abhi khula folder
 
     def new_library_folder(self):
         base = self._selected_library_folder()
@@ -7145,14 +7251,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._toggle_fav(p)
 
     def _jump_to_folder(self, p):
+        """Kisi folder me SEEDHA chalo (drill-in). Base ke andar ho to bas
+        usme; bahar ho to use naya base bana do."""
+        if not p or not os.path.isdir(p):
+            return
         try:
             self.files_search.clear()
-            idx = self.files_model.index(p)
-            self.files_tree.setCurrentIndex(idx)
-            self.files_tree.expand(idx)
-            self.files_tree.scrollTo(idx)
+            self.files_results.hide(); self.files_tree.show()
         except Exception:
             pass
+        base = os.path.normpath(self._files_root())
+        npath = os.path.normpath(p)
+        under = (npath == base) or npath.startswith(base + os.sep)
+        if under:
+            self._panel_show(p)
+        else:
+            self._opts["files_panel_root"] = p
+            self._save_opts()
+            self._refresh_files_root()
 
     def _files_result_activated(self, it):
         """Search-result par double-click: folder ho to panel me usme chale
