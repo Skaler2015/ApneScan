@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "37"
+VERSION = "38"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -369,7 +369,6 @@ DEFAULT_OPTIONS = {
     "name_append_number": False, # auto-naam me document number bhi jodo
     "name_append_date": False,   # auto-naam me date bhi jodo
     "ui_dashboard": True,        # khaali screen par bade action-cards
-    "ui_fab": False,             # floating gol Scan button
     "ui_header": True,           # toolbar ke neeche status-patti
     "ui_graph": True,            # sidebar me 7-din ka graph
     "ui_preview": False,         # daayan preview panel
@@ -3496,7 +3495,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, self.L("Left sidebar dikhao/chhupao", "Show/hide left sidebar"), self.toggle_left_panel, "हिन्दी: Baayin taraf ka scan-settings panel on/off (zyada jagah ke liye).\nEnglish: Show/hide the left scan-settings sidebar for more space.", "F9")
         self.act_files_panel = self._ma(ms, self.L("Right sidebar (Meri Files) dikhao/chhupao", "Show/hide right sidebar (My Files)"), self.toggle_files_panel, "हिन्दी: Daayin taraf ka folders-wala panel on/off karo.\nEnglish: Show/hide the right-side files panel.", "F10")
         self._ma(ms, "Sidebar stats chuno…", self.choose_sidebar_stats, "हिन्दी: Sidebar ke stats-box me kaun-kaun si ginti dikhe — aap khud chuno (worldwide + personal).\nEnglish: Choose which stats appear in the sidebar box.")
-        self._ma(ms, "🎨 UI customize karo…", self.customize_ui, "हिन्दी: App ka look apne hisaab se: dashboard, floating Scan button, status-patti, sidebar graph, Dark Pro theme — jo chaho on/off karo.\nEnglish: Customize the UI: dashboard, floating Scan button, status bar, sidebar graph, Dark Pro theme.")
+        self._ma(ms, "🎨 UI customize karo…", self.customize_ui, "हिन्दी: App ka look apne hisaab se: dashboard, status-patti, sidebar graph, Dark Pro theme — jo chaho on/off karo.\nEnglish: Customize the UI: dashboard, status bar, sidebar graph, Dark Pro theme.")
         self.act_touch = self._ma(ms, "Touch / bade-button mode", self.toggle_touch_mode, "हिन्दी: Buttons/likhai badi ho jayegi — touch screen ya buzurgon ke liye aasan.\nEnglish: Bigger buttons and text for touch screens or elderly users.")
         self.act_touch.setCheckable(True)
         self.act_touch.setChecked(bool(self._opts.get("touch_mode")))
@@ -5242,15 +5241,6 @@ class ScannerWindow(QtWidgets.QMainWindow):
         _dv.addWidget(self._dash_recent)
         _dv.addStretch(1)
         self._dash.hide()
-        # ---- UI #6: Floating Scan button (FAB) ----
-        self.fab = QtWidgets.QPushButton("🖨", self)
-        self.fab.setFixedSize(56, 56)
-        self.fab.setToolTip("Scan (F5)")
-        self.fab.setStyleSheet(
-            "QPushButton{background:#0f766e;color:#fff;border:none;border-radius:28px;"
-            "font-size:22px;}QPushButton:hover{background:#115e59;}")
-        self.fab.clicked.connect(self.do_scan)
-        self.fab.setVisible(bool(self._opts.get("ui_fab", False)))
         self.list.viewport().installEventFilter(self)
         self.list.itemDoubleClicked.connect(self._open_preview_dialog)
         self.list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
@@ -5777,9 +5767,6 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, "fab"):
-            self.fab.move(self.width() - 78, self.height() - 100)
-            self.fab.raise_()
 
 
     def do_scan(self):
@@ -7312,7 +7299,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         cmb.setCurrentIndex({"light": 0, "dark": 1, "darkpro": 2}.get(self._opts.get("theme"), 0))
         form.addRow("Theme:", cmb)
         checks = {}
-        default_on = {"ui_fab", "ui_preview", "ui_jobs", "ui_kiosk", "ui_ribbon"}
+        default_on = {"ui_preview", "ui_jobs", "ui_kiosk", "ui_ribbon"}
         for key, hi, en in (
                 ("ui_ribbon", "Ribbon toolbar (MS-Office jaisa — tabs me buttons)",
                  "Ribbon toolbar (Office-style tabs)"),
@@ -7324,8 +7311,6 @@ class ScannerWindow(QtWidgets.QMainWindow):
                  "Preview panel (big page preview + quick edit)"),
                 ("ui_jobs", "Job-chips patti (1 click me profile+folder set)",
                  "Job chips bar (1-click profile+folder)"),
-                ("ui_fab", "Floating gol Scan button (neeche-daayein)",
-                 "Floating round Scan button (bottom-right)"),
                 ("ui_graph", "Sidebar me 7-din ka graph",
                  "7-day graph in the sidebar")):
             c = QtWidgets.QCheckBox(self.L(hi, en))
@@ -7355,7 +7340,6 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # turant lagao — restart ki zaroorat nahi
         self._apply_style()
         try:
-            self.fab.setVisible(bool(self._opts.get("ui_fab")))
             self.ui_header.setVisible(bool(self._opts.get("ui_header")))
             self.side_graph.setVisible(bool(self._opts.get("ui_graph")))
             self.preview_panel.setVisible(bool(self._opts.get("ui_preview")))
