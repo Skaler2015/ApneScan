@@ -164,7 +164,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "61"
+VERSION = "62"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -3840,6 +3840,21 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._namer.finished_all.connect(self._on_naming_done)
         self._namer.start()
 
+    def _name_one_page(self, row, path, force=False):
+        """Ek page ka naam TURANT background me padho (scan/import ke saath-saath).
+        Isse sab pages ke baad naming ka intezaar nahi karna padta."""
+        if not path or not tesseract_available():
+            return
+        if not force and not self._opts.get("auto_name"):
+            return
+        self._page_namers = getattr(self, "_page_namers", [])
+        w = NameWorker([(row, path)], learned=self._learned_names())
+        w.named.connect(self._apply_page_title)
+        w.finished_all.connect(
+            lambda w=w: self._page_namers.remove(w) if w in self._page_namers else None)
+        self._page_namers.append(w)
+        w.start()
+
     def _learned_names(self):
         out = []
         for e in (self._config.get("learned_names", []) or []):
@@ -6498,6 +6513,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _on_page_scanned(self, path):
         self._add_item_for_path(path)
         self._scan_count += 1
+        # NAAM turant padhna shuru (per-page) — sab pages ke baad delay na ho
+        self._name_one_page(self.list.count() - 1, path)
         if self._progress:
             self._progress.set_page(self._scan_count)
         if (self._opts.get("barcode_autofill") and not self._barcode_tried
@@ -6529,8 +6546,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
             msg += " (%d blank hataye)" % skipped
         self.status.showMessage(msg, 5000)
         self._an_report("scan", n=kept)      # worldwide scan-count + refresh
-        if self._opts.get("auto_name") and kept:
-            self.auto_name_pages()
+        # (naam har page ke scan hote hi background me padh liya gaya —
+        #  isliye yahan bulk naming ka intezaar nahi)
         if self._opts.get("auto_save") and kept:
             saved = self._auto_save_pdf()
             if saved and self._opts.get("batch_mode"):
@@ -6608,6 +6625,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     def _on_import_page(self, path, qimg):
         self._add_item_for_path(path, qimg)
+        # naam turant (per-page) — import ke baad alag se naming ka wait nahi
+        self._name_one_page(self.list.count() - 1, path, force=True)
 
     def _on_import_done(self, count):
         if count:
@@ -6615,8 +6634,6 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._pstats_bump(imports=count)     # personal
             self._an_report("event", imp=count)  # worldwide + refresh
             self._an_update_box()
-            if tesseract_available():
-                self.auto_name_pages()
         else:
             self.status.clearMessage()
             self._warn("Import nahi ho paya. PDF ho to behtar result ke liye "
