@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "39"
+VERSION = "40"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -5327,6 +5327,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
         fp.addWidget(self.files_tree, 1)
         # search ke results (search karte hi tree ki jagah dikhte hain)
         self.files_results = QtWidgets.QListWidget()
+        self.files_results.setWordWrap(True)      # naam kate nahi, agli line me
+        self.files_results.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.files_results.setUniformItemSizes(False)
+        self.files_results.setStyleSheet(
+            "QListWidget{outline:0;}"
+            "QListWidget::item{padding:5px 4px;border-bottom:1px solid #eef2f7;}"
+            "QListWidget::item:selected{background:#e0f2f1;color:#0f172a;}")
         self.files_results.itemDoubleClicked.connect(
             lambda it: it.data(QtCore.Qt.UserRole) and self._open_path(it.data(QtCore.Qt.UserRole)))
         self.files_results.hide()
@@ -7009,12 +7016,17 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 + ("+" if len(res) >= 600 else ""))
             head.setFlags(QtCore.Qt.NoItemFlags)
             _hf = head.font(); _hf.setBold(True); head.setFont(_hf)
+            head.setForeground(QtGui.QColor("#0f766e"))
             self.files_results.addItem(head)
+            _icon = {".pdf": "📕", ".docx": "📘", ".xlsx": "📗"}
             for p in res:
                 rel = os.path.dirname(os.path.relpath(p, scope))
-                label = "📄 " + os.path.basename(p)
+                ext = os.path.splitext(p)[1].lower()
+                name = os.path.basename(p)
+                # do line: upar naam, neeche chhota-halka folder ka raasta
+                label = _icon.get(ext, "🖼") + "  " + name
                 if rel and rel != ".":
-                    label += "   (%s)" % rel
+                    label += "\n       📁 " + rel.replace(os.sep, " › ")
                 it = QtWidgets.QListWidgetItem(label)
                 it.setToolTip(p)
                 it.setData(QtCore.Qt.UserRole, p)
