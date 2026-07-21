@@ -172,9 +172,15 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "77"
+VERSION = "78"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
+# App ko phailane (share/QR/poster) ke liye
+WEBSITE_URL = "https://apnescan.apnesoft.com"
+GITHUB_URL = "https://github.com/Skaler2015/ApneScan"
+SHARE_TEXT = ("ApneScan — bilkul FREE document scanner software (Windows). "
+              "Scan to PDF, Hindi+English OCR, PDF compress (200KB), WhatsApp share. "
+              "No ads. Download: " + WEBSITE_URL)
 def _portable_dir():
     """PORTABLE MODE: exe ke saath 'portable.txt' naam ki khaali file rakh do —
     saari settings wahi folder me rahengi (pen-drive se chalao, settings saath)."""
@@ -4175,6 +4181,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mh, "Check for updates…", lambda: self.check_updates(False), "हिन्दी: Naya version aaya ho to app use khud download karke install kar legi.\nEnglish: If a newer version exists the app downloads and installs it itself.")
         self._ma(mh, "View error report…", self.open_crash_report, "हिन्दी: Agar app kabhi crash hui ho to uski report kholo (feedback me bhejne ke liye).\nEnglish: Open the saved crash report, if any.")
         self._ma(mh, tr("feedback", self._lang), self.send_feedback, "हिन्दी: Sujhav/shikayat bhejo.\nEnglish: Send feedback.")
+        mh.addSeparator()
+        self._ma(mh, "📣 ApneScan share karo (doston ko batao)…", self.share_app, "हिन्दी: Is free app ko doston/customers tak pahuchao — WhatsApp, link copy, QR code ya poster/pamphlet (dukaan/hospital me lagane layak). Jitne zyada log, utna achha.\nEnglish: Spread this free app — WhatsApp, copy link, QR code, or a printable poster for your shop/clinic.")
+        self._ma(mh, "⭐ Review / Star (GitHub)…", self.ask_review, "हिन्दी: Pasand aaya to GitHub par ⭐ star ya review dein — isse app aur logon tak pahunchega.\nEnglish: Like it? Give a ⭐ or a review on GitHub — it helps others find ApneScan.")
         self._ma(mh, tr("about", self._lang), self.show_about, "हिन्दी: App ke baare me.\nEnglish: About this app.")
 
         # AUTOMATIC: har menu/submenu ke har option par "?" + Hindi/English hover
@@ -5442,6 +5451,226 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "1) Press Ctrl+V in the email (the file is already copied)\n"
             "2) Or drag the PDF from Explorer onto the email.\n\n"
             "File: %s" % pdf)
+
+    # ---- App phailao: Share / QR / Poster / Review (growth) ----
+    def _app_qr_image(self, url=None, box=8):
+        """Download-link ka QR (PIL image). qrcode na ho to None."""
+        try:
+            import qrcode
+            qr = qrcode.QRCode(border=2, box_size=box,
+                               error_correction=qrcode.constants.ERROR_CORRECT_M)
+            qr.add_data(url or WEBSITE_URL); qr.make(fit=True)
+            return qr.make_image(fill_color="#0f766e", back_color="white").convert("RGB")
+        except Exception:
+            return None
+
+    def share_app(self):
+        """Is app ko doosron tak pahuchao — WhatsApp / link copy / QR / poster."""
+        L = self.L
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(L("📣 ApneScan doosron ko batao", "📣 Share ApneScan"))
+        dlg.setMinimumWidth(440)
+        v = QtWidgets.QVBoxLayout(dlg)
+        top = QtWidgets.QLabel(L(
+            "<b>ApneScan free hai — jitne zyada log istemal karenge, utna achha!</b><br>"
+            "Neeche se ek tarika chuno. (Message + download-link tayaar hai.)",
+            "<b>ApneScan is free — the more people use it, the better!</b><br>"
+            "Pick a way below. (A ready message + download link is included.)"))
+        top.setTextFormat(QtCore.Qt.RichText); top.setWordWrap(True)
+        v.addWidget(top)
+        msg = QtWidgets.QPlainTextEdit(SHARE_TEXT); msg.setFixedHeight(76)
+        v.addWidget(msg)
+
+        def _wa():
+            try:
+                import urllib.parse as _up
+                os.startfile("whatsapp://send?text=" + _up.quote(msg.toPlainText()))
+            except Exception:
+                try:
+                    import webbrowser, urllib.parse as _up
+                    webbrowser.open("https://wa.me/?text=" + _up.quote(msg.toPlainText()))
+                except Exception:
+                    pass
+            self.status.showMessage(L("WhatsApp khul gaya — contact chuno aur bhejo",
+                                      "WhatsApp opened — pick a contact and send"), 6000)
+
+        def _copy():
+            QtWidgets.QApplication.clipboard().setText(msg.toPlainText())
+            self.status.showMessage(L("📋 Message copy ho gaya — kahin bhi paste karo",
+                                      "📋 Message copied — paste it anywhere"), 5000)
+
+        def _copylink():
+            QtWidgets.QApplication.clipboard().setText(WEBSITE_URL)
+            self.status.showMessage(L("📋 Link copy: " + WEBSITE_URL, "📋 Link copied: " + WEBSITE_URL), 5000)
+
+        def _email():
+            try:
+                import webbrowser, urllib.parse as _up
+                webbrowser.open("mailto:?subject=%s&body=%s"
+                                % (_up.quote("ApneScan — free scanner software"),
+                                   _up.quote(msg.toPlainText())))
+            except Exception:
+                pass
+        grid = QtWidgets.QGridLayout()
+        for i, (ic, lb, fn) in enumerate((
+                ("🟢", L("WhatsApp par bhejo", "Send on WhatsApp"), _wa),
+                ("📋", L("Message copy", "Copy message"), _copy),
+                ("🔗", L("Sirf link copy", "Copy link only"), _copylink),
+                ("✉", L("Email se bhejo", "Send by Email"), _email),
+                ("🔳", L("QR code dikhao/save", "Show/save QR code"), self.show_app_qr),
+                ("🖼", L("Poster/pamphlet banao", "Make a poster"), self.make_poster))):
+            b = QtWidgets.QPushButton("%s  %s" % (ic, lb)); b.setMinimumHeight(38)
+            b.clicked.connect(fn)
+            grid.addWidget(b, i // 2, i % 2)
+        v.addLayout(grid)
+        note = QtWidgets.QLabel(L(
+            "<span style='color:#64748b;font-size:11px;'>💡 Dukaan/hospital me QR-poster "
+            "laga do — log mobile se scan karke seedha download kar lenge.</span>",
+            "<span style='color:#64748b;font-size:11px;'>💡 Put a QR poster up at your "
+            "shop/hospital — people can scan it and download directly.</span>"))
+        note.setTextFormat(QtCore.Qt.RichText); note.setWordWrap(True)
+        v.addWidget(note)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+        bb.rejected.connect(dlg.reject); bb.accepted.connect(dlg.reject)
+        v.addWidget(bb)
+        dlg.exec_()
+
+    def show_app_qr(self):
+        """Download-link ka QR — screen par + save karne ka option."""
+        img = self._app_qr_image(box=10)
+        if img is None:
+            self._warn(self.L("QR banane ke liye 'qrcode' library chahiye (agle build me).",
+                              "The 'qrcode' library is needed for QR (in the next build).")); return
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("🔳 ApneScan QR", "🔳 ApneScan QR"))
+        v = QtWidgets.QVBoxLayout(dlg)
+        lbl = QtWidgets.QLabel(); lbl.setAlignment(QtCore.Qt.AlignCenter)
+        data = img.tobytes("raw", "RGB")
+        qim = QtGui.QImage(data, img.width, img.height, 3 * img.width, QtGui.QImage.Format_RGB888)
+        lbl.setPixmap(QtGui.QPixmap.fromImage(qim.copy()))
+        v.addWidget(lbl)
+        cap = QtWidgets.QLabel(self.L("Mobile camera se scan karo → seedha download",
+                                      "Scan with a phone camera → direct download"))
+        cap.setAlignment(QtCore.Qt.AlignCenter); cap.setStyleSheet("color:#475569;")
+        v.addWidget(cap)
+        row = QtWidgets.QHBoxLayout()
+        bsave = QtWidgets.QPushButton(self.L("💾 Image save karo", "💾 Save image"))
+
+        def _save():
+            out, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self, self.L("QR save", "Save QR"),
+                os.path.join(os.path.expanduser("~"), "ApneScan_QR.png"), "PNG (*.png)")
+            if out:
+                try:
+                    img.save(out); self.status.showMessage(self.L("QR save ho gaya", "QR saved"), 4000)
+                except Exception as e:
+                    self._warn(str(e))
+        bsave.clicked.connect(_save)
+        bclose = QtWidgets.QPushButton(self.L("Band", "Close")); bclose.clicked.connect(dlg.accept)
+        row.addWidget(bsave); row.addStretch(1); row.addWidget(bclose)
+        v.addLayout(row)
+        dlg.exec_()
+
+    def make_poster(self):
+        """Dukaan/hospital me lagane layak poster (QR + features) — PNG + PDF."""
+        L = self.L
+
+        def job():
+            W, H = 1240, 1754      # A4 @150dpi (portrait)
+            im = Image.new("RGB", (W, H), "white")
+            d = ImageDraw.Draw(im)
+
+            def _font(sz, bold=False):
+                for fn in (("arialbd.ttf", "Arial_Bold.ttf") if bold else ("arial.ttf", "Arial.ttf")):
+                    try:
+                        return ImageFont.truetype(fn, sz)
+                    except Exception:
+                        pass
+                try:
+                    return ImageFont.truetype("DejaVuSans%s.ttf" % ("-Bold" if bold else ""), sz)
+                except Exception:
+                    return ImageFont.load_default()
+            teal = (15, 118, 110)
+            d.rectangle([0, 0, W, 210], fill=teal)
+            d.text((60, 55), "ApneScan", fill="white", font=_font(96, True))
+            d.text((64, 165), "FREE Document Scanner  •  Windows", fill=(209, 234, 231), font=_font(30))
+            feats = [
+                "Scan to PDF  —  Hindi + English OCR (searchable)",
+                "PDF compress  —  200KB / 500KB / 1MB (portal upload)",
+                "Phone photo / webcam  →  clean PDF",
+                "WhatsApp & Email share  •  Merge / Split / Sign",
+                "No ads  •  No cloud  •  Works fully offline  •  100% FREE",
+            ]
+            y = 300
+            for f in feats:
+                d.ellipse([60, y + 10, 84, y + 34], fill=teal)
+                d.text((110, y), f, fill=(31, 41, 51), font=_font(38))
+                y += 84
+            qr = self._app_qr_image(box=12)
+            if qr is not None:
+                qr = qr.resize((520, 520))
+                im.paste(qr, ((W - 520) // 2, 820))
+            d.text((W // 2, 1380), "Scan this QR with your phone", fill=(71, 85, 105),
+                   font=_font(40), anchor="mm")
+            d.text((W // 2, 1440), "or visit", fill=(71, 85, 105), font=_font(34), anchor="mm")
+            d.text((W // 2, 1500), WEBSITE_URL, fill=teal, font=_font(46, True), anchor="mm")
+            d.rectangle([0, H - 70, W, H], fill=teal)
+            d.text((W // 2, H - 35), "ApneSoft  •  Free & Open-Source", fill="white",
+                   font=_font(28), anchor="mm")
+            base = os.path.join(self._opts.get("save_folder", os.path.expanduser("~")),
+                                "ApneScan_Poster")
+            png = base + ".png"; pdf = base + ".pdf"
+            im.save(png)
+            im.save(pdf, "PDF", resolution=150)
+            return (png, pdf)
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn(str(res)); return
+            png, pdf = res
+            self.status.showMessage(L("🖼 Poster ban gaya: ", "🖼 Poster created: ") + pdf, 8000)
+            try:
+                self._open_path(png)
+            except Exception:
+                pass
+        self._run_bg(job, done, L("Poster bana rahe…", "Making the poster…"))
+
+    def ask_review(self):
+        """User se GitHub par ⭐ / review maango (aasaan link)."""
+        r = QtWidgets.QMessageBox.question(
+            self, self.L("⭐ Pasand aaya?", "⭐ Enjoying ApneScan?"),
+            self.L("ApneScan free hai. Agar pasand aaya to GitHub par ⭐ star dein ya "
+                   "review likhein — isse aur logon tak pahunchega. Ab kholu?",
+                   "ApneScan is free. If you like it, please give it a ⭐ on GitHub or "
+                   "write a review — it helps others find it. Open now?"),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.Yes)
+        if r == QtWidgets.QMessageBox.Yes:
+            try:
+                import webbrowser
+                webbrowser.open(GITHUB_URL)
+            except Exception:
+                pass
+
+    def _maybe_growth_nudge(self):
+        """Kabhi-kabhi (bahut halke se) share/review ki yaad dilao — kabhi
+        pareshan na kare: 30 din me sirf ek baar, aur kaafi kaam ke baad."""
+        try:
+            cfg = self._config
+            import time as _t
+            now = int(_t.time())
+            last = int(cfg.get("nudge_last", 0) or 0)
+            if now - last < 30 * 86400:       # 30 din me ek baar hi
+                return
+            total_pdfs = int((self._pstats().get("totals", {}) or {}).get("pdfs", 0))
+            if total_pdfs < 25:               # thoda istemal ho jaane ke baad hi
+                return
+            cfg["nudge_last"] = now
+            save_config(cfg)
+            self.status.showMessage(self.L(
+                "🙏 ApneScan pasand aaya? Help → 'ApneScan share karo' se doston ko batayein.",
+                "🙏 Liking ApneScan? Tell friends via Help → 'Share ApneScan'."), 12000)
+        except Exception:
+            pass
 
     # ---- PDF compress tool ----
     def compress_pdf_tool(self, src_pdf=None):
@@ -12038,6 +12267,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # backup
         if self._opts.get("backup"):
             self._backup_file(out)
+        # kabhi-kabhi (bahut halke se) "app share karo" ki yaad (30 din me 1 baar)
+        self._maybe_growth_nudge()
 
     def _append_excel(self, claim, num_pages, out):
         try:
