@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "53"
+VERSION = "54"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -178,6 +178,7 @@ _PORTABLE = _portable_dir()
 CONFIG_PATH = (os.path.join(_PORTABLE, "apnescan_config.json") if _PORTABLE
                else os.path.join(os.path.expanduser("~"), ".apnescan.json"))
 CRASH_PATH = os.path.join(os.path.expanduser("~"), "apnescan_crash.txt")
+TRASH_DIR = os.path.join(os.path.expanduser("~"), ".apnescan_trash")   # Recycle Bin
 PSTATS_PATH = os.path.join(os.path.expanduser("~"), ".apnescan_pstats.json")
 _OLD_CONFIG = os.path.join(os.path.expanduser("~"), ".noble_doc_scanner.json")
 if not os.path.exists(CONFIG_PATH) and os.path.exists(_OLD_CONFIG):
@@ -3573,6 +3574,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "Tag lagao (kisi PDF par)…", self.tag_pdf, "हिन्दी: PDF par apne tags lagao (jaise Aadhaar, School, Bijli-bill) — baad me tag se turant dhoondo.\nEnglish: Put your own tags on a PDF for quick finding later.")
         self._ma(mt, "Tag se dhoondo…", self.search_by_tag, "हिन्दी: Lagaye hue tag se files ki list dekho aur kholo.\nEnglish: List and open files by tag.")
         self._ma(mt, "Merge PDFs…", self.merge_pdfs, "हिन्दी: Kai PDF ko jodkar ek PDF banao.\nEnglish: Merge several PDFs into one.")
+        self._ma(mt, "🗑 Recycle Bin…", self.show_recycle_bin, "हिन्दी: Delete ki hui files yahan aati hain — galti se hat gayi file ko wapas laao, ya hamesha ke liye hatao.\nEnglish: Deleted files go here — restore anything you removed by mistake, or delete forever.")
         self._ma(mt, "Split into multiple PDFs…", self.split_pdfs, "हिन्दी: Ek scan ko kai alag PDF me baanto.\nEnglish: Split into multiple PDFs.")
         self._ma(mt, "PDF chhota karo (compress)…", self.compress_pdf_tool, "हिन्दी: Abhi ke pages ya koi purani PDF ko 200KB/500KB/1MB/2MB tak chhota karo (portal upload ke liye).\nEnglish: Shrink current pages or any PDF to a 200KB/500KB/1MB/2MB target for portal uploads.")
         pdft = mt.addMenu("PDF Tools")
@@ -5516,11 +5518,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
         fp.addWidget(_hdr)
         # Search: kisi bhi folder ke andar naam se dhoondo (folder chuna ho to
         # usi ke andar, warna poore save-folder me)
+        _srow = QtWidgets.QHBoxLayout(); _srow.setSpacing(4)
         self.files_search = QtWidgets.QLineEdit()
         self.files_search.setPlaceholderText(
             self.L("🔍 Dhoondo… (chune folder ke andar)", "🔍 Search… (inside selected folder)"))
         self.files_search.setClearButtonEnabled(True)
-        fp.addWidget(self.files_search)
+        _srow.addWidget(self.files_search, 1)
+        # 📄 = PDF ke ANDAR ke text me bhi dhoondo (on/off)
+        self.btn_search_text = QtWidgets.QToolButton()
+        self.btn_search_text.setText("📄")
+        self.btn_search_text.setCheckable(True)
+        self.btn_search_text.setToolTip(self.L(
+            "PDF ke ANDAR likhe text me bhi dhoondo (naam ke alawa) — jaise mareez\n"
+            "ka naam ya claim number. On karke phir se search karein.",
+            "Also search INSIDE PDF text (not just the name) — e.g. a patient name\n"
+            "or claim number. Turn on, then search again."))
+        self.btn_search_text.toggled.connect(lambda _c: self._files_search_timer.start())
+        _srow.addWidget(self.btn_search_text)
+        fp.addLayout(_srow)
         # ⬅ Peeche · ⭐ Favourites (dropdown) · ⇅ Sort
         self.fav_bar = QtWidgets.QHBoxLayout()
         self.fav_bar.setSpacing(4)
@@ -7353,6 +7368,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _files_tree_menu(self, pos):
         idx = self.files_tree.indexAt(pos)
         menu = QtWidgets.QMenu(self)
+        # Kai files ek saath chuni hui? -> bulk actions
+        sel_files = self._selected_library_files()
+        if len(sel_files) > 1:
+            menu.addAction(self.L("🧩 %d files → ek PDF…" % len(sel_files),
+                                  "🧩 Merge %d files → one PDF…" % len(sel_files)),
+                           lambda: self._bulk_merge(sel_files))
+            menu.addAction(self.L("📁 Dusre folder me le jao…", "📁 Move to another folder…"),
+                           lambda: self._bulk_move(sel_files, copy=False))
+            menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
+                           lambda: self._bulk_move(sel_files, copy=True))
+            menu.addSeparator()
+            menu.addAction(self.L("🗑 %d files delete (Recycle Bin)" % len(sel_files),
+                                  "🗑 Delete %d files (Recycle Bin)" % len(sel_files)),
+                           lambda: self._bulk_delete(sel_files))
+            menu.addSeparator()
+            menu.addAction(self.L("🗑 Recycle Bin…", "🗑 Recycle Bin…"), self.show_recycle_bin)
+            menu.exec_(self.files_tree.viewport().mapToGlobal(pos))
+            return
         if idx.isValid():
             path = self.files_model.filePath(idx)
             if os.path.isdir(path):
@@ -7381,6 +7414,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
             menu.addAction(self.L("📂 Koi folder kholo…", "📂 Open a folder…"), self.open_existing_folder)
             menu.addAction(self.L("🏠 Wapas save-folder", "🏠 Back to save folder"), self.reset_panel_folder)
             menu.addAction("➕ Naya folder", self.new_library_folder)
+        menu.addSeparator()
+        menu.addAction(self.L("🗑 Recycle Bin…", "🗑 Recycle Bin…"), self.show_recycle_bin)
         menu.exec_(self.files_tree.viewport().mapToGlobal(pos))
 
     def _new_folder_in(self, base):
@@ -7489,6 +7524,43 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if p and os.path.isfile(p):
             self._preview_file_in_panel(p)
 
+    def _pdf_text_cached(self, path):
+        """PDF ke andar ka text (pehle 15 page) — content-search ke liye.
+        Har file ka result yaad rakhte hain (path+time se) taaki dobara search
+        turant ho. (Sirf digital text wali PDF me milta hai; poori scanned image
+        PDF me embedded text nahi hota.)"""
+        if not HAS_FITZ:
+            return ""
+        try:
+            mt = os.path.getmtime(path)
+        except Exception:
+            return ""
+        cache = getattr(self, "_pdf_text_cache", None)
+        if cache is None:
+            cache = self._pdf_text_cache = {}
+        key = (path, mt)
+        if key in cache:
+            return cache[key]
+        txt = ""
+        try:
+            doc = fitz.open(path)
+            parts = []
+            for i, page in enumerate(doc):
+                if i >= 15:
+                    break
+                parts.append(page.get_text())
+            txt = " ".join(parts).lower()
+            doc.close()
+        except Exception:
+            txt = ""
+        cache[key] = txt
+        if len(cache) > 500:                 # cache bahut bada na ho
+            try:
+                cache.pop(next(iter(cache)))
+            except Exception:
+                pass
+        return txt
+
     def _render_file_pixmap(self, path):
         """Kisi file ka QPixmap banao — image seedha, PDF ka pehla page fitz se."""
         ext = os.path.splitext(path)[1].lower()
@@ -7565,10 +7637,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if not (scope and os.path.isdir(scope)):
             scope = self._files_root()
         exts = (".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".docx", ".xlsx")
+        search_text = self.btn_search_text.isChecked()   # PDF ke andar bhi?
 
         def job():
-            def _rank(name):
-                # naam me match > sirf folder-raaste me; shuru me match sabse upar
+            def _rank(name, by_content=False):
+                # naam me match > content me > sirf folder-raaste me
+                if by_content:
+                    return (2, 0)
                 in_name = all(t in name for t in terms)
                 at_start = any(name.startswith(t) for t in terms)
                 return (0 if in_name else 1, 0 if at_start else 1)
@@ -7589,6 +7664,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     rel = os.path.relpath(full, scope).lower()
                     if all(t in rel for t in terms):
                         file_hits.append((_rank(name), name, full))
+                    elif search_text and full.lower().endswith(".pdf"):
+                        # naam me nahi mila -> PDF ke ANDAR ke text me dhoondo
+                        txt = self._pdf_text_cached(full)
+                        if txt and all(t in txt for t in terms):
+                            file_hits.append((_rank(name, True), name, full))
                 if len(dir_hits) + len(file_hits) >= 1000:
                     break
             dir_hits.sort(key=lambda h: (h[0], h[1]))
@@ -7702,14 +7782,253 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _delete_library_file(self, path):
         if QtWidgets.QMessageBox.question(
                 self, "Delete",
-                "'%s' ko delete kar dein?\n(Ye wapas nahi aayegi)" % os.path.basename(path),
+                "'%s' ko Recycle Bin me daalein?\n(Baad me wapas la sakte hain.)"
+                % os.path.basename(path),
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
             return
+        if self._trash_file(path):
+            self.status.showMessage(self.L("🗑 Recycle Bin me daal diya — wapas la sakte hain",
+                                           "🗑 Moved to Recycle Bin — you can restore it"), 5000)
+        else:
+            self._warn(self.L("Delete fail ho gaya", "Delete failed"))
+
+    # ---------- Recycle Bin (kachra-peti) ----------
+    def _trash_index_path(self):
+        return os.path.join(TRASH_DIR, "index.json")
+
+    def _load_trash_index(self):
+        import json
         try:
-            os.remove(path)
-        except Exception as exc:
-            self._warn("Delete fail: %s" % exc)
+            with open(self._trash_index_path(), "r", encoding="utf-8") as fh:
+                return json.load(fh) or []
+        except Exception:
+            return []
+
+    def _save_trash_index(self, items):
+        import json
+        try:
+            os.makedirs(TRASH_DIR, exist_ok=True)
+            with open(self._trash_index_path(), "w", encoding="utf-8") as fh:
+                json.dump(items, fh, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _trash_file(self, path):
+        """File ko Recycle Bin me le jao (delete karne ke bajay) — wapas laai
+        ja sake."""
+        import uuid
+        try:
+            os.makedirs(TRASH_DIR, exist_ok=True)
+            base = os.path.basename(path)
+            trash_name = uuid.uuid4().hex[:12] + "__" + base
+            shutil.move(path, os.path.join(TRASH_DIR, trash_name))
+            idx = self._load_trash_index()
+            idx.append({"trash": trash_name, "orig": path, "name": base,
+                        "when": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")})
+            self._save_trash_index(idx)
+            return True
+        except Exception:
+            return False
+
+    def show_recycle_bin(self):
+        """Delete ki hui files — wapas laao ya hamesha ke liye hatao."""
+        idx = self._load_trash_index()
+        # sirf wahi jo sach me bin me maujood hain
+        idx = [e for e in idx if os.path.exists(os.path.join(TRASH_DIR, e.get("trash", "")))]
+        self._save_trash_index(idx)
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("🗑 Recycle Bin", "🗑 Recycle Bin"))
+        dlg.resize(560, 460)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel(self.L(
+            "Delete ki hui files yahan hain. Chuno phir 'Wapas laao' ya 'Hamesha ke liye hatao'.",
+            "Deleted files are here. Select, then Restore or Delete forever.")))
+        lw = QtWidgets.QListWidget()
+        lw.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        for e in reversed(idx):     # naye upar
+            it = QtWidgets.QListWidgetItem("📄 %s\n       %s · %s" %
+                                           (e.get("name", "?"), e.get("when", ""),
+                                            os.path.dirname(e.get("orig", ""))))
+            it.setData(QtCore.Qt.UserRole, e)
+            lw.addItem(it)
+        if not idx:
+            it = QtWidgets.QListWidgetItem(self.L("(Recycle Bin khaali hai)", "(Recycle Bin is empty)"))
+            it.setFlags(QtCore.Qt.NoItemFlags)
+            lw.addItem(it)
+        v.addWidget(lw, 1)
+
+        def _restore():
+            picked = [i.data(QtCore.Qt.UserRole) for i in lw.selectedItems() if i.data(QtCore.Qt.UserRole)]
+            if not picked:
+                return
+            cur = self._load_trash_index()
+            done = 0
+            for e in picked:
+                src = os.path.join(TRASH_DIR, e["trash"])
+                dst = e["orig"]
+                try:
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    n = 2
+                    while os.path.exists(dst):
+                        stem, ext = os.path.splitext(e["orig"])
+                        dst = "%s_%d%s" % (stem, n, ext); n += 1
+                    shutil.move(src, dst)
+                    cur = [c for c in cur if c.get("trash") != e["trash"]]
+                    done += 1
+                except Exception:
+                    pass
+            self._save_trash_index(cur)
+            self.status.showMessage(self.L("♻ %d file wapas aa gayi" % done,
+                                           "♻ Restored %d file(s)" % done), 5000)
+            self._refresh_files_root()
+            dlg.accept()
+
+        def _delete_forever():
+            picked = [i.data(QtCore.Qt.UserRole) for i in lw.selectedItems() if i.data(QtCore.Qt.UserRole)]
+            if not picked:
+                return
+            if QtWidgets.QMessageBox.question(
+                    dlg, self.L("Pakka?", "Sure?"),
+                    self.L("%d file HAMESHA ke liye hat jayengi (wapas nahi aayengi). Theek?",
+                           "%d file(s) will be deleted FOREVER (cannot restore). OK?") % len(picked),
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+                return
+            cur = self._load_trash_index()
+            for e in picked:
+                try:
+                    os.remove(os.path.join(TRASH_DIR, e["trash"]))
+                except Exception:
+                    pass
+                cur = [c for c in cur if c.get("trash") != e["trash"]]
+            self._save_trash_index(cur)
+            dlg.accept()
+
+        def _empty():
+            if not idx:
+                return
+            if QtWidgets.QMessageBox.question(
+                    dlg, self.L("Bin khaali karein?", "Empty bin?"),
+                    self.L("Saari files HAMESHA ke liye hat jayengi. Theek?",
+                           "All files will be deleted FOREVER. OK?"),
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+                return
+            for e in self._load_trash_index():
+                try:
+                    os.remove(os.path.join(TRASH_DIR, e["trash"]))
+                except Exception:
+                    pass
+            self._save_trash_index([])
+            dlg.accept()
+
+        bb = QtWidgets.QHBoxLayout()
+        b1 = QtWidgets.QPushButton(self.L("♻ Wapas laao", "♻ Restore")); b1.clicked.connect(_restore)
+        b2 = QtWidgets.QPushButton(self.L("❌ Hamesha ke liye hatao", "❌ Delete forever")); b2.clicked.connect(_delete_forever)
+        b3 = QtWidgets.QPushButton(self.L("🧹 Bin khaali karo", "🧹 Empty bin")); b3.clicked.connect(_empty)
+        b4 = QtWidgets.QPushButton("OK"); b4.clicked.connect(dlg.accept)
+        bb.addWidget(b1); bb.addWidget(b2); bb.addWidget(b3); bb.addStretch(1); bb.addWidget(b4)
+        v.addLayout(bb)
+        dlg.exec_()
+
+    # ---------- Multi-select bulk (kai files ek saath) ----------
+    def _selected_library_files(self):
+        out, seen = [], set()
+        try:
+            for idx in self.files_tree.selectionModel().selectedIndexes():
+                if idx.column() != 0:
+                    continue
+                p = self.files_model.filePath(idx)
+                if p and os.path.isfile(p) and p not in seen:
+                    seen.add(p); out.append(p)
+        except Exception:
+            pass
+        return out
+
+    def _bulk_delete(self, files):
+        if QtWidgets.QMessageBox.question(
+                self, "Delete",
+                self.L("%d files Recycle Bin me daalein? (wapas la sakte hain)",
+                       "Move %d files to Recycle Bin? (restorable)") % len(files),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            return
+        n = sum(1 for f in files if self._trash_file(f))
+        self.status.showMessage(self.L("🗑 %d file Recycle Bin me" % n,
+                                       "🗑 %d file(s) to Recycle Bin" % n), 5000)
+
+    def _bulk_merge(self, files):
+        if not HAS_OCR_LIBS:
+            self._warn("pypdf install nahi hai (merge ke liye zaroori)."); return
+        pdfs = [f for f in files if f.lower().endswith(".pdf")]
+        if len(pdfs) < 2:
+            self._warn(self.L("Merge ke liye kam se kam 2 PDF chuno.",
+                              "Pick at least 2 PDFs to merge.")); return
+        folder = os.path.dirname(pdfs[0])
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("Jodi hui PDF save karein", "Save merged PDF"),
+            os.path.join(folder, "merged.pdf"), "PDF (*.pdf)")
+        if not out:
+            return
+
+        def job():
+            writer = PdfWriter()
+            used = 0
+            for p in pdfs:
+                if os.path.abspath(p) == os.path.abspath(out):
+                    continue
+                try:
+                    for pg in PdfReader(p).pages:
+                        writer.add_page(pg)
+                    used += 1
+                except Exception:
+                    pass
+            with open(out, "wb") as fh:
+                writer.write(fh)
+            return used
+
+        def on_done(res):
+            if isinstance(res, Exception):
+                self._warn("Merge fail:\n%s" % res); return
+            self.status.showMessage(self.L("🧩 %d PDF jud kar ek ban gayi" % res,
+                                           "🧩 Merged %d PDFs into one" % res), 6000)
+            self._refresh_files_root()
+        self._run_bg(job, on_done, self.L("PDFs jud rahi hain…", "Merging PDFs…"))
+
+    def _bulk_move(self, files, copy=False):
+        dest = QtWidgets.QFileDialog.getExistingDirectory(
+            self, self.L("Kaunse folder me?", "Into which folder?"),
+            self._panel_current_dir())
+        if not dest:
+            return
+
+        def job():
+            done = 0
+            for f in files:
+                try:
+                    dst = os.path.join(dest, os.path.basename(f))
+                    stem, ext = os.path.splitext(os.path.basename(f))
+                    k = 2
+                    while os.path.exists(dst):
+                        dst = os.path.join(dest, "%s_%d%s" % (stem, k, ext)); k += 1
+                    if copy:
+                        shutil.copy2(f, dst)
+                    else:
+                        shutil.move(f, dst)
+                    done += 1
+                except Exception:
+                    pass
+            return done
+
+        def on_done(res):
+            if isinstance(res, Exception):
+                self._warn("Fail:\n%s" % res); return
+            self.status.showMessage(
+                (self.L("📄 %d file copy ho gayi", "📄 Copied %d file(s)") if copy
+                 else self.L("📁 %d file le jaayi gayi", "📁 Moved %d file(s)")) % res, 5000)
+            self._refresh_files_root()
+        self._run_bg(job, on_done, self.L("Ho raha hai…", "Working…"))
 
     def toggle_files_panel(self):
         vis = not self.files_panel.isVisible()
