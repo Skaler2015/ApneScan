@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "35"
+VERSION = "36"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -3486,7 +3486,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, tr("scan_method", self._lang) + "…", self.choose_scan_method, "हिन्दी: Scan ka tareeka: escl (network duplex), twain (USB duplex), ya wia.\nEnglish: Scan method: escl (network duplex), twain (USB), or wia.")
         self._ma(ms, tr("language", self._lang) + "…", self.choose_language, "हिन्दी: App ki bhasha badlo (Hindi/English).\nEnglish: Change the app language.")
         self._ma(ms, "Stats server URL…", self.set_stats_url, "हिन्दी: Worldwide stats ke liye Google Apps Script ka URL daalein (kitne scan hue, kitne online).\nEnglish: Set the stats server URL (worldwide scan counts + online users).")
-        self._ma(ms, "Scanner khud dhoondo (network)…", self.find_scanners, "हिन्दी: IP yaad rakhne ki zaroorat nahi — network par scanner khud dhoondh kar set karo.\nEnglish: Auto-discover eSCL scanners on the network and set the IP.")
+        self._ma(ms, "🔍 Scanner auto-detect (LAN + USB)…", self.auto_detect_scanner, "हिन्दी: Scanner KHUD pehchano — LAN (network) par hai ya USB par, dono dhoondh kar sabse behtar chun leta hai. Kuch sochna nahi padta.\nEnglish: Auto-detect the scanner — finds it on LAN or USB automatically and picks the best.")
+        self._ma(ms, "Scanner khud dhoondo (sirf network)…", self.find_scanners, "हिन्दी: Sirf network (eSCL) par scanner dhoondho.\nEnglish: Discover only network (eSCL) scanners.")
         self._ma(ms, "Scanner IP…", self.set_scanner_ip, "हिन्दी: Network scanner ka IP set karo (jaise 192.168.1.8).\nEnglish: Set the network scanner IP.")
         self._ma(ms, "Keyboard Shortcuts…", self.show_shortcuts, "हिन्दी: Keyboard ke shortcuts ki list dekho.\nEnglish: View keyboard shortcuts.")
         self.act_simple = self._ma(ms, tr("simple_on", self._lang), self.toggle_simple_mode, "हिन्दी: Simple mode: sirf zaroori buttons dikhein (naye users ke liye aasan).\nEnglish: Simple mode: show only the essential buttons.")
@@ -4436,14 +4437,20 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     def choose_scan_method(self):
         cur = self._opts.get("scanner_method", "twain")
-        labels = ["escl (network duplex - no extra software)", "twain (USB duplex)", "wia", "naps2 (needs NAPS2)"]
-        keys = ["escl", "twain", "wia", "naps2"]
+        labels = [self.L("🔍 Auto-detect (recommended) — LAN ya USB khud pehchano",
+                         "🔍 Auto-detect (recommended) — find LAN or USB automatically"),
+                  "escl (network duplex - no extra software)",
+                  "twain (USB duplex)", "wia (USB)"]
+        keys = ["auto", "escl", "twain", "wia"]
         idx = keys.index(cur) if cur in keys else 0
         choice, ok = QtWidgets.QInputDialog.getItem(
             self, "Scan method", "Method:", labels, idx, False)
         if not ok:
             return
         method = keys[labels.index(choice)]
+        if method == "auto":
+            self.auto_detect_scanner()
+            return
         self._opts["scanner_method"] = method
         if method == "escl":
             ip = self.ip_field.text().strip()
@@ -4453,24 +4460,6 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 if oki:
                     ip = ip.strip(); self.ip_field.setText(ip)
             self._opts["scanner_ip"] = ip
-        elif method == "naps2":
-            path = self._opts.get("naps2_path") or find_naps2()
-            if not path or not os.path.exists(path):
-                path, okp = QtWidgets.QInputDialog.getText(
-                    self, "NAPS2",
-                    "NAPS2.Console.exe ka poora path daalein\n"
-                    "(jaise C:\\Program Files\\NAPS2\\NAPS2.Console.exe):")
-                path = path.strip() if okp else ""
-            self._opts["naps2_path"] = path
-            pname, okn = QtWidgets.QInputDialog.getText(
-                self, "NAPS2 profile",
-                "NAPS2 ka profile naam (bilkul waisa hi jaisa NAPS2 me hai,\n"
-                "jaise: 150dpi Double Side):",
-                text=self._opts.get("naps2_profile", ""))
-            if okn:
-                self._opts["naps2_profile"] = pname.strip()
-            if not path:
-                self._warn("NAPS2 ka path nahi mila. Pehle NAPS2 install karo.")
         elif method == "wia":
             try:
                 devs = list_wia_sources()
@@ -5558,6 +5547,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._upd_timer.start()
         # Mahine ki pehli baar kholne par "Aapka Mahina" summary
         QtCore.QTimer.singleShot(6000, self._maybe_month_wrap)
+        # Pehli baar (koi scanner set nahi) — auto-detect khud chala do
+        if not self._config.get("auto_detect_done"):
+            self._config["auto_detect_done"] = True
+            save_config(self._config)
+            QtCore.QTimer.singleShot(1500, self.auto_detect_scanner)
         # Kiosk mode band karke exit kiya tha to wapas usi me kholo
         if self._opts.get("ui_kiosk"):
             QtCore.QTimer.singleShot(300, lambda: (self.kiosk.setGeometry(
@@ -6036,6 +6030,85 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._finder = ScannerFinder()
         self._finder.found.connect(self._on_scanners_found)
         self._finder.start()
+
+    def auto_detect_scanner(self):
+        """Scanner KHUD pehchano — LAN (eSCL) par hai ya USB (WIA) par, dono
+        dhoondh kar sabse behtar chun lo. User ko kuch nahi sochna padta."""
+        self.status.showMessage(
+            self.L("Scanner dhoondh rahe hain — LAN aur USB dono… (10-20 sec)",
+                   "Detecting scanner — LAN and USB… (10-20 sec)"), 0)
+        # USB/WIA list turant (halka kaam)
+        try:
+            self._auto_usb = list_wia_sources() or []
+        except Exception:
+            self._auto_usb = []
+        # network eSCL background me
+        self._finder = ScannerFinder()
+        self._finder.found.connect(self._on_auto_detect_done)
+        self._finder.start()
+
+    def _on_auto_detect_done(self, net):
+        self.status.clearMessage()
+        usb = getattr(self, "_auto_usb", []) or []
+        # combined choices banao
+        choices = []   # (label, kind, value)
+        for ip, model in (net or []):
+            choices.append(("🌐 LAN: %s  (%s)" % (model, ip), "escl", ip))
+        for _id, name in usb:
+            choices.append(("🔌 USB: %s" % name, "wia", _id))
+
+        def _apply(kind, value):
+            if kind == "escl":
+                self._opts["scanner_method"] = "escl"
+                self._opts["scanner_ip"] = value
+                self._config["scanner_ip"] = value
+                self.ip_field.setText(value)
+                msg = self.L("Scanner set ho gaya (LAN / network): %s" % value,
+                             "Scanner set (LAN / network): %s" % value)
+            else:
+                self._opts["scanner_method"] = "wia"
+                self._opts["wia_device_id"] = value
+                msg = self.L("Scanner set ho gaya (USB): mil gaya",
+                             "Scanner set (USB)")
+            self._save_opts(); save_config(self._config)
+            try:
+                self._refresh_conn_and_method()
+            except Exception:
+                pass
+            QtWidgets.QMessageBox.information(self, self.L("Ho gaya", "Done"), msg)
+
+        if not choices:
+            r = QtWidgets.QMessageBox.question(
+                self, self.L("Koi scanner nahi mila", "No scanner found"),
+                self.L("LAN ya USB par koi scanner nahi mila.\n\nScanner ON hai aur "
+                       "juda/isi WiFi par hai?\n\nNetwork scanner ka IP hath se daalna hai?",
+                       "No scanner found on LAN or USB.\n\nIs it on and connected/on the "
+                       "same WiFi?\n\nEnter a network IP manually?"),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            if r == QtWidgets.QMessageBox.Yes:
+                self.set_scanner_ip()
+            return
+        if len(choices) == 1:
+            lbl, kind, value = choices[0]
+            _apply(kind, value)
+            return
+        # ek se zyada mile — user chune (LAN pehle)
+        labels = [c[0] for c in choices]
+        pick, ok = QtWidgets.QInputDialog.getItem(
+            self, self.L("Scanner mil gaye", "Scanners found"),
+            self.L("%d scanner mile — kaunsa use karein?" % len(choices),
+                   "%d scanners found — which to use?" % len(choices)),
+            labels, 0, False)
+        if not ok or not pick:
+            return
+        c = choices[labels.index(pick)]
+        _apply(c[1], c[2])
+
+    def _refresh_conn_and_method(self):
+        try:
+            self.method_lbl.setText("Connected via: %s" % self._opts.get("scanner_method", "").upper())
+        except Exception:
+            pass
 
     def _on_scanners_found(self, results):
         self.status.clearMessage()
