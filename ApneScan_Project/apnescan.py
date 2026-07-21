@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "28"
+VERSION = "29"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -4226,26 +4226,32 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         if not out.lower().endswith(".pdf"):
             out += ".pdf"
-        try:
+
+        def job():
             size = self._write_compressed_pdf(pages, out, limit)
-        except Exception:
-            self._warn("Compress fail:\n%s" % traceback.format_exc())
-            return
-        self._remember_save_dir(out)
-        if src_pdf:
-            try:
-                saved = os.path.getsize(src_pdf) - size
-                if saved > 0:
-                    self._pstats_bump(saved_bytes=saved)
-            except Exception:
-                pass
-        kb = size / 1024.0
-        pretty = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024.0))
-        note = ""
-        if limit and size > limit:
-            note = "\n\n(Itni chhoti nahi ho payi — pages bahut hain. Kam pages chunein ya badi limit lein.)"
-        QtWidgets.QMessageBox.information(
-            self, "Ho gaya", "Chhoti PDF save ho gayi (%s):\n%s%s" % (pretty, out, note))
+            saved = 0
+            if src_pdf:
+                try:
+                    saved = os.path.getsize(src_pdf) - size
+                except Exception:
+                    saved = 0
+            return (size, saved)
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn("Compress fail:\n%s" % res); return
+            size, saved = res
+            self._remember_save_dir(out)
+            if saved > 0:
+                self._pstats_bump(saved_bytes=saved)
+            kb = size / 1024.0
+            pretty = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024.0))
+            note = ""
+            if limit and size > limit:
+                note = "\n\n(Itni chhoti nahi ho payi — pages bahut hain. Kam pages chunein ya badi limit lein.)"
+            QtWidgets.QMessageBox.information(
+                self, "Ho gaya", "Chhoti PDF save ho gayi (%s):\n%s%s" % (pretty, out, note))
+        self._run_bg(job, done, "PDF chhoti ho rahi hai (compress)…")
 
     def _write_compressed_pdf(self, img_paths, out, limit_bytes=None):
         """JPEG quality/size ghata-ghata kar PDF banao jab tak limit ke andar na aaye.
@@ -6940,13 +6946,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
         return f or None
 
     def _run_bg(self, fn, on_done, busy_msg):
-        """Bhaari kaam background me; done hone par on_done(result)."""
-        self.status.showMessage(busy_msg, 0)
+        """Bhaari kaam BACKGROUND me chalao; UI 1 second ke liye bhi nahi rukti.
+        done hone par on_done(result) (main thread me). Ek non-blocking
+        '⏳ kaam ho raha hai' indicator dikhta hai; kai kaam ek saath bhi
+        chal sakte hain (counter se)."""
         self._bg_workers = getattr(self, "_bg_workers", [])
+        self._bg_count = getattr(self, "_bg_count", 0) + 1
+        self._show_busy_indicator(busy_msg)
         w = FuncWorker(fn)
 
         def _fin(res, w=w):
-            self.status.clearMessage()
+            self._bg_count = max(0, getattr(self, "_bg_count", 1) - 1)
+            self._show_busy_indicator(None)
             try:
                 self._bg_workers.remove(w)
             except ValueError:
@@ -6955,6 +6966,40 @@ class ScannerWindow(QtWidgets.QMainWindow):
         w.done.connect(_fin)
         self._bg_workers.append(w)
         w.start()
+
+    def _show_busy_indicator(self, msg):
+        """Status bar me ghoomta hua '⏳' — kaam chal raha hai par app chalu."""
+        if not hasattr(self, "_busy_lbl"):
+            self._busy_lbl = QtWidgets.QLabel("")
+            self._busy_lbl.setStyleSheet(
+                "QLabel{background:#0f766e;color:#fff;border-radius:9px;"
+                "padding:1px 10px;font-weight:700;}")
+            try:
+                self.status.addPermanentWidget(self._busy_lbl)
+            except Exception:
+                pass
+            self._busy_spin = ["⏳", "⌛"]
+            self._busy_i = 0
+            self._busy_timer = QtCore.QTimer(self)
+            self._busy_timer.setInterval(500)
+
+            def _tick():
+                self._busy_i = (self._busy_i + 1) % len(self._busy_spin)
+                base = getattr(self, "_busy_msg", "Kaam ho raha hai…")
+                n = getattr(self, "_bg_count", 0)
+                extra = (" (%d)" % n) if n > 1 else ""
+                self._busy_lbl.setText("%s %s%s" %
+                                       (self._busy_spin[self._busy_i], base, extra))
+            self._busy_timer.timeout.connect(_tick)
+        if msg:
+            self._busy_msg = msg
+        if getattr(self, "_bg_count", 0) > 0:
+            self._busy_lbl.setText("⏳ " + getattr(self, "_busy_msg", "Kaam ho raha hai…"))
+            self._busy_lbl.show()
+            self._busy_timer.start()
+        else:
+            self._busy_timer.stop()
+            self._busy_lbl.hide()
 
     def pdf_page_editor(self):
         """Kisi bhi PDF ke pages ka kram badlo / ghumao / hatao — bina quality
@@ -7870,20 +7915,27 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if not out.lower().endswith(".pdf"):
             out += ".pdf"
         ocr = HAS_OCR_LIBS and self.chk_ocr.isChecked()
-        try:
+        npages = len(paths)
+
+        def job():
             if ocr:
-                self._save_ocr_pdf(paths, out)
+                self._save_ocr_pdf(paths, out)   # OCR = sabse bhaari — ab background me
             else:
                 self._pages_as_pdf(paths, out)
-        except Exception as exc:
-            if HAS_OCR_LIBS and isinstance(exc, pytesseract.TesseractNotFoundError):
-                self._warn("Tesseract OCR nahi mila. OCR ke bina try karein.")
-            else:
-                self._warn("PDF save fail:\n%s" % traceback.format_exc())
-            return
-        self._remember_save_dir(out); self._remember_doc_name(out)
-        self._record_save(out, len(paths)); self._dirty = False; self._after_save_action(out)
-        QtWidgets.QMessageBox.information(self, "Ho gaya", "PDF save ho gaya:\n%s" % out)
+            return out
+
+        def done(res):
+            if isinstance(res, Exception):
+                if HAS_OCR_LIBS and isinstance(res, pytesseract.TesseractNotFoundError):
+                    self._warn("Tesseract OCR nahi mila. OCR ke bina try karein.")
+                else:
+                    self._warn("PDF save fail:\n%s" % res)
+                return
+            self._remember_save_dir(out); self._remember_doc_name(out)
+            self._record_save(out, npages); self._dirty = False; self._after_save_action(out)
+            self.status.showMessage("✔ PDF save ho gaya: %s" % out, 8000)
+        self._run_bg(job, done,
+                     "PDF save ho raha hai…" if not ocr else "OCR PDF ban rahi hai…")
 
     def save_pdf_password(self):
         paths = self._ordered_paths()
@@ -7899,13 +7951,19 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         if not out.lower().endswith(".pdf"):
             out += ".pdf"
-        try:
+        npages = len(paths)
+
+        def job():
             self._pages_as_pdf(paths, out, password=pw)
-        except Exception:
-            self._warn("PDF save fail:\n%s" % traceback.format_exc()); return
-        self._remember_save_dir(out); self._remember_doc_name(out)
-        self._record_save(out, len(paths)); self._dirty = False; self._after_save_action(out)
-        QtWidgets.QMessageBox.information(self, "Ho gaya", "Password-PDF save ho gaya:\n%s" % out)
+            return out
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn("PDF save fail:\n%s" % res); return
+            self._remember_save_dir(out); self._remember_doc_name(out)
+            self._record_save(out, npages); self._dirty = False; self._after_save_action(out)
+            self.status.showMessage("✔ Password-PDF save ho gaya: %s" % out, 8000)
+        self._run_bg(job, done, "Password-PDF ban rahi hai…")
 
     def save_images(self):
         paths = self._ordered_paths()
@@ -7921,15 +7979,21 @@ class ScannerWindow(QtWidgets.QMainWindow):
             ext = ".jpg"
         fmt = {"jpg": "JPEG", "jpeg": "JPEG", "png": "PNG", "tif": "TIFF", "tiff": "TIFF"}\
             .get(ext.lower().lstrip("."), "JPEG")
-        try:
+        npages = len(paths)
+
+        def job():
             for i, p in enumerate(paths):
                 target = (base + ext) if i == 0 else ("%s_%d%s" % (base, i + 1, ext))
                 with Image.open(p) as im:
                     im.convert("RGB").save(target, fmt)
-        except Exception:
-            self._warn("Images save fail:\n%s" % traceback.format_exc()); return
-        self._remember_save_dir(out)
-        QtWidgets.QMessageBox.information(self, "Ho gaya", "%d image save ho gayi." % len(paths))
+            return npages
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn("Images save fail:\n%s" % res); return
+            self._remember_save_dir(out)
+            self.status.showMessage("✔ %d image save ho gayi." % res, 8000)
+        self._run_bg(job, done, "Images save ho rahi hain…")
 
     def export_ocr_text(self):
         if not HAS_OCR_LIBS:
@@ -7940,21 +8004,25 @@ class ScannerWindow(QtWidgets.QMainWindow):
         out, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Text save karein", self._build_filename(".txt"), "Text (*.txt)")
         if not out:
             return
-        try:
+        def job():
             chunks = []
             for p in paths:
                 with Image.open(p) as im:
                     chunks.append(pytesseract.image_to_string(im, lang="hin+eng"))
             with open(out, "w", encoding="utf-8") as fh:
                 fh.write("\n\n----\n\n".join(chunks))
-        except Exception as exc:
-            if isinstance(exc, pytesseract.TesseractNotFoundError):
-                self._warn("Tesseract OCR install nahi hai.")
-            else:
-                self._warn("Text export fail:\n%s" % traceback.format_exc())
-            return
-        self._remember_save_dir(out)
-        QtWidgets.QMessageBox.information(self, "Ho gaya", "Text save ho gaya:\n%s" % out)
+            return out
+
+        def done(res):
+            if isinstance(res, Exception):
+                if isinstance(res, pytesseract.TesseractNotFoundError):
+                    self._warn("Tesseract OCR install nahi hai.")
+                else:
+                    self._warn("Text export fail:\n%s" % res)
+                return
+            self._remember_save_dir(out)
+            self.status.showMessage("✔ Text save ho gaya: %s" % out, 8000)
+        self._run_bg(job, done, "OCR text nikal rahe hain…")
 
     def _save_ocr_pdf(self, paths, out):
         writer = PdfWriter()
@@ -7992,12 +8060,17 @@ class ScannerWindow(QtWidgets.QMainWindow):
         for i, s in enumerate(starts):
             end = (starts[i + 1] - 1) if i + 1 < len(starts) else len(paths)
             ranges.append((s, end))
-        try:
+
+        def job():
             for idx, (s, e) in enumerate(ranges, 1):
                 self._pages_as_pdf(paths[s - 1:e], os.path.join(folder, "%s_part%d.pdf" % (base, idx)))
-        except Exception:
-            self._warn("Split fail:\n%s" % traceback.format_exc()); return
-        QtWidgets.QMessageBox.information(self, "Ho gaya", "%d alag PDF ban gayi:\n%s" % (len(ranges), folder))
+            return len(ranges)
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn("Split fail:\n%s" % res); return
+            QtWidgets.QMessageBox.information(self, "Ho gaya", "%d alag PDF ban gayi:\n%s" % (res, folder))
+        self._run_bg(job, done, "PDF split ho rahi hai…")
 
     def merge_pdfs(self):
         if not HAS_OCR_LIBS:
@@ -8010,7 +8083,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         if not out.lower().endswith(".pdf"):
             out += ".pdf"
-        try:
+
+        def job():
             writer = PdfWriter()
             for f in files:
                 r = PdfReader(f)
@@ -8018,10 +8092,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     writer.add_page(pg)
             with open(out, "wb") as fh:
                 writer.write(fh)
-        except Exception:
-            self._warn("Merge fail:\n%s" % traceback.format_exc()); return
-        self._add_recent(out)
-        QtWidgets.QMessageBox.information(self, "Ho gaya", "Merged PDF ban gayi:\n%s" % out)
+            return out
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn("Merge fail:\n%s" % res); return
+            self._add_recent(out)
+            self.status.showMessage("✔ Merged PDF ban gayi: %s" % out, 8000)
+        self._run_bg(job, done, "PDFs jud rahi hain (merge)…")
 
     def search_pdfs(self):
         dlg = QtWidgets.QDialog(self)
