@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "45"
+VERSION = "46"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -3320,6 +3320,10 @@ class FilesTree(QtWidgets.QTreeView):
         super().__init__()
         self._on_drop = on_drop
         self.setAcceptDrops(True)
+        # Files ko yahan se KHEENCH kar doc-area me drop karke import karo
+        self.setDragEnabled(True)
+        self.setDragDropMode(QtWidgets.QAbstractItemView.DragDrop)
+        self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
 
     def dragEnterEvent(self, e):
         e.acceptProposedAction()
@@ -5407,6 +5411,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.files_tree.selectionModel().currentChanged.connect(self._files_sel_changed)
         self.files_tree.setToolTip("Folder chuno → 'Yahan save' dabao, ya pages ko\n"
                                    "kheench kar folder par chhod do.\n"
+                                   "Kisi file ko KHEENCH kar beech ke doc-area me\n"
+                                   "chhodo = wo turant import ho jayegi.\n"
                                    "Right-click = share/rename/delete/merge.\n"
                                    "File par double-click = kholo. Hari = aaj ki file.")
         fp.addWidget(self.files_tree, 1)
