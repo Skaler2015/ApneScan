@@ -28,6 +28,12 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
 
 try:
+    from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest
+    HAS_QTNET = True
+except Exception:
+    HAS_QTNET = False
+
+try:
     from PyQt5.QtMultimedia import QCamera, QCameraInfo, QCameraImageCapture
     from PyQt5.QtMultimediaWidgets import QCameraViewfinder
     HAS_CAMERA = True
@@ -158,7 +164,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "57"
+VERSION = "58"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -4080,13 +4086,90 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._bg_workers.append(w)
         w.start()
 
+    def _stats_nam(self):
+        """Qt ka apna network manager (main event-loop par — koi thread nahi).
+        Redirect follow karta hai aur SSL-error ko ignore (sirf public ginti)."""
+        if getattr(self, "_nam", None) is None:
+            self._nam = QNetworkAccessManager(self)
+            try:    # HTTPS cert dikkat ho to bhi ruke nahi (yahan sirf ginti hai)
+                self._nam.sslErrors.connect(lambda reply, errs: reply.ignoreSslErrors())
+            except Exception:
+                pass
+            try:    # Apps Script 302 redirect follow karo (Qt 5.9+)
+                self._nam.setRedirectPolicy(QNetworkRequest.NoLessSafeRedirectPolicy)
+            except Exception:
+                pass
+        return self._nam
+
     def _stats_fetch(self, action="stats", n=0, imp=0, prt=0, want_display=True):
-        """Stats server se ek request — background me (UI nahi rukti)."""
+        """Stats server se ek request — Qt network se (UI nahi rukti, thread
+        nahi). Naye sire se banaya — pehle urllib+thread wala rasta kuch
+        machino par kaam nahi karta tha."""
         url = self._stats_url()
         if not url:
             return
-        client = self._get_client_id()
-        ver = VERSION
+        if not HAS_QTNET:      # Qt-network na ho to seedha urllib fallback
+            self._stats_fetch_urllib(action, n, imp, prt, want_display)
+            return
+        import urllib.parse as P
+        try:
+            country = (QtCore.QLocale().name().split("_") + [""])[1][:2]
+        except Exception:
+            country = ""
+        q = {"action": action, "client": self._get_client_id(),
+             "v": VERSION, "c": country}
+        if action == "scan" and n:
+            q["n"] = str(n)
+        if imp:
+            q["imp"] = str(imp)
+        if prt:
+            q["prt"] = str(prt)
+        full = url + ("&" if "?" in url else "?") + P.urlencode(q)
+        req = QNetworkRequest(QtCore.QUrl(full))
+        req.setHeader(QNetworkRequest.UserAgentHeader, "ApneScan/%s" % VERSION)
+        try:    # purane Qt (5.6-5.14) me redirect isse follow hota hai
+            req.setAttribute(QNetworkRequest.FollowRedirectsAttribute, True)
+        except Exception:
+            pass
+        reply = self._stats_nam().get(req)
+        self._stat_replies = getattr(self, "_stat_replies", [])
+        self._stat_replies.append(reply)
+
+        def _done():
+            try:
+                self._stat_replies.remove(reply)
+            except Exception:
+                pass
+            data = None
+            try:
+                raw = bytes(reply.readAll()).decode("utf-8", "ignore")
+                import json
+                data = json.loads(raw)
+            except Exception:
+                data = None
+            try:
+                reply.deleteLater()
+            except Exception:
+                pass
+            if not want_display:
+                return
+            if isinstance(data, dict) and data.get("ok"):
+                self._on_world_stats(data)
+                self._set_stats_display((int(data.get("total", 0)),
+                                         int(data.get("today", 0)),
+                                         int(data.get("online", 0))))
+            else:
+                # Qt se na aaya to purana (urllib+thread) rasta ek baar aajma lo
+                self._stats_fetch_urllib(action, n, imp, prt, want_display)
+        reply.finished.connect(_done)
+
+    def _stats_fetch_urllib(self, action="stats", n=0, imp=0, prt=0, want_display=True):
+        """Fallback: agar Qt-network kaam na kare to urllib se (background thread).
+        FuncWorker ka proven rasta — GC-safe."""
+        url = self._stats_url()
+        if not url:
+            self._stats_failed(); return
+        client = self._get_client_id(); ver = VERSION
         try:
             country = (QtCore.QLocale().name().split("_") + [""])[1][:2]
         except Exception:
@@ -4106,12 +4189,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 q["prt"] = str(prt)
             full = url + ("&" if "?" in url else "?") + P.urlencode(q)
             req = U.Request(full, headers={"User-Agent": "ApneScan/%s" % ver})
-            # verified -> unverified -> no-proxy: teeno me se jo chale
             for mk in (lambda: U.urlopen(req, timeout=20),
-                       lambda: U.urlopen(req, timeout=20, context=ssl._create_unverified_context()),
-                       lambda: U.build_opener(
-                           U.ProxyHandler({}),
-                           U.HTTPSHandler(context=ssl._create_unverified_context())).open(req, timeout=25)):
+                       lambda: U.urlopen(req, timeout=20, context=ssl._create_unverified_context())):
                 try:
                     r = mk()
                     return J.loads(r.read().decode("utf-8", "ignore"))
