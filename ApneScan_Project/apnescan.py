@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "69"
+VERSION = "70"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -7563,14 +7563,22 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
 
     def _selected_library_folder(self):
+        # ABHI jo folder khula hai wahi base hai. Koi subfolder tabhi maano jab
+        # wo isi khule folder ke ANDAR ho — warna purana (view se bahar ka)
+        # selection galat folder me kaam kara deta tha (jaise 'New folder').
+        cur = self._panel_current_dir()
         try:
             idx = self.files_tree.currentIndex()
             if idx.isValid():
                 p = self.files_model.filePath(idx)
-                return p if os.path.isdir(p) else os.path.dirname(p)
+                folder = p if os.path.isdir(p) else os.path.dirname(p)
+                nf = os.path.normpath(folder)
+                nc = os.path.normpath(cur)
+                if nf == nc or nf.startswith(nc + os.sep):
+                    return folder
         except Exception:
             pass
-        return self._panel_current_dir()   # kuch chuna na ho to abhi khula folder
+        return cur
 
     def new_library_folder(self):
         base = self._selected_library_folder()
