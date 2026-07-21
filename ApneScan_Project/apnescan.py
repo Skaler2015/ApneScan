@@ -164,7 +164,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "64"
+VERSION = "65"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -7547,13 +7547,17 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 "📥 Imported %d file(s)" % n), 4000)
         self._run_bg(job, on_done, self.L("Laa rahe hain…", "Importing…"))
 
-    def _save_pages_to_folder(self, folder, paths, ask_name=True, merge_same=False):
+    def _save_pages_to_folder(self, folder, paths, ask_name=True, merge_same=False,
+                              forced_name=None):
         if not paths:
             self._warn(tr("scan_first", self._lang))
             return
-        default = os.path.basename(self._build_filename(".pdf", paths=paths))
-        if default.lower().endswith(".pdf"):
-            default = default[:-4]
+        if forced_name:
+            default = forced_name
+        else:
+            default = os.path.basename(self._build_filename(".pdf", paths=paths))
+            if default.lower().endswith(".pdf"):
+                default = default[:-4]
         if ask_name:
             name, ok = QtWidgets.QInputDialog.getText(
                 self, "Save",
@@ -7627,16 +7631,40 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 pass
 
     def _on_pages_dropped(self, idx):
-        """Pages ko folder par DROP karo = turant wahan save (auto naam se).
-        Kuch folder par na chhoda ho to ABHI KHULE folder me. Agar usi naam ki
-        PDF pehle se hai to naye pages usi me jud jaate hain (ek hi PDF)."""
+        """Drop pages on a folder = save there instantly. Pages are grouped by
+        their NAME (title): same-named pages -> one PDF (named after the title),
+        differently-named pages -> separate PDFs."""
         try:
             p = self.files_model.filePath(idx) if idx.isValid() else self._panel_current_dir()
         except Exception:
             p = self._panel_current_dir()
         folder = p if os.path.isdir(p) else os.path.dirname(p)
         paths = self._selected_paths() or self._ordered_paths()
-        self._save_pages_to_folder(folder, paths, ask_name=False, merge_same=True)
+        self._save_pages_grouped(folder, paths)
+
+    def _save_pages_grouped(self, folder, paths):
+        """Selected pages ko unke NAAM (title) ke hisaab se group karke save karo:
+        ek jaise naam wale pages ki EK hi PDF; alag naam wale alag PDF. Jinka
+        naam nahi hai unke liye auto-naam."""
+        if not paths:
+            self._warn("Scan or import a page first."); return
+        title_of = {}
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            title_of[it.data(QtCore.Qt.UserRole)] = it.data(TITLE_ROLE)
+        groups, order = [], {}
+        for p in paths:
+            t = title_of.get(p) or ""
+            key = t or "__auto__"
+            if key not in order:
+                order[key] = len(groups)
+                groups.append([t, []])
+            groups[order[key]][1].append(p)
+        for name, gpaths in groups:
+            self._save_pages_to_folder(folder, gpaths, ask_name=False,
+                                       merge_same=True, forced_name=(name or None))
+        if len(groups) > 1:
+            self.status.showMessage("Saved %d documents (grouped by name)" % len(groups), 5000)
 
     def _files_sel_changed(self, cur, _prev):
         # Folder chunte hi status me hisaab; FILE chunte hi uska preview
@@ -9566,7 +9594,25 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.delete_page()
 
     def rename_current_page(self):
-        it = self.list.currentItem() or (self.list.selectedItems() or [None])[0]
+        # If SEVERAL pages are selected, rename them ALL to the same name at once.
+        sel = self.list.selectedItems()
+        if len(sel) > 1:
+            cur = sel[0].data(TITLE_ROLE) or ""
+            name, ok = QtWidgets.QInputDialog.getText(
+                self, "Rename %d pages" % len(sel),
+                "One name for all %d selected pages:" % len(sel), text=cur)
+            if not ok:
+                return
+            name = underscore_name(name)
+            if not name:
+                return
+            for it in sel:
+                it.setData(TITLE_ROLE, name)
+                it.setText(name)
+            self._learn_name(sel[0].data(QtCore.Qt.UserRole), name)
+            self.status.showMessage("Renamed %d pages to '%s'" % (len(sel), name), 4000)
+            return
+        it = self.list.currentItem() or (sel or [None])[0]
         if it is None:
             self._warn("Select a page first."); return
         cur = it.data(TITLE_ROLE) or ""
