@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "40"
+VERSION = "41"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -5358,9 +5358,20 @@ class ScannerWindow(QtWidgets.QMainWindow):
         _bnew.clicked.connect(self.new_library_folder)
         _row.addWidget(_bopen); _row.addWidget(_bhome); _row.addWidget(_bnew)
         fp.addLayout(_row)
+        # 📥 Bahar se files SEEDHA chune folder me laao (copy)
+        self.btn_import_here = QtWidgets.QPushButton(self.L("📥 Files laao (import)", "📥 Import files"))
+        self.btn_import_here.setMinimumHeight(32)
+        self.btn_import_here.setToolTip(self.L(
+            "PC se PDF/photo/Word/Excel chuno — wo SEEDHA is (chune) folder me aa jaayengi.",
+            "Pick PDF/photo/Word/Excel from your PC — they copy straight into the selected folder."))
+        self.btn_import_here.clicked.connect(self.import_into_selected_folder)
+        fp.addWidget(self.btn_import_here)
         self.btn_save_here = QtWidgets.QPushButton(self.L("💾 Yahan save karo", "💾 Save here"))
         self.btn_save_here.setObjectName("primary")
         self.btn_save_here.setMinimumHeight(34)
+        self.btn_save_here.setToolTip(self.L(
+            "Abhi jo pages scan/import kiye hain, unki PDF SEEDHA is chune folder me save karo.",
+            "Save the currently scanned/imported pages as a PDF straight into the selected folder."))
         self.btn_save_here.clicked.connect(self.save_into_selected_folder)
         fp.addWidget(self.btn_save_here)
         self.files_panel.setFixedWidth(250)
@@ -6801,6 +6812,59 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         self._save_pages_to_folder(self._selected_library_folder(), paths, ask_name=True)
 
+    def import_into_selected_folder(self):
+        """Panel ke ⬇ Import button — chune folder me bahar se files laao."""
+        folder = self._selected_library_folder()
+        if not folder or not os.path.isdir(folder):
+            folder = self._files_root()
+        self._import_files_dialog(folder)
+
+    def _import_files_dialog(self, folder):
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            self.L("Files chuno — ye is folder me aa jaayengi",
+                   "Choose files — they'll be copied into this folder"),
+            os.path.expanduser("~"),
+            "Documents (*.pdf *.jpg *.jpeg *.png *.tif *.tiff *.docx *.xlsx);;"
+            "All files (*.*)")
+        if files:
+            self._import_files_to_folder(folder, files)
+
+    def _import_files_to_folder(self, folder, files):
+        """Chuni gayi files ko folder me copy karo (naam takraye to _2, _3…);
+        background me, UI nahi rukti."""
+        def job():
+            done = 0
+            for src in files:
+                try:
+                    stem, ext = os.path.splitext(os.path.basename(src))
+                    dst = os.path.join(folder, stem + ext)
+                    k = 2
+                    while os.path.exists(dst):
+                        dst = os.path.join(folder, "%s_%d%s" % (stem, k, ext))
+                        k += 1
+                    shutil.copy2(src, dst)
+                    done += 1
+                except Exception:
+                    pass
+            return done
+
+        def on_done(n):
+            if isinstance(n, Exception):
+                self._warn(self.L("Import fail ho gaya", "Import failed"))
+                return
+            try:
+                idx = self.files_model.index(folder)
+                self.files_tree.setCurrentIndex(idx)
+                self.files_tree.expand(idx)
+                self.files_tree.scrollTo(idx)
+            except Exception:
+                pass
+            self.status.showMessage(self.L(
+                "📥 %d file is folder me aa gayi" % n,
+                "📥 Imported %d file(s)" % n), 4000)
+        self._run_bg(job, on_done, self.L("Laa rahe hain…", "Importing…"))
+
     def _save_pages_to_folder(self, folder, paths, ask_name=True):
         if not paths:
             self._warn(tr("scan_first", self._lang))
@@ -6873,6 +6937,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
             if os.path.isdir(path):
                 menu.addAction("💾 Yahan save karo",
                                lambda: self._save_pages_to_folder(path, self._ordered_paths()))
+                menu.addAction("📥 Yahan files laao (import)…",
+                               lambda: self._import_files_dialog(path))
                 menu.addAction("➕ Naya folder isme…", lambda: self._new_folder_in(path))
                 menu.addAction("🧩 Is folder ki saari PDFs → ek PDF…",
                                lambda: self._merge_folder_pdfs(path))
