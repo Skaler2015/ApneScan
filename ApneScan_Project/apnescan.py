@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "43"
+VERSION = "44"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -4191,10 +4191,29 @@ class ScannerWindow(QtWidgets.QMainWindow):
             fd, tmp = tempfile.mkstemp(suffix=".exe")
             os.close(fd)
             req = U.Request(url, headers={"User-Agent": "ApneScan"})
-            with _urlopen_safe(req, timeout=180) as r, open(tmp, "wb") as fh:
+            expected = 0
+            with _urlopen_safe(req, timeout=300) as r, open(tmp, "wb") as fh:
+                try:
+                    expected = int(r.headers.get("Content-Length") or 0)
+                except Exception:
+                    expected = 0
                 shutil.copyfileobj(r, fh)
-            if os.path.getsize(tmp) < 5_000_000:
-                raise RuntimeError("Download adhoora laga (%d bytes)" % os.path.getsize(tmp))
+            got = os.path.getsize(tmp)
+            # ADHOORA download hi asli dikkat thi: aadhi-likhi onefile exe
+            # 'python312.dll load fail' deti hai. Isliye pakka karo ki poori
+            # file aayi (Content-Length se), aur ye sach me ek Windows exe hai.
+            with open(tmp, "rb") as fh:
+                head = fh.read(2)
+            if head != b"MZ":
+                raise RuntimeError("Download sahi exe nahi laga (shayad server ne "
+                                   "galat file bheji). Website se try karein.")
+            if expected and got < expected:
+                raise RuntimeError("Download adhoora reh gaya (%d me se sirf %d bytes "
+                                   "aaye). Internet check karke dobara koshish karein."
+                                   % (expected, got))
+            if got < 20_000_000:
+                raise RuntimeError("Download poora nahi aaya (sirf %d bytes). "
+                                   "Dobara koshish karein ya website se le lein." % got)
             return tmp
 
         def done(res):
@@ -4219,13 +4238,29 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         cur = os.path.abspath(sys.executable)
         bat = os.path.join(tempfile.gettempdir(), "apnescan_update.bat")
+        # App band hone ka intezaar karo, phir purani exe ko nayi se badlo.
+        # Kabhi purani exe abhi bhi lock hoti hai -> copy fail; isliye kai baar
+        # koshish karte hain. Agar phir bhi na ho, to (verified) nayi exe ko
+        # SEEDHA temp se hi chala dete hain — taaki adhoori-copy exe kabhi na
+        # chale (wahi 'python DLL load fail' deti thi).
+        body = (
+            "@echo off\r\n"
+            "ping 127.0.0.1 -n 4 > nul\r\n"
+            "set SRC=__SRC__\r\n"
+            "set DST=__DST__\r\n"
+            "set OK=0\r\n"
+            "for /L %%i in (1,1,15) do (\r\n"
+            "  copy /y \"%SRC%\" \"%DST%\" > nul 2>&1\r\n"
+            "  if not errorlevel 1 ( set OK=1 & goto launch )\r\n"
+            "  ping 127.0.0.1 -n 2 > nul\r\n"
+            ")\r\n"
+            ":launch\r\n"
+            "if \"%OK%\"==\"1\" ( start \"\" \"%DST%\" ) else ( start \"\" \"%SRC%\" )\r\n"
+            "del \"%~f0\"\r\n"
+        ).replace("__SRC__", tmp_exe).replace("__DST__", cur)
         try:
             with open(bat, "w") as fh:
-                fh.write('@echo off\r\n'
-                         'ping 127.0.0.1 -n 4 > nul\r\n'
-                         'copy /y "%s" "%s" > nul\r\n'
-                         'start "" "%s"\r\n'
-                         'del "%%~f0"\r\n' % (tmp_exe, cur, cur))
+                fh.write(body)
         except Exception as exc:
             self._warn("Update script fail: %s" % exc)
             return
