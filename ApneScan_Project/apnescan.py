@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "71"
+VERSION = "72"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -4551,6 +4551,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.list.setIconSize(QtCore.QSize(w, h))
         # naam ke liye neeche zyada jagah (2 line ka naam bhi poora dikhe)
         self.list.setGridSize(QtCore.QSize(w + 24, h + 52))
+        for _i in range(self.list.count()):
+            self.list.item(_i).setSizeHint(QtCore.QSize(w + 24, h + 52))
 
     def _zoom_thumbs(self, factor):
         self._apply_thumb_zoom(self._thumb_w * factor)
@@ -5873,7 +5875,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.list.setResizeMode(QtWidgets.QListView.Adjust)
         self.list.setMovement(QtWidgets.QListView.Snap)
         self.list.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
-        self.list.setSpacing(10); self.list.setUniformItemSizes(True)
+        self.list.setSpacing(10)
+        # uniformItemSizes OFF — warna ek chhota (jaise ultrasound) document aane
+        # par Qt SAB thumbnails ko chhota kar deta tha. Ab har thumbnail apni
+        # natural size me (fixed cell me) dikhega: chhota chhota, poora poora,
+        # aur naam bhi neeche saaf dikhega.
+        self.list.setUniformItemSizes(False)
         self.list.setWordWrap(True)          # naam poora dikhe (kate nahi, 2 line me)
         self.list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self._thumb_w, self._thumb_h = self.THUMB_W, self.THUMB_H   # zoomable display size
@@ -6515,6 +6522,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         _lbl = "Page %d" % (self.list.count() + 1)
         item = QtWidgets.QListWidgetItem(icon, _lbl)
         item.setData(QtCore.Qt.UserRole, path); item.setTextAlignment(QtCore.Qt.AlignHCenter)
+        # har cell ek jaisa (icon + naam ke liye poori jagah) — chhota doc aane
+        # par baaki thumbnails chhote na ho, aur naam hamesha dikhe
+        item.setSizeHint(QtCore.QSize(self._thumb_w + 24, self._thumb_h + 52))
         self.list.addItem(item); self.list.setCurrentItem(item)
         self.list.clearSelection()  # nothing "selected" by default; user picks with Ctrl/Shift
         self._dirty = True
@@ -7571,22 +7581,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
 
     def _selected_library_folder(self):
-        # ABHI jo folder khula hai wahi base hai. Koi subfolder tabhi maano jab
-        # wo isi khule folder ke ANDAR ho — warna purana (view se bahar ka)
-        # selection galat folder me kaam kara deta tha (jaise 'New folder').
-        cur = self._panel_current_dir()
-        try:
-            idx = self.files_tree.currentIndex()
-            if idx.isValid():
-                p = self.files_model.filePath(idx)
-                folder = p if os.path.isdir(p) else os.path.dirname(p)
-                nf = os.path.normpath(folder)
-                nc = os.path.normpath(cur)
-                if nf == nc or nf.startswith(nc + os.sep):
-                    return folder
-        except Exception:
-            pass
-        return cur
+        # HAMESHA wahi folder jo panel me ABHI KHULA (view) hai — highlighted
+        # subfolder nahi. (New folder / save / import isi khule folder me ho.)
+        # Kisi doosre subfolder me daalna ho to us par 2x click karke us me
+        # jaao (drill-in), phir wahan banao/save karo.
+        return self._panel_current_dir()
 
     def new_library_folder(self):
         base = self._selected_library_folder()
