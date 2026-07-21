@@ -13,6 +13,7 @@ on:
       - 'ApneScan_Project/apnescan_logo*'
       - 'ApneScan_Project/apnescan_icon.png'
       - 'ApneScan_Project/apnescan.py'
+      - 'ApneScan_Project/website_extras/**'
       - '.github/workflows/deploy-website.yml'
 
 permissions:
@@ -53,9 +54,16 @@ jobs:
           echo "apnescan.apnesoft.com" > _site/CNAME
           # App ka in-app update-check isi file se naya version pehchanta hai
           echo "v$VERSION" > _site/version.txt
-          # SEO/GEO files: robots.txt (AI crawlers allowed), llms.txt, sitemap
+          # SEO/GEO/AEO/LLMO files: robots.txt (AI crawlers allowed), llms.txt,
+          # llms-full.txt, ai.txt, manifest, humans.txt, security.txt
           cp ApneScan_Project/website_extras/robots.txt _site/ 2>/dev/null || true
           cp ApneScan_Project/website_extras/llms.txt _site/ 2>/dev/null || true
+          cp ApneScan_Project/website_extras/llms-full.txt _site/ 2>/dev/null || true
+          cp ApneScan_Project/website_extras/ai.txt _site/ 2>/dev/null || true
+          cp ApneScan_Project/website_extras/manifest.webmanifest _site/ 2>/dev/null || true
+          cp ApneScan_Project/website_extras/humans.txt _site/ 2>/dev/null || true
+          mkdir -p _site/.well-known
+          cp ApneScan_Project/website_extras/.well-known/security.txt _site/.well-known/ 2>/dev/null || true
           # Google Search Console ownership verification
           cp ApneScan_Project/website_extras/google*.html _site/ 2>/dev/null || true
           TODAY=$(date -u +%Y-%m-%d)

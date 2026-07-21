@@ -1,0 +1,16 @@
+/* TEAM */
+  Maker: ApneSoft
+  Contact: https://github.com/Skaler2015/ApneScan
+  From: India
+
+/* PRODUCT */
+  ApneScan — free, open-source document scanner for Windows (Hindi + English).
+  Scan to searchable PDF, compress, edit, and share on WhatsApp — fully offline.
+
+/* THANKS */
+  Tesseract OCR · PyMuPDF · pypdf · PyQt5 · and every user who scans a lot of paper.
+
+/* SITE */
+  Language: English / हिन्दी
+  Standards: HTML5, Schema.org, Open Graph, llms.txt
+  Components: Python + PyQt5 desktop app

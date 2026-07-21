@@ -25,6 +25,31 @@
 <meta name="twitter:description" content="Free scan-to-PDF for Windows with Hindi+English OCR. No ads, works offline.">
 <meta name="twitter:image" content="https://apnescan.apnesoft.com/apnescan_logo.png">
 <link rel="icon" type="image/png" href="apnescan_icon.png">
+<!-- Crawling / indexing — rich snippets + AI Overviews (AIO/GEO) ke liye -->
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+<meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1">
+<meta name="bingbot" content="index, follow">
+<!-- Authorship / publisher (E-E-A-T, GAIO) -->
+<meta name="author" content="ApneSoft">
+<meta name="publisher" content="ApneSoft">
+<meta name="application-name" content="ApneScan">
+<meta name="apple-mobile-web-app-title" content="ApneScan">
+<meta name="rating" content="General">
+<meta name="revisit-after" content="7 days">
+<meta name="format-detection" content="telephone=no">
+<!-- Geo (bhaugolik — SEvO/local) -->
+<meta name="geo.region" content="IN">
+<meta name="geo.placename" content="India">
+<meta name="language" content="English, Hindi">
+<meta property="og:image:alt" content="ApneScan — free Windows document scanner (Hindi + English)">
+<meta name="twitter:image:alt" content="ApneScan — free Windows document scanner">
+<meta name="twitter:site" content="@ApneScan">
+<!-- Discovery files (SEO/GEO/LLMO) -->
+<link rel="sitemap" type="application/xml" href="/sitemap.xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="author" href="/humans.txt">
+<link rel="preconnect" href="https://github.com" crossorigin>
+<link rel="dns-prefetch" href="https://github.com">
 <!-- Structured data: Google ko machine-language me app ki jaankari -->
 <script type="application/ld+json">
 {
@@ -70,6 +95,83 @@
      "acceptedAnswer": {"@type": "Answer", "text": "Yes — you can capture documents from a webcam or USB camera, or import photos from your phone; both are auto-cleaned into a PDF."}},
     {"@type": "Question", "name": "Does it name documents automatically?",
      "acceptedAnswer": {"@type": "Answer", "text": "Yes — rename a document once with F2 and the same form is named automatically next time, optionally adding the detected bill/claim number and the date."}}
+  ]
+}
+</script>
+<!-- Organization / publisher (GAIO, E-E-A-T) -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "ApneSoft",
+  "url": "https://apnescan.apnesoft.com/",
+  "logo": "https://apnescan.apnesoft.com/apnescan_logo.png",
+  "sameAs": ["https://github.com/Skaler2015/ApneScan"],
+  "description": "Maker of ApneScan, a free open-source document scanner for Windows with a Hindi + English interface."
+}
+</script>
+<!-- WebSite + sitelinks searchbox -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "ApneScan",
+  "alternateName": "ApneScan Free Scanner Software",
+  "url": "https://apnescan.apnesoft.com/",
+  "inLanguage": ["en", "hi"],
+  "publisher": {"@type": "Organization", "name": "ApneSoft"},
+  "potentialAction": {
+    "@type": "SearchAction",
+    "target": {"@type": "EntryPoint", "urlTemplate": "https://apnescan.apnesoft.com/tools.html?q={search_term_string}"},
+    "query-input": "required name=search_term_string"
+  }
+}
+</script>
+<!-- Breadcrumb -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://apnescan.apnesoft.com/"},
+    {"@type": "ListItem", "position": 2, "name": "Free Tools", "item": "https://apnescan.apnesoft.com/tools.html"},
+    {"@type": "ListItem", "position": 3, "name": "Guides", "item": "https://apnescan.apnesoft.com/guides.html"}
+  ]
+}
+</script>
+<!-- HowTo: scan to PDF (AEO / answer-engine steps) -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "HowTo",
+  "name": "How to scan a document to PDF for free on Windows",
+  "description": "Scan paper documents into a searchable PDF on Windows using ApneScan, a free scanner app.",
+  "totalTime": "PT2M",
+  "tool": [{"@type": "HowToTool", "name": "Any TWAIN/WIA/eSCL scanner, webcam, or phone photo"}],
+  "supply": [{"@type": "HowToSupply", "name": "ApneScan (free download)"}],
+  "step": [
+    {"@type": "HowToStep", "position": 1, "name": "Install", "text": "Download ApneScan (free) and run the installer — no technical setup.", "url": "https://apnescan.apnesoft.com/#download"},
+    {"@type": "HowToStep", "position": 2, "name": "Choose scanner", "text": "The setup wizard finds your scanner automatically over USB (TWAIN/WIA) or the network (eSCL)."},
+    {"@type": "HowToStep", "position": 3, "name": "Scan", "text": "Place your pages in the feeder or on the glass and press Scan."},
+    {"@type": "HowToStep", "position": 4, "name": "Save as PDF", "text": "Save a clean, searchable PDF (English + Hindi OCR), or let it auto-save."}
+  ]
+}
+</script>
+<!-- Feature ItemList (GEO — AI ko feature list saaf de do) -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "ItemList",
+  "name": "ApneScan features",
+  "itemListElement": [
+    {"@type": "ListItem", "position": 1, "name": "Scan to searchable PDF (Hindi + English OCR)"},
+    {"@type": "ListItem", "position": 2, "name": "Network eSCL, USB TWAIN and WIA scanner support with ADF duplex"},
+    {"@type": "ListItem", "position": 3, "name": "Compress PDF to 200KB / 500KB / 1MB / 2MB targets"},
+    {"@type": "ListItem", "position": 4, "name": "Phone-photo and webcam to PDF with shadow removal"},
+    {"@type": "ListItem", "position": 5, "name": "WhatsApp and Email sharing of scanned PDFs"},
+    {"@type": "ListItem", "position": 6, "name": "PDF tools: merge, split, sign/stamp, watermark, PDF to Word/Excel/JPG"},
+    {"@type": "ListItem", "position": 7, "name": "Smart auto-naming of repeated forms with bill/claim number and date"},
+    {"@type": "ListItem", "position": 8, "name": "Works fully offline — no ads, no tracking, no uploads"}
   ]
 }
 </script>
@@ -232,6 +334,29 @@
       </div>
     </div>
   </div>
+
+  <!-- QUICK ANSWER (AEO/GEO: concise, quotable summary for AI + answer engines) -->
+  <section id="quick-answer" aria-label="What is ApneScan" style="padding-top:8px">
+    <div class="wrap">
+      <div style="background:#fff;border:1px solid #e2e8f0;border-left:4px solid #0f766e;border-radius:14px;padding:22px 24px;max-width:900px;margin:0 auto">
+        <h2 style="font-size:22px;margin-bottom:8px">What is ApneScan? (in short)</h2>
+        <p style="color:#475569;font-size:16px">
+          <strong>ApneScan is a 100% free, open-source document scanner for Windows 10 and 11</strong>
+          with a Hindi + English interface. It scans paper to a searchable PDF (Hindi + English OCR)
+          from network scanners (eSCL — no drivers), USB scanners (TWAIN/WIA) with ADF duplex, a webcam,
+          or a phone photo — then compresses, shares on WhatsApp/Email, and edits PDFs. Everything runs
+          <strong>offline on your PC — no ads, no tracking, no uploads.</strong>
+        </p>
+        <ul style="color:#475569;font-size:15px;margin:12px 0 0 20px;line-height:1.8">
+          <li><strong>Price:</strong> Free (no ads, no account, no watermark)</li>
+          <li><strong>Platform:</strong> Windows 10 / 11 · <strong>Languages:</strong> Hindi + English (OCR both)</li>
+          <li><strong>Best for:</strong> shops, offices, clinics/hospitals, schools, CSC centres in India that scan and upload/WhatsApp PDFs</li>
+          <li><strong>Alternative to:</strong> NAPS2, CamScanner (PC) — with a Hindi-first UI and government-portal PDF size targets</li>
+          <li><strong>Download:</strong> <a href="#download" style="color:#0f766e">apnescan.apnesoft.com</a> · <strong>Source:</strong> <a href="https://github.com/Skaler2015/ApneScan" rel="noopener">GitHub</a></li>
+        </ul>
+      </div>
+    </div>
+  </section>
 
   <!-- FEATURES -->
   <section id="features">
