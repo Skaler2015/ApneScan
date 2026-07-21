@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "42"
+VERSION = "43"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -7112,14 +7112,25 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 for f in fn:
                     if not f.lower().endswith(exts):
                         continue
-                    # naam + jis folder me hai uska raasta — dono me dhoondo
+                    name = f.lower()
+                    # naam + jis folder me hai uska raasta — dono me,
+                    # aur naam/folder ke BEECH me se bhi (substring) dhoondo
                     rel = os.path.relpath(os.path.join(dp, f), scope).lower()
-                    if all(t in rel for t in terms):
-                        hits.append(os.path.join(dp, f))
-                        if len(hits) >= 600:
-                            return hits
-            hits.sort(key=lambda p: os.path.basename(p).lower())
-            return hits
+                    if not all(t in rel for t in terms):
+                        continue
+                    # Relevance: pehle wo files jinke NAAM me match hai, phir
+                    # wo jo sirf folder-naam se mili; naam ke SHURU me match ho
+                    # to aur upar. (Beech ka match bhi aata hai, bas neeche.)
+                    in_name = all(t in name for t in terms)
+                    at_start = any(name.startswith(t) for t in terms)
+                    rank = (0 if in_name else 1, 0 if at_start else 1)
+                    hits.append((rank, name, os.path.join(dp, f)))
+                    if len(hits) >= 1000:
+                        break
+                if len(hits) >= 1000:
+                    break
+            hits.sort(key=lambda h: (h[0], h[1]))
+            return [h[2] for h in hits]
 
         def done(res):
             if isinstance(res, Exception):
@@ -7129,7 +7140,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.files_results.clear()
             head = QtWidgets.QListWidgetItem(
                 self.L("🔎 %d natije mile", "🔎 %d results") % len(res)
-                + ("+" if len(res) >= 600 else ""))
+                + ("+" if len(res) >= 1000 else ""))
             head.setFlags(QtCore.Qt.NoItemFlags)
             _hf = head.font(); _hf.setBold(True); head.setFont(_hf)
             head.setForeground(QtGui.QColor("#0f766e"))
