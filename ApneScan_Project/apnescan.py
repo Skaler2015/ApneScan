@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "72"
+VERSION = "73"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -406,6 +406,27 @@ DEFAULT_OPTIONS = {
     "save_images_too": False,     # also save each page as an image
     "auto_name": False,           # OCR the document title as the page label
     "shortcuts": {},              # id -> custom key (overrides default)
+    # ---- v73: 40+ UI-customize settings (live-preview supported) ----
+    "accent": "teal",             # primary button colour (teal/blue/green/purple/orange/rose)
+    "font_scale": 100,            # app-wide font size percent (70-180)
+    "ui_animations": True,        # small animations/transitions
+    "ui_tooltips": True,          # hover help-tips
+    "start_maximized": False,     # app open hote hi poori screen
+    "toolbar_style": "icon_text", # icon_only / text_only / icon_text
+    "thumb_size": 150,            # page thumbnail width (px)
+    "ui_spacing": "normal",       # compact / normal / roomy (page grid gap)
+    "left_panel_w": 252,          # baayan scan-settings panel width
+    "files_panel_w": 250,         # daayan Meri Files panel width
+    "preview_panel_w": 310,       # preview panel width
+    "ui_filmstrip": True,         # preview panel me niche filmstrip
+    "ui_analytics": True,         # sidebar me analytics card
+    "ui_confirm_delete": True,    # delete se pehle pucho
+    "footer_folder": True,        # status-bar: folder
+    "footer_pages": True,         # status-bar: pages/selection
+    "footer_last": True,          # status-bar: last saved file
+    "footer_disk": True,          # status-bar: free disk
+    "footer_version": True,       # status-bar: version
+    "footer_scanner": True,       # status-bar: scanner/busy
 }
 
 
@@ -6365,6 +6386,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.ip_field = QtWidgets.QLineEdit(self._config.get("scanner_ip", "")); self.ip_field.hide()
         self.btn_check = QtWidgets.QPushButton(); self.btn_check.hide()
         self._pb_holder = None
+        # v73: saari UI-customize settings (accent, font, panel-widths, thumb,
+        # footer, spacing…) startup par ek baar laga do taaki restart ke baad
+        # bhi user ki pasand yaad rahe.
+        QtCore.QTimer.singleShot(0, self._apply_ui_live)
+        if self._opts.get("start_maximized"):
+            QtCore.QTimer.singleShot(50, self.showMaximized)
 
 
     def _apply_style(self):
@@ -8935,69 +8962,290 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._opts["ui_kiosk"] = on
         self._save_opts()
 
-    def customize_ui(self):
-        """UI ke design-elements — user apne hisaab se on/off kare (v24)."""
-        dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle(self.L("🎨 UI customize", "🎨 Customize UI"))
-        form = QtWidgets.QFormLayout(dlg)
-        cmb = QtWidgets.QComboBox()
-        cmb.addItems(["Light", "Dark", "Dark Pro"])
-        cmb.setCurrentIndex({"light": 0, "dark": 1, "darkpro": 2}.get(self._opts.get("theme"), 0))
-        form.addRow("Theme:", cmb)
-        checks = {}
-        default_on = {"ui_preview", "ui_jobs", "ui_kiosk", "ui_ribbon"}
-        for key, hi, en in (
-                ("ui_ribbon", "Ribbon toolbar (MS-Office jaisa — tabs me buttons)",
-                 "Ribbon toolbar (Office-style tabs)"),
-                ("ui_dashboard", "Start dashboard (khaali screen par bade buttons)",
-                 "Start dashboard (big buttons on empty screen)"),
-                ("ui_header", "Status-patti (scanner/profile/aaj ka kaam)",
-                 "Status header (scanner/profile/today)"),
-                ("ui_preview", "Preview panel (page ki badi jhalak + quick-edit)",
-                 "Preview panel (big page preview + quick edit)"),
-                ("ui_jobs", "Job-chips patti (1 click me profile+folder set)",
-                 "Job chips bar (1-click profile+folder)"),
-                ("ui_graph", "Sidebar me 7-din ka graph",
-                 "7-day graph in the sidebar")):
-            c = QtWidgets.QCheckBox(self.L(hi, en))
-            c.setChecked(bool(self._opts.get(key, key not in default_on)))
-            checks[key] = c
-            form.addRow(c)
-        bkiosk = QtWidgets.QPushButton(self.L("🖥 Kiosk mode ab chalu karo (bade buttons)",
-                                             "🖥 Enter Kiosk mode now (big buttons)"))
-        bkiosk.clicked.connect(lambda: (dlg.accept(), self.toggle_kiosk()))
-        form.addRow(bkiosk)
-        note = QtWidgets.QLabel(self.L(
-            "<span style='color:#64748b;font-size:11px;'>Ribbon toolbar aur Icon-rail "
-            "sidebars agle update me.</span>",
-            "<span style='color:#64748b;font-size:11px;'>Ribbon toolbar and icon-rail "
-            "sidebars coming in the next update.</span>"))
-        note.setTextFormat(QtCore.Qt.RichText)
-        form.addRow(note)
-        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
-        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
-        form.addRow(bb)
-        if dlg.exec_() != QtWidgets.QDialog.Accepted:
-            return
-        self._opts["theme"] = ["light", "dark", "darkpro"][cmb.currentIndex()]
-        for key, c in checks.items():
-            self._opts[key] = c.isChecked()
-        self._save_opts()
-        # turant lagao — restart ki zaroorat nahi
-        self._apply_style()
+    # Accent (primary button) rang — customize me chuno.
+    ACCENTS = {
+        "teal": "#0f766e", "blue": "#1d4ed8", "green": "#15803d",
+        "purple": "#7e22ce", "orange": "#c2410c", "rose": "#be123c",
+    }
+
+    def _apply_ui_live(self):
+        """SAARE UI-customize options ko chalti app par turant laga do.
+        Yahi ek jagah hai jahan har UI-setting apply hoti hai — isliye
+        live-preview (tick karte hi dikhe), Cancel (wapas pehle jaisa) aur
+        OK (save) sab isi ko call karte hai. Har hissa apne try/except me
+        hai taaki ek me error aaye to baaki UI theek lage."""
+        o = self._opts
+        # 1) Theme
         try:
-            self.ui_header.setVisible(bool(self._opts.get("ui_header")))
-            self.side_graph.setVisible(bool(self._opts.get("ui_graph")))
-            self.preview_panel.setVisible(bool(self._opts.get("ui_preview")))
-            self.jobs_bar.setVisible(bool(self._opts.get("ui_jobs")))
-            rib = bool(self._opts.get("ui_ribbon"))
-            self.ribbon.setVisible(rib)
-            self._classic_toolbar.setVisible(not rib)
-            self._update_preview_panel()
-            self._update_empty_state()
-            self._update_sidebar_stats()
+            self._apply_style()
         except Exception:
             pass
+        # 2) Accent — primary button ka rang (theme ke upar override)
+        try:
+            acc = self.ACCENTS.get(o.get("accent", "teal"), "#0f766e")
+            self.setStyleSheet(self.styleSheet() +
+                "QPushButton#primary{background:%s;border:1px solid %s;color:#fff;"
+                "font-weight:700;}QPushButton#primary:hover{background:%s;}"
+                % (acc, acc, acc))
+        except Exception:
+            pass
+        # 3) Font scale — poori app ka font (chhota/bada)
+        try:
+            app = QtWidgets.QApplication.instance()
+            if app is not None:
+                sc = max(70, min(180, int(o.get("font_scale", 100) or 100)))
+                f = app.font(); f.setPointSizeF(9.0 * sc / 100.0); app.setFont(f)
+        except Exception:
+            pass
+        # 4) Ribbon vs classic toolbar
+        try:
+            rib = bool(o.get("ui_ribbon", False))
+            self.ribbon.setVisible(rib)
+            self._classic_toolbar.setVisible(not rib)
+        except Exception:
+            pass
+        # 5) Toolbar button style (sirf icon / sirf text / dono) — sirf ASLI
+        #    toolbar/ribbon buttons par (baaki ⬅ 📄 jaise glyph-buttons chhedo mat)
+        try:
+            st = o.get("toolbar_style", "icon_text")
+            mode = {"icon_only": QtCore.Qt.ToolButtonIconOnly,
+                    "text_only": QtCore.Qt.ToolButtonTextOnly,
+                    "icon_text": QtCore.Qt.ToolButtonTextUnderIcon}.get(
+                        st, QtCore.Qt.ToolButtonTextUnderIcon)
+            _tbtns = []
+            for _cont in (getattr(self, "_classic_toolbar", None), getattr(self, "ribbon", None)):
+                if _cont is not None:
+                    _tbtns += _cont.findChildren(QtWidgets.QToolButton)
+            for tb in _tbtns:
+                tb.setToolButtonStyle(mode)
+        except Exception:
+            pass
+        # 6) Panel / header / dashboard / graph / analytics dikhao-chhupao
+        for attr, key in (("ui_header", "ui_header"), ("side_graph", "ui_graph"),
+                          ("preview_panel", "ui_preview"), ("jobs_bar", "ui_jobs"),
+                          ("an_box", "ui_analytics"), ("left_panel", "show_left_panel"),
+                          ("files_panel", "show_files_panel")):
+            try:
+                getattr(self, attr).setVisible(bool(o.get(key, True)))
+            except Exception:
+                pass
+        # 7) Panel widths
+        for attr, key, dflt in (("left_panel", "left_panel_w", 252),
+                                ("files_panel", "files_panel_w", 250),
+                                ("preview_panel", "preview_panel_w", 310)):
+            try:
+                getattr(self, attr).setFixedWidth(
+                    max(160, min(520, int(o.get(key, dflt) or dflt))))
+            except Exception:
+                pass
+        # 8) Thumbnail size + page-grid spacing
+        try:
+            self._apply_thumb_zoom(int(o.get("thumb_size", self.THUMB_W) or self.THUMB_W))
+        except Exception:
+            pass
+        try:
+            sp = {"compact": 4, "normal": 10, "roomy": 18}.get(o.get("ui_spacing", "normal"), 10)
+            self.list.setSpacing(sp)
+        except Exception:
+            pass
+        # 9) Preview filmstrip
+        try:
+            self.pv_strip.setVisible(bool(o.get("ui_filmstrip", True)))
+        except Exception:
+            pass
+        # 10) Status-bar footer ke hisse
+        for attr, key in (("foot_folder", "footer_folder"), ("foot_pages", "footer_pages"),
+                          ("foot_last", "footer_last"), ("foot_disk", "footer_disk"),
+                          ("foot_ver", "footer_version"), ("lbl_busy", "footer_scanner")):
+            try:
+                getattr(self, attr).setVisible(bool(o.get(key, True)))
+            except Exception:
+                pass
+        # 11) dependent views refresh
+        for m in ("_update_preview_panel", "_update_empty_state", "_update_sidebar_stats"):
+            try:
+                getattr(self, m)()
+            except Exception:
+                pass
+
+    def customize_ui(self):
+        """UI customize — 40+ settings tabs me, LIVE-PREVIEW ke saath (v73).
+        Koi bhi option badalte hi bina OK kiye software par turant dikhta hai;
+        OK = save, Cancel = sab wapas pehle jaisa."""
+        L = self.L
+        # tick karne se pehle ki poori state — Cancel par yahi wapas aayegi
+        snapshot = dict(self._opts)
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(L("🎨 UI customize (live)", "🎨 Customize UI (live)"))
+        dlg.setMinimumWidth(440)
+        outer = QtWidgets.QVBoxLayout(dlg)
+        hint = QtWidgets.QLabel(L(
+            "<span style='color:#0f766e;font-size:12px;'>💡 Koi bhi cheez tick/badalte "
+            "hi software par TURANT dikh jayegi. Pasand aaye to <b>OK</b>, warna "
+            "<b>Cancel</b> — sab wapas pehle jaisa.</span>",
+            "<span style='color:#0f766e;font-size:12px;'>💡 Every change shows on the app "
+            "<b>instantly</b> (no OK needed). Keep it with <b>OK</b>, or "
+            "<b>Cancel</b> to revert everything.</span>"))
+        hint.setTextFormat(QtCore.Qt.RichText); hint.setWordWrap(True)
+        outer.addWidget(hint)
+        tabs = QtWidgets.QTabWidget()
+        outer.addWidget(tabs, 1)
+
+        def _set(key, val):
+            self._opts[key] = val
+            self._apply_ui_live()
+
+        def _tab(title):
+            w = QtWidgets.QWidget(); f = QtWidgets.QFormLayout(w)
+            f.setLabelAlignment(QtCore.Qt.AlignLeft)
+            tabs.addTab(w, title)
+            return f
+
+        def _check(f, key, hi, en, default=True):
+            c = QtWidgets.QCheckBox(L(hi, en))
+            c.setChecked(bool(self._opts.get(key, default)))
+            c.toggled.connect(lambda v, k=key: _set(k, bool(v)))
+            f.addRow(c)
+            return c
+
+        def _combo(f, label, key, items, default):
+            # items: list of (value, shown-text)
+            cmb = QtWidgets.QComboBox()
+            for _v, _t in items:
+                cmb.addItem(_t, _v)
+            cur = self._opts.get(key, default)
+            idx = max(0, [v for v, _ in items].index(cur) if cur in [v for v, _ in items] else 0)
+            cmb.setCurrentIndex(idx)
+            cmb.currentIndexChanged.connect(
+                lambda i, k=key, c=cmb: _set(k, c.itemData(i)))
+            f.addRow(label, cmb)
+            return cmb
+
+        def _slider(f, label, key, lo, hi, default, suffix=""):
+            row = QtWidgets.QWidget(); h = QtWidgets.QHBoxLayout(row)
+            h.setContentsMargins(0, 0, 0, 0)
+            s = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+            s.setMinimum(lo); s.setMaximum(hi)
+            s.setValue(int(self._opts.get(key, default) or default))
+            val = QtWidgets.QLabel(str(s.value()) + suffix)
+            val.setMinimumWidth(46)
+            s.valueChanged.connect(lambda v, k=key, lb=val: (lb.setText(str(v) + suffix), _set(k, v)))
+            h.addWidget(s, 1); h.addWidget(val)
+            f.addRow(label, row)
+            return s
+
+        # ---------- TAB: Look ----------
+        f = _tab(L("🎨 Roop", "🎨 Look"))
+        _combo(f, L("Theme:", "Theme:"), "theme",
+               [("light", "Light"), ("dark", "Dark"), ("darkpro", "Dark Pro")], "light")
+        _combo(f, L("Rang (accent):", "Accent colour:"), "accent",
+               [("teal", "🟢 Teal"), ("blue", "🔵 Blue"), ("green", "🟩 Green"),
+                ("purple", "🟣 Purple"), ("orange", "🟧 Orange"), ("rose", "🌹 Rose")], "teal")
+        _slider(f, L("Font size:", "Font size:"), "font_scale", 70, 180, 100, "%")
+        _check(f, "touch_mode", "Touch / buzurg mode (bada sab kuch)",
+               "Touch / large mode (bigger everything)", False)
+        _check(f, "ui_animations", "Halke animations", "Smooth animations", True)
+        _check(f, "ui_tooltips", "Hover par madad-tips", "Hover help-tips", True)
+        _check(f, "start_maximized", "App khulte hi poori screen",
+               "Open maximised (full screen)", False)
+
+        # ---------- TAB: Toolbar / Header ----------
+        f = _tab(L("🧰 Toolbar", "🧰 Toolbar"))
+        _check(f, "ui_ribbon", "Ribbon toolbar (Office jaisa — tabs me)",
+               "Ribbon toolbar (Office-style tabs)", False)
+        _combo(f, L("Button style:", "Button style:"), "toolbar_style",
+               [("icon_text", L("Icon + naam", "Icon + text")),
+                ("icon_only", L("Sirf icon", "Icon only")),
+                ("text_only", L("Sirf naam", "Text only"))], "icon_text")
+        _check(f, "ui_header", "Status-patti (scanner/profile/aaj)",
+               "Status header (scanner/profile/today)", True)
+        _check(f, "ui_dashboard", "Start dashboard (khaali screen par bade buttons)",
+               "Start dashboard (big buttons on empty screen)", True)
+        _check(f, "ui_jobs", "Job-chips patti (1 click me profile+folder)",
+               "Job chips bar (1-click profile+folder)", False)
+
+        # ---------- TAB: Pages ----------
+        f = _tab(L("📄 Pages", "📄 Pages"))
+        _slider(f, L("Thumbnail size:", "Thumbnail size:"), "thumb_size", 90, 320, 150, "px")
+        _combo(f, L("Beech ki jagah:", "Grid spacing:"), "ui_spacing",
+               [("compact", L("Compact (paas-paas)", "Compact")),
+                ("normal", L("Normal", "Normal")),
+                ("roomy", L("Khula (roomy)", "Roomy"))], "normal")
+        _check(f, "show_page_numbers", "Har page ke niche naam/number dikhao",
+               "Show name/number under each page", True)
+
+        # ---------- TAB: Panels ----------
+        f = _tab(L("🗂 Panels", "🗂 Panels"))
+        _check(f, "show_left_panel", "Baayan scan-settings panel",
+               "Left scan-settings panel", True)
+        _slider(f, L("  ↳ chaudai:", "  ↳ width:"), "left_panel_w", 180, 420, 252, "px")
+        _check(f, "show_files_panel", "Daayan 'Meri Files' panel",
+               "Right 'My Files' panel", True)
+        _slider(f, L("  ↳ chaudai:", "  ↳ width:"), "files_panel_w", 180, 420, 250, "px")
+        _check(f, "ui_preview", "Preview panel (badi jhalak + quick-edit)",
+               "Preview panel (big preview + quick edit)", False)
+        _slider(f, L("  ↳ chaudai:", "  ↳ width:"), "preview_panel_w", 220, 480, 310, "px")
+        _check(f, "ui_filmstrip", "Preview me niche filmstrip",
+               "Filmstrip in preview panel", True)
+        _check(f, "ui_graph", "Sidebar me 7-din ka graph",
+               "7-day graph in the sidebar", True)
+        _check(f, "ui_analytics", "Sidebar me analytics card",
+               "Analytics card in the sidebar", True)
+
+        # ---------- TAB: Status bar ----------
+        f = _tab(L("📊 Status", "📊 Status bar"))
+        _check(f, "footer_folder", "Folder", "Folder", True)
+        _check(f, "footer_pages", "Pages / selection", "Pages / selection", True)
+        _check(f, "footer_last", "Aakhri save ki file", "Last saved file", True)
+        _check(f, "footer_disk", "Khaali disk", "Free disk", True)
+        _check(f, "footer_version", "Version", "Version", True)
+        _check(f, "footer_scanner", "Scanner / busy", "Scanner / busy", True)
+
+        # ---------- TAB: Behaviour ----------
+        f = _tab(L("⚙ Vyavhaar", "⚙ Behaviour"))
+        _combo(f, L("Save ke baad:", "After save:"), "after_save",
+               [("nothing", L("Kuch nahi", "Do nothing")),
+                ("folder", L("Folder kholo", "Open folder")),
+                ("open", L("File kholo", "Open file"))], "nothing")
+        _check(f, "ui_confirm_delete", "Delete se pehle pucho",
+               "Ask before delete", True)
+        _combo(f, L("Bhasha / Language:", "Language:"), "language",
+               [("en", "English"), ("hi", "हिन्दी (Hindi)")], "en")
+        bkiosk = QtWidgets.QPushButton(L("🖥 Kiosk mode ab chalu karo (bade buttons)",
+                                         "🖥 Enter Kiosk mode now (big buttons)"))
+        bkiosk.clicked.connect(lambda: (dlg.accept(), self.toggle_kiosk()))
+        f.addRow(bkiosk)
+        note = QtWidgets.QLabel(L(
+            "<span style='color:#64748b;font-size:11px;'>Bhasha badalne par kuch text "
+            "restart ke baad poora badlega.</span>",
+            "<span style='color:#64748b;font-size:11px;'>Some text fully switches "
+            "language after a restart.</span>"))
+        note.setTextFormat(QtCore.Qt.RichText); note.setWordWrap(True)
+        f.addRow(note)
+
+        # ---------- OK / Cancel ----------
+        bb = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.button(QtWidgets.QDialogButtonBox.Ok).setText(L("✔ OK (save karo)", "✔ OK (save)"))
+        bb.button(QtWidgets.QDialogButtonBox.Cancel).setText(
+            L("✖ Cancel (wapas pehle jaisa)", "✖ Cancel (revert)"))
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        outer.addWidget(bb)
+
+        # live-preview pehle se chalu — jaisa abhi opts hai waisa laga do
+        self._apply_ui_live()
+        self._lang = self._opts.get("language", "en")
+
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            # OK — jo dikh raha hai wahi save
+            self._lang = self._opts.get("language", "en")
+            self._save_opts()
+        else:
+            # Cancel — sab wapas snapshot par
+            self._opts.clear(); self._opts.update(snapshot)
+            self._lang = self._opts.get("language", "en")
+            self._apply_ui_live()
 
     def toggle_left_panel(self):
         vis = not self.left_panel.isVisible()
