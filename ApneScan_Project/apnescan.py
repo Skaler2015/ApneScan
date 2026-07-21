@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "41"
+VERSION = "42"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -3335,6 +3335,56 @@ class FilesTree(QtWidgets.QTreeView):
             e.ignore()
 
 
+class PagesList(QtWidgets.QListWidget):
+    """Pages ki central list. Do kaam karti hai:
+      1. Andar-hi-andar pages ko kheench kar aage-peeche karo (reorder).
+      2. Bahar se (Explorer/desktop) image/PDF ko SEEDHA is list par
+         drag-drop karke import karo.
+    Bahar ki files ka drop 'on_files' ko jaata hai; baaki sab (reorder) Qt
+    ka apna InternalMove sambhalta hai."""
+
+    IMPORT_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".pdf")
+
+    def __init__(self, on_files):
+        super().__init__()
+        self._on_files = on_files
+        self.setAcceptDrops(True)
+
+    def _dropped_files(self, e):
+        md = e.mimeData()
+        if not md.hasUrls():
+            return []
+        out = []
+        for u in md.urls():
+            p = u.toLocalFile()
+            if p and p.lower().endswith(self.IMPORT_EXTS):
+                out.append(p)
+        return out
+
+    def dragEnterEvent(self, e):
+        if self._dropped_files(e):
+            e.acceptProposedAction()
+        else:
+            super().dragEnterEvent(e)
+
+    def dragMoveEvent(self, e):
+        if self._dropped_files(e):
+            e.acceptProposedAction()
+        else:
+            super().dragMoveEvent(e)
+
+    def dropEvent(self, e):
+        files = self._dropped_files(e)
+        if files:
+            e.acceptProposedAction()
+            try:
+                self._on_files(files)
+            except Exception:
+                pass
+        else:
+            super().dropEvent(e)      # andar-hi-andar reorder
+
+
 class ScannerWindow(QtWidgets.QMainWindow):
     THUMB_W = 150
     THUMB_H = 200
@@ -5212,7 +5262,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
         vline = QtWidgets.QFrame(); vline.setObjectName("hr"); vline.setFrameShape(QtWidgets.QFrame.VLine); body.addWidget(vline)
 
-        self.list = QtWidgets.QListWidget()
+        self.list = PagesList(lambda files: self._start_import(files, "normal"))
         self.list.setViewMode(QtWidgets.QListView.IconMode)
         self.list.setIconSize(QtCore.QSize(self.THUMB_W, self.THUMB_H))
         self.list.setResizeMode(QtWidgets.QListView.Adjust)
