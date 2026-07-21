@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "55"
+VERSION = "56"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -987,9 +987,10 @@ class StatsWorker(QtCore.QThread):
     got_full = QtCore.pyqtSignal(dict)       # poora server payload
     failed = QtCore.pyqtSignal()
 
-    def __init__(self, url, client, action="ping", n=0):
+    def __init__(self, url, client, action="ping", n=0, imp=0, prt=0):
         super().__init__()
         self.url = url; self.client = client; self.action = action; self.n = n
+        self.imp = imp; self.prt = prt          # import / print ginti
         try:
             self.country = (QtCore.QLocale().name().split("_") + [""])[1][:2]
         except Exception:
@@ -1005,6 +1006,10 @@ class StatsWorker(QtCore.QThread):
                  "v": VERSION, "c": self.country}
             if self.action == "scan":
                 q["n"] = str(self.n)
+            if self.imp:
+                q["imp"] = str(self.imp)
+            if self.prt:
+                q["prt"] = str(self.prt)
             full = self.url + ("&" if "?" in self.url else "?") + P.urlencode(q)
             req = U.Request(full, headers={"User-Agent": "ApneScan/%s" % VERSION})
             data = None
@@ -4049,7 +4054,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # network na ho to bhi personal stats dikhti rahein
         self._update_sidebar_stats()
 
-    def _start_stat_worker(self, action, n=0, want_display=True):
+    def _start_stat_worker(self, action, n=0, imp=0, prt=0, want_display=True):
         """StatsWorker ko is tarah chalao ki wo GC (garbage-collect) na ho jaye
         jab tak khatam na ho — warna signal kabhi nahi pahunchta tha aur sidebar
         '...' par atka reh jata tha. Har worker ko list me rakhte hain aur
@@ -4058,7 +4063,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if not url:
             return None
         self._stat_workers = getattr(self, "_stat_workers", [])
-        w = StatsWorker(url, self._get_client_id(), action=action, n=n)
+        w = StatsWorker(url, self._get_client_id(), action=action, n=n, imp=imp, prt=prt)
         self._stat_workers.append(w)
 
         def _cleanup(wk=w):
@@ -4092,6 +4097,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # scan-count server par bhejo (LIKHAI) — GC-safe worker se
         self._start_stat_worker("scan", n=n, want_display=True)
         # LIKHAI slow ho sakti hai — thodi der baad display ko 'stats' se taaza karo
+        QtCore.QTimer.singleShot(6000, lambda: self._refresh_stats("stats"))
+
+    def _report_event(self, imports=0, prints=0):
+        """Worldwide analytics ke liye import/print ki ginti server par bhejo
+        (best-effort). Display baad me 'stats' se taaza ho jata hai."""
+        if not self._stats_url() or (imports <= 0 and prints <= 0):
+            return
+        self._start_stat_worker("event", imp=imports, prt=prints, want_display=True)
         QtCore.QTimer.singleShot(6000, lambda: self._refresh_stats("stats"))
 
     def set_stats_url(self):
@@ -6296,7 +6309,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _on_import_done(self, count):
         if count:
             self.status.showMessage("%d page import ho gaye." % count, 4000)
-            self._pstats_bump(imports=count)     # analytics: import ginti
+            self._pstats_bump(imports=count)     # analytics: import ginti (personal)
+            self._report_event(imports=count)    # worldwide bhi
             self._update_sidebar_stats()
             if tesseract_available():
                 self.auto_name_pages()
@@ -6848,6 +6862,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
             ("world_today", L("📅 Aaj (world)", "📅 Today (world)"), w.get("today")),
             ("world_online", L("🟢 Abhi online", "🟢 Online now"), w.get("online")),
             ("world_users", L("👥 Kul users (world)", "👥 Total users (world)"), w.get("users")),
+            ("world_imports", L("📥 Import (world)", "📥 Imports (world)"), w.get("imports")),
+            ("world_prints", L("🖨 Print (world)", "🖨 Prints (world)"), w.get("prints")),
             ("my_today", L("📄 Mere aaj ke pages", "📄 My pages today"), day.get("pages", 0)),
             ("my_today_pdfs", L("🗂 Meri aaj ki PDFs", "🗂 My PDFs today"), day.get("pdfs", 0)),
             ("my_week", L("🗓 Is hafte (pages)", "🗓 This week (pages)"), self._pstats_sum(7, "pages")),
@@ -7017,12 +7033,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
         info2 = QtWidgets.QLabel(
             "🌍 Total scans: <b>%s</b><br>📅 Aaj: <b>%s</b> &nbsp;|&nbsp; "
             "🟢 Abhi online: <b>%s</b> &nbsp;|&nbsp; 📈 Aaj ka peak: <b>%s</b><br>"
-            "👥 Kul users (ab tak): <b>%s</b><br>⏱ Is ghante ke scans: <b>%s</b><br><br>"
+            "👥 Kul users (ab tak): <b>%s</b><br>⏱ Is ghante ke scans: <b>%s</b><br>"
+            "📥 Import: <b>%s</b> &nbsp;|&nbsp; 🖨 Print: <b>%s</b><br><br>"
             "<b>Versions:</b> %s<br><b>Desh:</b> %s<br><br>"
             "<span style='color:#64748b;'>Privacy: server par sirf GINTI jaati hai — "
             "kabhi koi document, naam ya file nahi.</span>"
             % (_fmt(w.get("total")), _fmt(w.get("today")), _fmt(w.get("online")),
                _fmt(w.get("peak")), _fmt(w.get("users")), _fmt(w.get("hour")),
+               _fmt(w.get("imports")), _fmt(w.get("prints")),
                vtxt, ctxt))
         info2.setTextFormat(QtCore.Qt.RichText)
         info2.setWordWrap(True)
@@ -9920,7 +9938,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     self._draw_fit(painter, p, target)
         finally:
             painter.end()
-        self._pstats_bump(prints=1)          # analytics: print ginti
+        self._pstats_bump(prints=1)          # analytics: print ginti (personal)
+        self._report_event(prints=1)         # worldwide bhi
         self._update_sidebar_stats()
         self.status.showMessage("Print bhej diya.", 4000)
 

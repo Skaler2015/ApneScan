@@ -225,6 +225,23 @@ function _bumpPeak(online) {
   return Math.max(cur, online);
 }
 
+// Generic ginti-counter (import/print jaise) — totals sheet me key-value row.
+function _getCounter(key) {
+  var sh = _sheet("totals", ["key", "value"]);
+  var data = sh.getDataRange().getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === key) return { row: i + 1, val: Number(data[i][1]) || 0 };
+  }
+  sh.appendRow([key, 0]);
+  return { row: sh.getLastRow(), val: 0 };
+}
+
+function _bumpCounter(key, n) {
+  var c = _getCounter(key);
+  _sheet("totals", ["key", "value"]).getRange(c.row, 2).setValue(c.val + n);
+  return c.val + n;
+}
+
 function _stats() {
   var online = _onlineCount();
   return {
@@ -236,6 +253,8 @@ function _stats() {
     week: _week(),
     peak: _bumpPeak(online),
     hour: _hourCount(),
+    imports: _getCounter("imports").val,
+    prints: _getCounter("prints").val,
     versions: _breakdown(4),
     countries: _breakdown(5)
   };
@@ -245,7 +264,8 @@ function _stats() {
 // GET  ?action=stats            -> current numbers
 // GET  ?action=ping&client=ID   -> mark online + return numbers
 // GET  ?action=scan&client=ID&n=1 -> add scans + return numbers
-// (POST bhi same params ke saath chalega)
+// GET  ?action=event&client=ID&imp=1  -> +1 import  (prt=1 -> +1 print)
+// (POST bhi same params ke saath chalega; imp/prt kisi bhi action ke saath)
 function doGet(e) {
   return _handle(e);
 }
@@ -277,6 +297,11 @@ function _handle(e) {
         _touchOnline(client);
         _touchClient(client, p.v || "", p.c || "");
       }
+      // import/print ki ginti — kisi bhi action ke saath aa sakti hai
+      var imp = Math.max(0, Math.min(500, parseInt(p.imp || "0", 10) || 0));
+      var prt = Math.max(0, Math.min(500, parseInt(p.prt || "0", 10) || 0));
+      if (imp) _bumpCounter("imports", imp);
+      if (prt) _bumpCounter("prints", prt);
       out = _stats();
     } finally {
       lock.releaseLock();
