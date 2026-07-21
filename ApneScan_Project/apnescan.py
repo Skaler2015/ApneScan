@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "75"
+VERSION = "76"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -382,6 +382,8 @@ DEFAULT_OPTIONS = {
     "show_files_panel": True,    # daayan "Meri Files" panel
     "show_left_panel": True,     # baayan scan-settings panel
     "fav_folders": [],           # panel ke ⭐ favourite folders
+    "pinned_files": [],          # panel ke 📌 pin ki hui files (upar dikhti hain)
+    "files_grid": False,         # panel results grid (badi thumbnail) view
     "files_panel_root": "",      # panel me khola gaya doosra folder (khaali = save-folder)
     "files_sort": "name_asc",    # panel ki list kis tarah sort ho (user pasand)
     "sidebar_stats": [],         # khaali = default set dikhega
@@ -6146,11 +6148,43 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.fav_bar.addWidget(self.fav_star)
         self.fav_bar.addWidget(self.btn_panel_sort)
         fp.addLayout(self.fav_bar)
+        # ---- Filter · Recent · Grid (quick controls) ----
+        _qrow = QtWidgets.QHBoxLayout(); _qrow.setSpacing(4)
+        self.files_filter = QtWidgets.QComboBox()
+        for _fv, _ft in (("all", self.L("Sab", "All")),
+                         ("pdf", "📕 PDF"),
+                         ("img", self.L("🖼 Photo", "🖼 Images")),
+                         ("today", self.L("📅 Aaj", "📅 Today")),
+                         ("week", self.L("📆 Hafta", "📆 Week")),
+                         ("pinned", self.L("📌 Pinned", "📌 Pinned"))):
+            self.files_filter.addItem(_ft, _fv)
+        self.files_filter.setToolTip(self.L(
+            "Dikhaao: sab / sirf PDF / sirf photo / aaj / is hafte / pin ki hui",
+            "Show: all / PDF only / images / today / this week / pinned"))
+        self.files_filter.currentIndexChanged.connect(lambda _i: self._apply_files_filter())
+        _qrow.addWidget(self.files_filter, 1)
+        self.btn_recent = QtWidgets.QToolButton(); self.btn_recent.setText("🕘")
+        self.btn_recent.setToolTip(self.L("Haal me bani/badli files (naye sabse upar)",
+                                          "Recent files (newest first)"))
+        self.btn_recent.clicked.connect(self._show_recent_files)
+        _qrow.addWidget(self.btn_recent)
+        self.btn_grid = QtWidgets.QToolButton(); self.btn_grid.setText("⧉")
+        self.btn_grid.setCheckable(True)
+        self.btn_grid.setChecked(bool(self._opts.get("files_grid")))
+        self.btn_grid.setToolTip(self.L("Grid view — badi thumbnail (PDF ka pehla page)",
+                                        "Grid view — big thumbnails (PDF first page)"))
+        self.btn_grid.toggled.connect(self._toggle_files_grid)
+        _qrow.addWidget(self.btn_grid)
+        fp.addLayout(_qrow)
         # Abhi kis folder me ho — chhoti si patti (breadcrumb)
         self.lbl_panel_cwd = QtWidgets.QLabel("")
         self.lbl_panel_cwd.setStyleSheet("color:#0f766e;font-size:11px;font-weight:600;")
         self.lbl_panel_cwd.setWordWrap(True)
         fp.addWidget(self.lbl_panel_cwd)
+        # Is folder me kitni files + kul size
+        self.lbl_folder_info = QtWidgets.QLabel("")
+        self.lbl_folder_info.setStyleSheet("color:#64748b;font-size:11px;")
+        fp.addWidget(self.lbl_folder_info)
         _root = self._files_root()
         self.files_model = LibraryModel(self)
         self.files_model.setRootPath(_root)
@@ -7778,6 +7812,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self._ensure_files_index_async(folder)
         except Exception:
             pass
+        try:
+            self._update_folder_info()
+        except Exception:
+            pass
 
     def _panel_current_dir(self):
         try:
@@ -8081,6 +8119,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
                            lambda: self._bulk_move(sel_files, copy=False))
             menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
                            lambda: self._bulk_move(sel_files, copy=True))
+            menu.addAction(self.L("✏ %d files ka bulk rename…" % len(sel_files),
+                                  "✏ Bulk rename %d files…" % len(sel_files)),
+                           lambda: self._bulk_rename(sel_files))
             menu.addSeparator()
             menu.addAction(self.L("🗑 %d files delete (Recycle Bin)" % len(sel_files),
                                   "🗑 Delete %d files (Recycle Bin)" % len(sel_files)),
@@ -8099,18 +8140,31 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 menu.addAction("➕ New folder here…", lambda: self._new_folder_in(path))
                 menu.addAction("🧩 All PDFs in this folder → one PDF…",
                                lambda: self._merge_folder_pdfs(path))
+                menu.addAction(self.L("🗜 Is folder ki ZIP banao…",
+                                      "🗜 Make a ZIP of this folder…"),
+                               lambda: self._zip_folder(path))
                 menu.addAction("📂 Open in Explorer", lambda: self._open_path(path))
                 favs = self._opts.get("fav_folders") or []
                 menu.addAction("⭐ Remove favourite" if path in favs else "⭐ Add favourite",
                                lambda: self._toggle_fav(path))
             else:
                 menu.addAction("📖 Open", lambda: self._open_path(path))
+                pinned = self._opts.get("pinned_files") or []
+                menu.addAction(self.L("📌 Pin hatao", "📌 Unpin") if path in pinned
+                               else self.L("📌 Pin karo (upar rakho)", "📌 Pin (keep on top)"),
+                               lambda: self._toggle_pin(path))
                 if path.lower().endswith(".pdf"):
                     menu.addAction("🟢 Send via WhatsApp", lambda: self.share_whatsapp(path))
                     menu.addAction("✉ Send via Email", lambda: self.share_email(path))
                     menu.addAction("🗜 Compress…",
                                    lambda: self.compress_pdf_tool(path))
                     menu.addAction("🏷 Add tag…", lambda: self.tag_pdf(path))
+                menu.addAction(self.L("🖨 Print", "🖨 Print"), lambda: self._print_library_file(path))
+                menu.addSeparator()
+                menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
+                               lambda: self._bulk_move([path], copy=True))
+                menu.addAction(self.L("📁 Dusre folder me le jao…", "📁 Move to another folder…"),
+                               lambda: self._bulk_move([path], copy=False))
                 menu.addAction("✏ Rename…", lambda: self._rename_library_file(path))
                 menu.addAction("🗑 Delete…", lambda: self._delete_library_file(path))
         else:
@@ -8118,6 +8172,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
             menu.addAction(self.L("🏠 Wapas save-folder", "🏠 Back to save folder"), self.reset_panel_folder)
             menu.addAction("➕ New folder", self.new_library_folder)
         menu.addSeparator()
+        menu.addAction(self.L("🔁 Nakli (duplicate) files dhoondo…",
+                              "🔁 Find duplicate files…"), self._find_duplicates)
         menu.addAction(self.L("🗑 Recycle Bin…", "🗑 Recycle Bin…"), self.show_recycle_bin)
         menu.exec_(self.files_tree.viewport().mapToGlobal(pos))
 
@@ -8156,6 +8212,155 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.status.showMessage(msg, 3000)
         except Exception:
             pass
+
+    def _toggle_pin(self, path):
+        """File ko 📌 pin/unpin — pinned files '📌 Pinned' filter me upar dikhti hain."""
+        pins = self._opts.setdefault("pinned_files", [])
+        if path in pins:
+            pins.remove(path); msg = self.L("📌 Pin hataya", "📌 Unpinned")
+        else:
+            pins.append(path)
+            while len(pins) > 50:
+                pins.pop(0)
+            msg = self.L("📌 Pin kar diya (📌 Pinned filter me dekho)",
+                         "📌 Pinned (see the 📌 Pinned filter)")
+        self._save_opts()
+        self.status.showMessage(msg, 3000)
+        try:
+            if hasattr(self, "files_filter") and self.files_filter.currentData() == "pinned":
+                self._apply_files_filter()
+        except Exception:
+            pass
+
+    def _print_library_file(self, path):
+        """Saved file ko seedha print par bhejo (default app se)."""
+        try:
+            os.startfile(path, "print")
+            self.status.showMessage(self.L("🖨 Print par bhej diya", "🖨 Sent to printer"), 4000)
+        except Exception:
+            try:
+                self._open_path(path)
+            except Exception as e:
+                self._warn(str(e))
+
+    def _zip_folder(self, folder):
+        """Poore folder ki ek ZIP banao (backup / bhejne ke liye) — background me."""
+        if not folder or not os.path.isdir(folder):
+            return
+        default = os.path.join(os.path.dirname(folder),
+                               (os.path.basename(folder) or "files") + ".zip")
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("ZIP save karein", "Save ZIP"), default, "ZIP (*.zip)")
+        if not out:
+            return
+        if not out.lower().endswith(".zip"):
+            out += ".zip"
+
+        def job():
+            import zipfile
+            base = os.path.dirname(folder)
+            with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+                for dp, _dns, fn in os.walk(folder):
+                    for f in fn:
+                        fp = os.path.join(dp, f)
+                        if os.path.abspath(fp) == os.path.abspath(out):
+                            continue
+                        z.write(fp, os.path.relpath(fp, base))
+            return out
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn(self.L("ZIP nahi bani:\n", "ZIP failed:\n") + str(res)); return
+            self.status.showMessage(self.L("🗜 ZIP ban gayi: ", "🗜 ZIP created: ")
+                                    + os.path.basename(res), 8000)
+            try:
+                self._open_path(os.path.dirname(res))
+            except Exception:
+                pass
+        self._run_bg(job, done, self.L("ZIP bana rahe…", "Zipping…"))
+
+    def _bulk_rename(self, files):
+        """Kai files ko ek naam + number (naam_001, naam_002…) me rename karo."""
+        if not files:
+            return
+        base, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Bulk rename", "Bulk rename"),
+            self.L("Sabhi ke liye ek naam (aage number apne aap lagega):",
+                   "One base name (a number is appended automatically):"), text="doc")
+        if not ok or not base.strip():
+            return
+        base = sanitize(underscore_name(base.strip())) or "doc"
+        n = 0
+        for i, p in enumerate(sorted(files, key=lambda x: os.path.basename(x).lower()), 1):
+            try:
+                ext = os.path.splitext(p)[1]
+                new = os.path.join(os.path.dirname(p), "%s_%03d%s" % (base, i, ext))
+                if os.path.abspath(new) == os.path.abspath(p):
+                    n += 1; continue
+                if os.path.exists(new):
+                    continue
+                os.rename(p, new)
+                n += 1
+            except Exception:
+                pass
+        self._invalidate_files_index()
+        self.status.showMessage(self.L("✏ %d files rename ho gayi" % n,
+                                       "✏ Renamed %d files" % n), 5000)
+
+    def _find_duplicates(self):
+        """Ek jaisi (nakli) files dhoondo — pehle size, phir content (md5) se."""
+        scope = self._panel_current_dir()
+        if not (scope and os.path.isdir(scope)):
+            scope = self._files_root()
+
+        def job():
+            import hashlib
+            by_size = {}
+            for dp, _dns, fn in os.walk(scope):
+                for f in fn:
+                    if not f.lower().endswith(self._FILE_EXTS):
+                        continue
+                    fp = os.path.join(dp, f)
+                    try:
+                        by_size.setdefault(os.path.getsize(fp), []).append(fp)
+                    except Exception:
+                        pass
+            dups = []
+            for _sz, group in by_size.items():
+                if len(group) < 2:
+                    continue
+                seen = {}
+                for fp in group:
+                    try:
+                        h = hashlib.md5()
+                        with open(fp, "rb") as fh:
+                            for chunk in iter(lambda: fh.read(65536), b""):
+                                h.update(chunk)
+                        seen.setdefault(h.hexdigest(), []).append(fp)
+                    except Exception:
+                        pass
+                for _k, same in seen.items():
+                    if len(same) >= 2:
+                        dups.extend(same)
+            return [("file", p) for p in dups]
+
+        def done(res):
+            if isinstance(res, Exception):
+                return
+            if not res:
+                self.status.showMessage(self.L("Koi nakli file nahi mili.",
+                                               "No duplicate files found."), 4000)
+                return
+            try:
+                self.files_filter.blockSignals(True)
+                self.files_filter.setCurrentIndex(0)
+                self.files_filter.blockSignals(False)
+            except Exception:
+                pass
+            self._render_files_results(res)
+            self.status.showMessage(self.L("🔁 %d nakli files mili (ek jaisi)" % len(res),
+                                           "🔁 %d duplicate files found" % len(res)), 6000)
+        self._run_bg(job, done, self.L("Nakli files dhoondh rahe…", "Finding duplicates…"))
 
     def _rebuild_fav_bar(self):
         """Favourites ko dropdown me bharo (galat/hata diye gaye folder chhod do)."""
@@ -8460,37 +8665,52 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._run_bg(job, done, self.L("Andar ka text dhoondh rahe…",
                                        "Searching inside text…"))
 
-    def _render_files_results(self, res, q):
-        """Search ke natije (list) ko panel me folder-wise dikhao."""
-        if self.files_search.text().strip().lower() != q:
+    def _render_files_results(self, res, q=None):
+        """Search/filter ke natije (list) ko panel me dikhao. q diya ho to sirf
+        tabhi render karo jab search-box me abhi bhi wahi likha ho."""
+        if q is not None and self.files_search.text().strip().lower() != q:
             return                          # tab tak nayi search shuru ho gayi
-        if True:
-            self.files_results.clear()
-            # FOLDER ke hisaab se group karo: upar folder ka naam (header),
-            # neeche usi folder ke documents.
-            groups, order = {}, []
-            for kind, p in res:
-                if kind == "file":
-                    par = os.path.dirname(p)
-                    if par not in groups:
-                        groups[par] = []; order.append(par)
-                    groups[par].append(p)
-            for kind, p in res:                     # naam-se-mile khali folder bhi
-                if kind == "dir" and p not in groups:
-                    groups[p] = []; order.append(p)
-            order.sort(key=lambda f: os.path.basename(f).lower())
-            n_dir = len(order)
-            n_file = sum(len(v) for v in groups.values())
-            head = QtWidgets.QListWidgetItem(
-                self.L("🔎 %d folder · %d file" % (n_dir, n_file),
-                       "🔎 %d folders · %d files" % (n_dir, n_file))
-                + ("+" if len(res) >= 1000 else ""))
-            head.setFlags(QtCore.Qt.NoItemFlags)
-            _hf = head.font(); _hf.setBold(True); head.setFont(_hf)
-            head.setForeground(QtGui.QColor("#0f766e"))
+        self._last_files_res = res          # grid toggle par dobara render ke liye
+        grid = bool(self._opts.get("files_grid"))
+        self.files_results.clear()
+        # FOLDER ke hisaab se group karo: upar folder ka naam (header),
+        # neeche usi folder ke documents.
+        groups, order = {}, []
+        for kind, p in res:
+            if kind == "file":
+                par = os.path.dirname(p)
+                if par not in groups:
+                    groups[par] = []; order.append(par)
+                groups[par].append(p)
+        for kind, p in res:                     # naam-se-mile khali folder bhi
+            if kind == "dir" and p not in groups:
+                groups[p] = []; order.append(p)
+        order.sort(key=lambda f: os.path.basename(f).lower())
+        n_dir = len(order)
+        n_file = sum(len(v) for v in groups.values())
+        if grid:
+            self.files_results.setViewMode(QtWidgets.QListView.IconMode)
+            self.files_results.setIconSize(QtCore.QSize(96, 124))
+            self.files_results.setGridSize(QtCore.QSize(108, 150))
+            self.files_results.setResizeMode(QtWidgets.QListView.Adjust)
+            self.files_results.setMovement(QtWidgets.QListView.Static)
+        else:
+            self.files_results.setViewMode(QtWidgets.QListView.ListMode)
+            self.files_results.setGridSize(QtCore.QSize())
+        head = QtWidgets.QListWidgetItem(
+            self.L("🔎 %d folder · %d file" % (n_dir, n_file),
+                   "🔎 %d folders · %d files" % (n_dir, n_file))
+            + ("+" if len(res) >= 1000 else ""))
+        head.setFlags(QtCore.Qt.NoItemFlags)
+        _hf = head.font(); _hf.setBold(True); head.setFont(_hf)
+        head.setForeground(QtGui.QColor("#0f766e"))
+        if not grid:
             self.files_results.addItem(head)
-            _icon = {".pdf": "📕", ".docx": "📘", ".xlsx": "📗"}
-            for folder in order:
+        _icon = {".pdf": "📕", ".docx": "📘", ".xlsx": "📗"}
+        pinned = set(self._opts.get("pinned_files") or [])
+        grid_files = []
+        for folder in order:
+            if not grid:
                 fh = QtWidgets.QListWidgetItem("📁  " + (os.path.basename(folder) or folder))
                 _ff = fh.font(); _ff.setBold(True); fh.setFont(_ff)
                 fh.setForeground(QtGui.QColor("#0f766e"))
@@ -8499,20 +8719,203 @@ class ScannerWindow(QtWidgets.QMainWindow):
                                               "   (folder — double-click to open)"))
                 fh.setData(QtCore.Qt.UserRole, folder)
                 self.files_results.addItem(fh)
-                for p in sorted(groups[folder], key=lambda x: os.path.basename(x).lower()):
-                    ext = os.path.splitext(p)[1].lower()
-                    it = QtWidgets.QListWidgetItem("      " + _icon.get(ext, "🖼")
+            for p in sorted(groups[folder], key=lambda x: os.path.basename(x).lower()):
+                ext = os.path.splitext(p)[1].lower()
+                pin = "📌 " if p in pinned else ""
+                if grid:
+                    it = QtWidgets.QListWidgetItem(pin + os.path.basename(p))
+                    it.setTextAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop)
+                    it.setSizeHint(QtCore.QSize(108, 150))
+                    grid_files.append((self.files_results.count(), p))
+                else:
+                    it = QtWidgets.QListWidgetItem("      " + pin + _icon.get(ext, "🖼")
                                                    + "  " + os.path.basename(p))
-                    it.setToolTip(p + self.L("   (click = preview · 2x = kholo · drag = import)",
-                                             "   (click = preview · double-click = open · drag = import)"))
-                    it.setData(QtCore.Qt.UserRole, p)
-                    self.files_results.addItem(it)
-            if not order:
-                it = QtWidgets.QListWidgetItem(self.L("(kuch nahi mila)", "(nothing found)"))
-                it.setFlags(QtCore.Qt.NoItemFlags)
+                it.setToolTip(p + self.L("   (click = preview · 2x = kholo · drag = import)",
+                                         "   (click = preview · double-click = open · drag = import)"))
+                it.setData(QtCore.Qt.UserRole, p)
                 self.files_results.addItem(it)
-            self.files_tree.hide()
-            self.files_results.show()
+        if not order:
+            it = QtWidgets.QListWidgetItem(self.L("(kuch nahi mila)", "(nothing found)"))
+            it.setFlags(QtCore.Qt.NoItemFlags)
+            self.files_results.addItem(it)
+        self.files_tree.hide()
+        self.files_results.show()
+        if grid and grid_files:
+            self._build_grid_thumbs(grid_files[:60])
+
+    def _build_grid_thumbs(self, items):
+        """Grid view ke liye har file ki thumbnail (PDF ka pehla page ya image)
+        background me banao, phir icon laga do — UI kabhi atke nahi."""
+        rows = [(r, p) for r, p in items]
+
+        def job():
+            out = []
+            for r, p in rows:
+                png = None
+                try:
+                    ext = os.path.splitext(p)[1].lower()
+                    if ext == ".pdf" and HAS_FITZ:
+                        doc = fitz.open(p)
+                        page = doc.load_page(0)
+                        pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5), alpha=False)
+                        fd, png = tempfile.mkstemp(suffix=".png", dir=self._tmpdir)
+                        os.close(fd); pix.save(png); doc.close()
+                    elif ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):
+                        png = p
+                except Exception:
+                    png = None
+                out.append((r, png))
+            return out
+
+        def done(res):
+            if isinstance(res, Exception):
+                return
+            for r, png in res:
+                if not png:
+                    continue
+                try:
+                    it = self.files_results.item(r)
+                    if it is not None and it.data(QtCore.Qt.UserRole):
+                        it.setIcon(QtGui.QIcon(self._make_thumb(png)))
+                except Exception:
+                    pass
+        self._run_bg_quiet(job, done)
+
+    def _toggle_files_grid(self, on):
+        self._opts["files_grid"] = bool(on)
+        self._save_opts()
+        # jo abhi dikh raha hai use usi tarah dobara render karo
+        if self.files_results.isVisible() and getattr(self, "_last_files_res", None) is not None:
+            self._render_files_results(self._last_files_res)
+        else:
+            self._apply_files_filter()
+
+    def _files_index_ready(self, scope):
+        """scope ka index chahiye — na ho to background me banwao, ready hone par
+        given callback ke bajaye seedha filter/recent dobara chala do."""
+        idx = getattr(self, "_files_index", None)
+        if idx is not None and getattr(self, "_files_index_scope", None) == scope:
+            return idx
+        self._ensure_files_index_async(scope)
+        return None
+
+    def _apply_files_filter(self):
+        """Filter dropdown: sab / PDF / photo / aaj / hafta / pinned."""
+        mode = self.files_filter.currentData() if hasattr(self, "files_filter") else "all"
+        if mode in (None, "all"):
+            # normal folder-browser wapas
+            try:
+                self.files_search.clear()
+            except Exception:
+                pass
+            self.files_results.hide(); self.files_tree.show()
+            return
+        scope = self._panel_current_dir()
+        if not (scope and os.path.isdir(scope)):
+            scope = self._files_root()
+        if mode == "pinned":
+            res = [("file", p) for p in (self._opts.get("pinned_files") or [])
+                   if os.path.isfile(p)]
+            self._render_files_results(res)
+            return
+        idx = self._files_index_ready(scope)
+        if idx is None:
+            self.files_results.clear()
+            _w = QtWidgets.QListWidgetItem(self.L("⏳ Taiyaari…", "⏳ Indexing…"))
+            _w.setFlags(QtCore.Qt.NoItemFlags)
+            self.files_results.addItem(_w)
+            self.files_tree.hide(); self.files_results.show()
+            QtCore.QTimer.singleShot(400, self._apply_files_filter)
+            return
+        files = [(full) for kind, full, name, rel in idx if kind == "file"]
+        if mode == "pdf":
+            res = [("file", p) for p in files if p.lower().endswith(".pdf")]
+        elif mode == "img":
+            res = [("file", p) for p in files
+                   if p.lower().endswith((".jpg", ".jpeg", ".png", ".tif", ".tiff"))]
+        elif mode in ("today", "week"):
+            import time as _t
+            now = _t.time()
+            span = 86400 if mode == "today" else 7 * 86400
+            hit = []
+            for p in files:
+                try:
+                    if now - os.path.getmtime(p) <= span:
+                        hit.append(p)
+                except Exception:
+                    pass
+            res = [("file", p) for p in hit]
+        else:
+            res = [("file", p) for p in files]
+        self._render_files_results(res)
+
+    def _show_recent_files(self):
+        """Haal me bani/badli files — naye sabse upar (poore scope me)."""
+        scope = self._panel_current_dir()
+        if not (scope and os.path.isdir(scope)):
+            scope = self._files_root()
+        idx = self._files_index_ready(scope)
+        if idx is None:
+            self.status.showMessage(self.L("Taiyaari… phir se dabao.",
+                                           "Indexing… tap again."), 2000)
+            return
+        files = [full for kind, full, name, rel in idx if kind == "file"]
+
+        def job():
+            dated = []
+            for p in files:
+                try:
+                    dated.append((os.path.getmtime(p), p))
+                except Exception:
+                    pass
+            dated.sort(reverse=True)
+            return [("file", p) for _m, p in dated[:60]]
+
+        def done(res):
+            if isinstance(res, Exception):
+                return
+            try:
+                self.files_filter.blockSignals(True)
+                self.files_filter.setCurrentIndex(0)
+                self.files_filter.blockSignals(False)
+            except Exception:
+                pass
+            self._render_files_results(res)
+        self._run_bg(job, done, self.L("Haal ki files…", "Recent files…"))
+
+    def _update_folder_info(self):
+        """Is folder me kitni files + kul size — chhoti patti me dikhao."""
+        scope = self._panel_current_dir()
+        if not (scope and os.path.isdir(scope)):
+            self.lbl_folder_info.setText("")
+            return
+
+        def job():
+            n = 0; total = 0
+            try:
+                for dp, dns, fn in os.walk(scope):
+                    for f in fn:
+                        if f.lower().endswith(self._FILE_EXTS):
+                            n += 1
+                            try:
+                                total += os.path.getsize(os.path.join(dp, f))
+                            except Exception:
+                                pass
+                    if n >= 40000:
+                        break
+            except Exception:
+                pass
+            return (n, total)
+
+        def done(res):
+            if isinstance(res, Exception) or not isinstance(res, tuple):
+                return
+            n, total = res
+            gb = total / (1024.0 ** 3)
+            sz = ("%.1f GB" % gb) if gb >= 1 else ("%.0f MB" % (total / 1048576.0))
+            self.lbl_folder_info.setText(self.L("📦 %d files · %s" % (n, sz),
+                                                "📦 %d files · %s" % (n, sz)))
+        self._run_bg_quiet(job, done)
 
     def _merge_folder_pdfs(self, folder):
         if not HAS_OCR_LIBS:
