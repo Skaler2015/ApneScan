@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "46"
+VERSION = "47"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -3389,6 +3389,29 @@ class PagesList(QtWidgets.QListWidget):
             super().dropEvent(e)      # andar-hi-andar reorder
 
 
+class UrlListWidget(QtWidgets.QListWidget):
+    """Search-results list — items ko FILE ki tarah kheencha ja sake, taaki
+    search me mili file ko seedha doc-area me drag karke import kar sakein.
+    Sirf asli files (folder-header nahi) drag hoti hain."""
+
+    def __init__(self):
+        super().__init__()
+        self.setDragEnabled(True)
+        self.setDragDropMode(QtWidgets.QAbstractItemView.DragOnly)
+        self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+
+    def mimeData(self, items):
+        md = QtCore.QMimeData()
+        urls = []
+        for it in items:
+            p = it.data(QtCore.Qt.UserRole)
+            if p and os.path.isfile(p):
+                urls.append(QtCore.QUrl.fromLocalFile(p))
+        if urls:
+            md.setUrls(urls)
+        return md
+
+
 class ScannerWindow(QtWidgets.QMainWindow):
     THUMB_W = 150
     THUMB_H = 200
@@ -5417,7 +5440,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                                    "File par double-click = kholo. Hari = aaj ki file.")
         fp.addWidget(self.files_tree, 1)
         # search ke results (search karte hi tree ki jagah dikhte hain)
-        self.files_results = QtWidgets.QListWidget()
+        self.files_results = UrlListWidget()      # yahan se file drag = import
         self.files_results.setWordWrap(True)      # naam kate nahi, agli line me
         self.files_results.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.files_results.setUniformItemSizes(False)
@@ -5426,6 +5449,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "QListWidget::item{padding:5px 4px;border-bottom:1px solid #eef2f7;}"
             "QListWidget::item:selected{background:#e0f2f1;color:#0f172a;}")
         self.files_results.itemDoubleClicked.connect(self._files_result_activated)
+        self.files_results.itemClicked.connect(self._on_result_clicked)  # 1-click = preview
         self.files_results.hide()
         fp.addWidget(self.files_results, 1)
         self._files_search_timer = QtCore.QTimer(self)
@@ -7141,6 +7165,71 @@ class ScannerWindow(QtWidgets.QMainWindow):
         else:
             self._open_path(p)
 
+    def _on_result_clicked(self, it):
+        """Search-result par EK click: document ho to uska preview panel me
+        dikhao (PDF ka pehla page / image seedha). Folder par kuch nahi."""
+        p = it.data(QtCore.Qt.UserRole)
+        if p and os.path.isfile(p):
+            self._preview_file_in_panel(p)
+
+    def _render_file_pixmap(self, path):
+        """Kisi file ka QPixmap banao — image seedha, PDF ka pehla page fitz se."""
+        ext = os.path.splitext(path)[1].lower()
+        if ext in (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"):
+            pm = QtGui.QPixmap(path)
+            return pm if not pm.isNull() else None
+        if ext == ".pdf" and HAS_FITZ:
+            try:
+                doc = fitz.open(path)
+                page = doc.load_page(0)
+                pix = page.get_pixmap(matrix=fitz.Matrix(1.6, 1.6), alpha=False)
+                img = QtGui.QImage(pix.samples, pix.width, pix.height,
+                                   pix.stride, QtGui.QImage.Format_RGB888)
+                pm = QtGui.QPixmap.fromImage(img.copy())
+                doc.close()
+                return pm if not pm.isNull() else None
+            except Exception:
+                return None
+        return None
+
+    def _preview_file_in_panel(self, path):
+        """Preview panel me is file ki jhalak dikhao (band ho to khol do)."""
+        if not getattr(self, "preview_panel", None):
+            return
+        if not self.preview_panel.isVisible():
+            self.preview_panel.setVisible(True)
+            self._opts["ui_preview"] = True
+        name = os.path.basename(path)
+        try:
+            self.pv_tabs.setCurrentIndex(0)
+        except Exception:
+            pass
+        pm = self._render_file_pixmap(path)
+        if pm is None:
+            self.pv_img.clear(); self._pv_pm = None
+            self.pv_title.setText(self.L("👁 Preview nahi bana", "👁 No preview"))
+            self.pv_info.setText(name)
+            self.pv_info2.setText("<b>%s</b><br><span style='color:#94a3b8'>%s</span>"
+                                  % (name, path))
+            self.pv_text.setPlainText("")
+            return
+        self._pv_pm = pm
+        self._pv_zoom = 1.0
+        self.pv_title.setText(name)
+        self._pv_render()
+        # panel abhi-abhi khula ho to width settle hone par dobara render
+        QtCore.QTimer.singleShot(30, self._pv_render)
+        try:
+            kb = os.path.getsize(path) / 1024.0
+            szt = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024))
+        except Exception:
+            szt = "-"
+        self.pv_info.setText("%s · %s · %d×%d" % (name, szt, pm.width(), pm.height()))
+        self.pv_info2.setText("<b>%s</b><br>📐 %d × %d px<br>💾 %s<br>"
+                              "<span style='color:#94a3b8'>%s</span>"
+                              % (name, pm.width(), pm.height(), szt, path))
+        self.pv_text.setPlainText("")
+
     def _run_files_search(self):
         """Advanced search — POORE panel-folder (aur uske andar ke sabhi
         folders) me naam se dhoondo. Bas 2 akshar likhte hi turant natije.
@@ -7194,8 +7283,21 @@ class ScannerWindow(QtWidgets.QMainWindow):
             if self.files_search.text().strip().lower() != q:
                 return                      # tab tak nayi search shuru ho gayi
             self.files_results.clear()
-            n_dir = sum(1 for k, _ in res if k == "dir")
-            n_file = len(res) - n_dir
+            # FOLDER ke hisaab se group karo: upar folder ka naam (header),
+            # neeche usi folder ke documents.
+            groups, order = {}, []
+            for kind, p in res:
+                if kind == "file":
+                    par = os.path.dirname(p)
+                    if par not in groups:
+                        groups[par] = []; order.append(par)
+                    groups[par].append(p)
+            for kind, p in res:                     # naam-se-mile khali folder bhi
+                if kind == "dir" and p not in groups:
+                    groups[p] = []; order.append(p)
+            order.sort(key=lambda f: os.path.basename(f).lower())
+            n_dir = len(order)
+            n_file = sum(len(v) for v in groups.values())
             head = QtWidgets.QListWidgetItem(
                 self.L("🔎 %d folder · %d file" % (n_dir, n_file),
                        "🔎 %d folders · %d files" % (n_dir, n_file))
@@ -7205,23 +7307,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
             head.setForeground(QtGui.QColor("#0f766e"))
             self.files_results.addItem(head)
             _icon = {".pdf": "📕", ".docx": "📘", ".xlsx": "📗"}
-            for kind, p in res:
-                parent = os.path.dirname(os.path.relpath(p, scope))
-                name = os.path.basename(p)
-                if kind == "dir":
-                    # do line: upar folder ka naam, neeche uska raasta
-                    label = "📁  " + name
-                else:
+            for folder in order:
+                fh = QtWidgets.QListWidgetItem("📁  " + (os.path.basename(folder) or folder))
+                _ff = fh.font(); _ff.setBold(True); fh.setFont(_ff)
+                fh.setForeground(QtGui.QColor("#0f766e"))
+                fh.setBackground(QtGui.QColor("#eef4f3"))
+                fh.setToolTip(folder + self.L("   (folder — 2x click = kholo)",
+                                              "   (folder — double-click to open)"))
+                fh.setData(QtCore.Qt.UserRole, folder)
+                self.files_results.addItem(fh)
+                for p in sorted(groups[folder], key=lambda x: os.path.basename(x).lower()):
                     ext = os.path.splitext(p)[1].lower()
-                    label = _icon.get(ext, "🖼") + "  " + name
-                if parent and parent != ".":
-                    label += "\n       ↳ " + parent.replace(os.sep, " › ")
-                it = QtWidgets.QListWidgetItem(label)
-                it.setToolTip(p + (self.L("   (folder — click karke kholo)",
-                                          "   (folder — click to open)") if kind == "dir" else ""))
-                it.setData(QtCore.Qt.UserRole, p)
-                self.files_results.addItem(it)
-            if not res:
+                    it = QtWidgets.QListWidgetItem("      " + _icon.get(ext, "🖼")
+                                                   + "  " + os.path.basename(p))
+                    it.setToolTip(p + self.L("   (click = preview · 2x = kholo · drag = import)",
+                                             "   (click = preview · double-click = open · drag = import)"))
+                    it.setData(QtCore.Qt.UserRole, p)
+                    self.files_results.addItem(it)
+            if not order:
                 it = QtWidgets.QListWidgetItem(self.L("(kuch nahi mila)", "(nothing found)"))
                 it.setFlags(QtCore.Qt.NoItemFlags)
                 self.files_results.addItem(it)
