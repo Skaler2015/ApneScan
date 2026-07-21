@@ -158,7 +158,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "54"
+VERSION = "55"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 def _portable_dir():
@@ -4049,36 +4049,49 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # network na ho to bhi personal stats dikhti rahein
         self._update_sidebar_stats()
 
+    def _start_stat_worker(self, action, n=0, want_display=True):
+        """StatsWorker ko is tarah chalao ki wo GC (garbage-collect) na ho jaye
+        jab tak khatam na ho — warna signal kabhi nahi pahunchta tha aur sidebar
+        '...' par atka reh jata tha. Har worker ko list me rakhte hain aur
+        finish hone par hata dete hain."""
+        url = self._stats_url()
+        if not url:
+            return None
+        self._stat_workers = getattr(self, "_stat_workers", [])
+        w = StatsWorker(url, self._get_client_id(), action=action, n=n)
+        self._stat_workers.append(w)
+
+        def _cleanup(wk=w):
+            try:
+                self._stat_workers.remove(wk)
+            except Exception:
+                pass
+        if want_display:
+            w.got.connect(lambda t, d, o: self._set_stats_display((t, d, o)))
+            w.got_full.connect(self._on_world_stats)
+            w.failed.connect(self._stats_failed)
+        w.finished.connect(_cleanup)
+        w.start()
+        return w
+
     def _refresh_stats(self, action="ping"):
         url = self._stats_url()
         if not url:
             self._set_stats_display(None)
             return
-        # DISPLAY hamesha 'stats' (sirf PADHNA) se aata hai — ye tez aur
-        # bharosemand hai. 'ping'/'scan' me server par LIKHAI hoti hai jo
-        # kabhi-kabhi slow/timeout ho jaati thi, jis wajah se sidebar '...'
-        # par atak jata tha. Ab display uspar depend nahi karta.
-        self._stats_worker = StatsWorker(url, self._get_client_id(), action="stats")
-        self._stats_worker.got.connect(lambda t, d, o: self._set_stats_display((t, d, o)))
-        self._stats_worker.got_full.connect(self._on_world_stats)
-        self._stats_worker.failed.connect(self._stats_failed)
-        self._stats_worker.start()
-        # ONLINE/USER register karne ke liye 'ping' ALAG se, best-effort —
-        # iska nateeja display ko affect nahi karta.
+        # DISPLAY hamesha 'stats' (sirf PADHNA) se — tez aur bharosemand.
+        self._start_stat_worker("stats", want_display=True)
+        # ONLINE/USER register: 'ping' ALAG se best-effort (display iss par
+        # depend nahi karta).
         if action == "ping":
-            self._ping_worker = StatsWorker(url, self._get_client_id(), action="ping")
-            self._ping_worker.start()
+            self._start_stat_worker("ping", want_display=False)
 
     def _report_scan_stat(self, n):
-        url = self._stats_url()
-        if not url or n <= 0:
+        if not self._stats_url() or n <= 0:
             return
-        self._scan_reporter = StatsWorker(url, self._get_client_id(), action="scan", n=n)
-        self._scan_reporter.got.connect(lambda t, d, o: self._set_stats_display((t, d, o)))
-        self._scan_reporter.got_full.connect(self._on_world_stats)
-        self._scan_reporter.start()
-        # scan-count (LIKHAI) slow ho sakti hai — thodi der baad display ko
-        # 'stats' (PADHNA) se taaza kar do taaki naya count dikh jaye
+        # scan-count server par bhejo (LIKHAI) — GC-safe worker se
+        self._start_stat_worker("scan", n=n, want_display=True)
+        # LIKHAI slow ho sakti hai — thodi der baad display ko 'stats' se taaza karo
         QtCore.QTimer.singleShot(6000, lambda: self._refresh_stats("stats"))
 
     def set_stats_url(self):
@@ -6283,6 +6296,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _on_import_done(self, count):
         if count:
             self.status.showMessage("%d page import ho gaye." % count, 4000)
+            self._pstats_bump(imports=count)     # analytics: import ginti
+            self._update_sidebar_stats()
             if tesseract_available():
                 self.auto_name_pages()
         else:
@@ -6722,17 +6737,20 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
 
     def _pstats_bump(self, pages=0, pdfs=0, shared=0, ocr_named=0,
-                     scan_ok=0, scan_fail=0, saved_bytes=0, doc_type=None):
+                     scan_ok=0, scan_fail=0, saved_bytes=0, doc_type=None,
+                     imports=0, prints=0):
         st = self._pstats()
         day = datetime.datetime.now().strftime("%Y-%m-%d")
         d = st.setdefault("days", {}).setdefault(day, {})
-        for k, v in (("pages", pages), ("pdfs", pdfs), ("shared", shared)):
+        for k, v in (("pages", pages), ("pdfs", pdfs), ("shared", shared),
+                     ("imports", imports), ("prints", prints)):
             if v:
                 d[k] = d.get(k, 0) + v
         t = st.setdefault("totals", {})
         for k, v in (("pages", pages), ("pdfs", pdfs), ("shared", shared),
                      ("ocr_named", ocr_named), ("scan_ok", scan_ok),
-                     ("scan_fail", scan_fail), ("saved_bytes", saved_bytes)):
+                     ("scan_fail", scan_fail), ("saved_bytes", saved_bytes),
+                     ("imports", imports), ("prints", prints)):
             if v:
                 t[k] = t.get(k, 0) + v
         if pages:
@@ -6835,6 +6853,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
             ("my_week", L("🗓 Is hafte (pages)", "🗓 This week (pages)"), self._pstats_sum(7, "pages")),
             ("my_total", L("📚 Mere kul pages", "📚 My total pages"), t.get("pages", 0)),
             ("my_pdfs", L("🗂 Meri kul PDFs", "🗂 My total PDFs"), t.get("pdfs", 0)),
+            ("my_imports_today", L("📥 Aaj import kiye", "📥 Imported today"), day.get("imports", 0)),
+            ("my_imports", L("📥 Kul import", "📥 Total imports"), t.get("imports", 0)),
+            ("my_prints_today", L("🖨 Aaj print kiye", "🖨 Printed today"), day.get("prints", 0)),
+            ("my_prints", L("🖨 Kul print", "🖨 Total prints"), t.get("prints", 0)),
             ("streak", L("🔥 Streak (din)", "🔥 Streak (days)"), self._pstats_streak()),
             ("shared", L("📤 Share ki hui", "📤 Shared"), t.get("shared", 0)),
             ("saved_mb", L("🗜 Compress se bachaya (MB)", "🗜 Saved by compress (MB)"),
@@ -6952,12 +6974,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "📄 Aaj: <b>%d</b> pages &nbsp;|&nbsp; 🗓 Hafta: <b>%d</b> &nbsp;|&nbsp; "
             "Mahina: <b>%d</b><br>"
             "📚 Kul: <b>%s pages</b>, <b>%s PDFs</b><br>"
+            "📥 Import: <b>%s</b> &nbsp;|&nbsp; 🖨 Print: <b>%s</b><br>"
             "🔥 Streak: <b>%d din</b> &nbsp;|&nbsp; 🏅 Best din: <b>%s (%d)</b><br>"
             "📤 Share: <b>%d</b> &nbsp;|&nbsp; 🗜 Bachaya: <b>%.1f MB</b><br>"
             "🩺 Scan success: <b>%s</b> &nbsp;|&nbsp; 🔤 OCR-naam mile: <b>%d</b><br>"
             "⏰ Sabse busy waqt: <b>%s</b><br><br><b>Document types (top 5):</b><br>%s"
             % (self._pstats_sum(1), self._pstats_sum(7), self._pstats_sum(30),
                "{:,}".format(t.get("pages", 0)), "{:,}".format(t.get("pdfs", 0)),
+               "{:,}".format(t.get("imports", 0)), "{:,}".format(t.get("prints", 0)),
                self._pstats_streak(), best_k, best_v,
                t.get("shared", 0), t.get("saved_bytes", 0) / 1048576.0,
                rate, t.get("ocr_named", 0), peak_h, tys))
@@ -9896,6 +9920,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     self._draw_fit(painter, p, target)
         finally:
             painter.end()
+        self._pstats_bump(prints=1)          # analytics: print ginti
+        self._update_sidebar_stats()
         self.status.showMessage("Print bhej diya.", 4000)
 
     def print_all(self):
