@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "81"
+VERSION = "82"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6358,6 +6358,257 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "ApneScan\nFree document scanning + PDF tool.\n"
             "TWAIN + WIA scanners support.\nVersion " + VERSION)
 
+    # ---- Panel guides ("?" buttons on Meri Files / Preview) ----
+    _GUIDE_CSS = ("<style>h2{color:#0f766e;font-size:17px;margin:2px 0 4px;}"
+                  "h3{color:#0f172a;font-size:14px;margin:14px 0 4px;}"
+                  "p{color:#334155;margin:4px 0;}"
+                  "b{color:#0f172a;} li{color:#334155;margin:3px 0;}"
+                  "ul{margin:4px 0 4px 4px;padding-left:18px;}"
+                  ".t{color:#64748b;font-size:12px;}</style>")
+
+    def _show_panel_guide(self, title, hi_html, en_html):
+        """Ek panel ki poori guide — 2 tabs: हिंदी aur English."""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.resize(620, 680)
+        v = QtWidgets.QVBoxLayout(dlg)
+        tabs = QtWidgets.QTabWidget()
+        for lang, htmlc in (("हिंदी", hi_html), ("English", en_html)):
+            br = QtWidgets.QTextBrowser()
+            br.setOpenExternalLinks(True)
+            br.setHtml(self._GUIDE_CSS + htmlc)
+            tabs.addTab(br, lang)
+        # user ki abhi ki bhasha wala tab pehle khol do
+        tabs.setCurrentIndex(1 if self._lang == "en" else 0)
+        v.addWidget(tabs, 1)
+        b = QtWidgets.QPushButton(self.L("बंद करें", "Close"))
+        b.clicked.connect(dlg.accept)
+        v.addWidget(b)
+        dlg.exec_()
+
+    def show_files_guide(self):
+        hi = """
+<h2>📁 मेरी फ़ाइलें (My Files) — पूरी गाइड</h2>
+<p class='t'>दाईं तरफ़ का यह पैनल आपके save-फ़ोल्डर की सभी फ़ोल्डर और फ़ाइलें दिखाता है।
+यहीं से आप सीधे किसी फ़ोल्डर में सेव कर सकते हैं, ढूँढ सकते हैं, और फ़ाइलों पर काम कर सकते हैं।</p>
+
+<h3>🧭 इधर-उधर जाना (Navigation)</h3>
+<ul>
+<li><b>फ़ोल्डर खोलना:</b> किसी फ़ोल्डर पर <b>डबल-क्लिक</b> करें — आप उसके अंदर चले जाएँगे।</li>
+<li><b>⬅ पीछे:</b> ऊपर वाले फ़ोल्डर में वापस जाने के लिए।</li>
+<li><b>ब्रेडक्रम्ब:</b> पैनल में हरे रंग में लिखा रहता है कि आप अभी किस फ़ोल्डर में हैं।</li>
+<li><b>📦 फ़ोल्डर जानकारी:</b> नीचे दिखता है इस फ़ोल्डर में कितनी फ़ाइलें और कुल कितनी जगह।</li>
+</ul>
+
+<h3>🔍 ढूँढना (Search) — तुरंत</h3>
+<ul>
+<li>ऊपर search बॉक्स में <b>2 अक्षर</b> लिखते ही नतीजे तुरंत आ जाते हैं (नाम बीच से भी मिलता है)।</li>
+<li>कई शब्द लिखें (जैसे <b>राम बिल</b>) तो सब मिलने चाहिए।</li>
+<li><b>📄 बटन</b> दबाकर search करें तो PDF के <b>अंदर के टेक्स्ट</b> में भी ढूँढेगा (मरीज़ का नाम/claim नंबर)।</li>
+</ul>
+
+<h3>🎛 छाँटना और दिखाना</h3>
+<ul>
+<li><b>फ़िल्टर ड्रॉपडाउन:</b> सब / 📕 PDF / 🖼 फ़ोटो / 📅 आज / 📆 हफ़्ता / 📌 Pinned।</li>
+<li><b>🕘 Recent:</b> हाल में बनी/बदली फ़ाइलें सबसे ऊपर।</li>
+<li><b>⧉ Grid:</b> बड़ी thumbnail view (PDF का पहला पेज दिखता है)।</li>
+<li><b>⇅ Sort:</b> नाम/तारीख़/आकार से क्रम — आपकी पसंद सेव रहती है।</li>
+<li><b>⭐ Favourites:</b> ड्रॉपडाउन से पसंदीदा फ़ोल्डर पर एक क्लिक में जाएँ; ⭐ बटन से फ़ोल्डर जोड़ें/हटाएँ।</li>
+</ul>
+
+<h3>💾 सेव करना और लाना</h3>
+<ul>
+<li><b>💾 यहाँ सेव करें:</b> अभी स्कैन/import किए पेजों की PDF सीधे <b>इसी खुले फ़ोल्डर</b> में सेव।</li>
+<li><b>📥 फ़ाइलें लाओ (Import):</b> कंप्यूटर से PDF/फ़ोटो चुनकर सीधे इस फ़ोल्डर में कॉपी।</li>
+<li><b>➕ नया फ़ोल्डर:</b> यहीं नया फ़ोल्डर बनाएँ (Space/Ctrl+S से सेव भी इसी खुले फ़ोल्डर में जाता है)।</li>
+<li><b>Drag करके लाना:</b> किसी फ़ाइल को पैनल से खींचकर बीच वाली पेज-लिस्ट में डालें — वह import हो जाएगी।</li>
+</ul>
+
+<h3>🖱 राइट-क्लिक मेन्यू (फ़ाइल पर)</h3>
+<ul>
+<li><b>खोलें</b>, <b>📌 Pin</b> (ऊपर रखो), <b>🟢 WhatsApp</b>, <b>✉ Email</b>, <b>🗜 Compress</b>, <b>🏷 Tag</b></li>
+<li><b>🖨 Print</b>, <b>📄 Copy</b> / <b>📁 Move</b> दूसरे फ़ोल्डर में, <b>✏ Rename</b>, <b>🗑 Delete</b></li>
+</ul>
+<h3>🖱 राइट-क्लिक (फ़ोल्डर पर)</h3>
+<ul>
+<li><b>💾 यहाँ सेव</b>, <b>📥 Import</b>, <b>➕ नया फ़ोल्डर</b>, <b>🧩 सारी PDF → एक PDF</b>, <b>🗜 ZIP बनाओ</b>, <b>📂 Explorer में खोलो</b>, <b>⭐ Favourite</b></li>
+</ul>
+<h3>🖱 कई फ़ाइलें चुनकर (Ctrl/Shift से)</h3>
+<ul>
+<li><b>🧩 एक PDF में जोड़ो</b>, <b>📁 Move</b>, <b>📄 Copy</b>, <b>✏ Bulk rename</b> (naam_001, 002…), <b>🗑 Delete</b></li>
+</ul>
+
+<h3>🧹 और सुविधाएँ</h3>
+<ul>
+<li><b>🔁 Duplicate finder:</b> खाली जगह पर राइट-क्लिक → एक जैसी नक़ल फ़ाइलें ढूँढो।</li>
+<li><b>🗑 Recycle Bin:</b> ग़लती से हटी फ़ाइल वापस लाओ या हमेशा के लिए हटाओ।</li>
+<li><b>क्लिक करके झलक:</b> किसी फ़ाइल पर एक क्लिक = Preview पैनल में जल्दी झलक।</li>
+</ul>
+"""
+        en = """
+<h2>📁 My Files panel — complete guide</h2>
+<p class='t'>This right-hand panel shows every folder and document in your save
+folder. From here you can save straight into a folder, search, and act on files.</p>
+
+<h3>🧭 Navigation</h3>
+<ul>
+<li><b>Open a folder:</b> <b>double-click</b> it to go inside.</li>
+<li><b>⬅ Back:</b> go up one folder.</li>
+<li><b>Breadcrumb:</b> the green line shows which folder you are in now.</li>
+<li><b>📦 Folder info:</b> shows the file count and total size of the folder.</li>
+</ul>
+
+<h3>🔍 Search — instant</h3>
+<ul>
+<li>Type <b>2 letters</b> in the search box — results appear instantly (matches anywhere in the name).</li>
+<li>Type several words (e.g. <b>ram bill</b>) — all must match.</li>
+<li>Turn on the <b>📄 button</b> to also search <b>inside PDF text</b> (a patient name / claim number).</li>
+</ul>
+
+<h3>🎛 Filter & view</h3>
+<ul>
+<li><b>Filter dropdown:</b> All / 📕 PDF / 🖼 Images / 📅 Today / 📆 Week / 📌 Pinned.</li>
+<li><b>🕘 Recent:</b> newest files first.</li>
+<li><b>⧉ Grid:</b> big-thumbnail view (shows a PDF's first page).</li>
+<li><b>⇅ Sort:</b> by name/date/size — your choice is saved.</li>
+<li><b>⭐ Favourites:</b> jump to a favourite folder from the dropdown; the ⭐ button adds/removes a folder.</li>
+</ul>
+
+<h3>💾 Saving & importing</h3>
+<ul>
+<li><b>💾 Save here:</b> saves the currently scanned/imported pages as a PDF into <b>the open folder</b>.</li>
+<li><b>📥 Import files:</b> pick PDFs/photos from your PC straight into this folder.</li>
+<li><b>➕ New folder:</b> create one here (Space/Ctrl+S also saves into the open folder).</li>
+<li><b>Drag in:</b> drag a file from the panel onto the middle page-list to import it.</li>
+</ul>
+
+<h3>🖱 Right-click on a file</h3>
+<ul>
+<li><b>Open</b>, <b>📌 Pin</b>, <b>🟢 WhatsApp</b>, <b>✉ Email</b>, <b>🗜 Compress</b>, <b>🏷 Tag</b></li>
+<li><b>🖨 Print</b>, <b>📄 Copy</b> / <b>📁 Move</b> to another folder, <b>✏ Rename</b>, <b>🗑 Delete</b></li>
+</ul>
+<h3>🖱 Right-click on a folder</h3>
+<ul>
+<li><b>💾 Save here</b>, <b>📥 Import</b>, <b>➕ New folder</b>, <b>🧩 All PDFs → one PDF</b>, <b>🗜 Make ZIP</b>, <b>📂 Open in Explorer</b>, <b>⭐ Favourite</b></li>
+</ul>
+<h3>🖱 Several files selected (Ctrl/Shift)</h3>
+<ul>
+<li><b>🧩 Merge into one PDF</b>, <b>📁 Move</b>, <b>📄 Copy</b>, <b>✏ Bulk rename</b> (name_001, 002…), <b>🗑 Delete</b></li>
+</ul>
+
+<h3>🧹 More</h3>
+<ul>
+<li><b>🔁 Find duplicates:</b> right-click empty space → find identical copies.</li>
+<li><b>🗑 Recycle Bin:</b> restore a deleted file or remove it for good.</li>
+<li><b>Click to preview:</b> one click on a file shows a quick preview in the Preview panel.</li>
+</ul>
+"""
+        self._show_panel_guide(self.L("📁 मेरी फ़ाइलें — गाइड", "📁 My Files — Guide"), hi, en)
+
+    def show_preview_guide(self):
+        hi = """
+<h2>👁 Preview पैनल — पूरी गाइड</h2>
+<p class='t'>बीच की पेज-लिस्ट में किसी पेज पर क्लिक करें — उसकी बड़ी झलक यहाँ आती है,
+और आप एक-क्लिक में उसे सुधार सकते हैं। नीचे के बटन उसी पेज पर लगते हैं (या 'सभी पेज' पर, अगर टिक हो)।</p>
+
+<h3>🧭 पेज बदलना और देखना</h3>
+<ul>
+<li><b>◀ ▶</b> से पिछला/अगला पेज; ऊपर <b>Page x/N</b> दिखता है।</li>
+<li><b>Filmstrip:</b> नीचे सभी पेजों की छोटी झलक — किसी पर क्लिक = वही पेज।</li>
+<li><b>Zoom:</b> ➖ छोटा · 🔳 Fit · ➕ बड़ा · ⛶ पूरी स्क्रीन (या <b>Ctrl+scroll</b>)।</li>
+<li><b>टैब:</b> 👁 झलक · 🔤 Text (OCR) · ℹ Info (आकार, DPI, तारीख़)।</li>
+</ul>
+
+<h3>🔧 एक-क्लिक सुधार</h3>
+<ul>
+<li><b>घुमाना:</b> ↩️ बाएँ · ↪️ दाएँ · 🎯 किसी भी कोण पर सीधा।</li>
+<li><b>✂️ Crop</b> (border अपने-आप) · <b>📐 सीधा</b> (deskew)।</li>
+<li><b>रंग/रोशनी:</b> ☀️ उजला · 🌙 गहरा · 🌗 Contrast · ✨ Auto-साफ़ · ⬜ Whiten (backing सफ़ेद)।</li>
+<li><b>⬛ B&W</b> · <b>🩶 Gray</b> · <b>🖼️ Restore</b> (पुरानी फ़ोटो) · <b>✍️ Sign/मोहर</b> · <b>🆔 ID अलग</b>।</li>
+</ul>
+
+<h3>🎨 Editor (crop/मिटाओ/text/तीर) — सबसे ताक़तवर</h3>
+<p>🎨 <b>Editor</b> बटन एक पूरा canvas खोलता है — माउस से सीधे पेज पर:</p>
+<ul>
+<li><b>✂ Crop</b> (घसीट कर हिस्सा रखो) · <b>🧽 मिटाओ</b> (दाग सफ़ेद) · <b>✍ Text</b> (क्लिक करके लिखो)</li>
+<li><b>➡ तीर</b> · <b>🖍 Highlight</b> · <b>📐 Perspective</b> (4 कोने क्लिक → तिरछा सीधा)</li>
+<li><b>🔢 Page number</b> · <b>☀◐ Brightness/Contrast slider</b> · <b>↶ Undo</b> · <b>💾 Save</b> (पेज पर लग जाता है)</li>
+</ul>
+
+<h3>🛠 और काम (⋯ More मेन्यू)</h3>
+<ul>
+<li><b>↕ Compare:</b> दो पेज साथ-साथ (पहले–बाद)।</li>
+<li><b>🔎 Loupe:</b> माउस के नीचे ज़ूम-कांच।</li>
+<li><b>▶ Slideshow:</b> अपने-आप एक-एक पेज।</li>
+<li><b>⬆⬇ Move:</b> पेज ऊपर-नीचे (क्रम बदलो)।</li>
+<li><b>📤 Save-as</b> इस पेज को अलग JPG/PDF · <b>📋 Copy image</b> (WhatsApp/Word में paste)।</li>
+<li><b>🖨 Print</b> सिर्फ़ यह पेज · <b>🟢 Share</b> यह पेज · <b>📭 खाली है क्या?</b></li>
+</ul>
+
+<h3>🔤 Text टैब</h3>
+<ul>
+<li><b>🔤 Text पढ़ो</b> (OCR) · <b>📋 Copy</b> · <b>🌐 Translate</b> (हिंदी/English)।</li>
+</ul>
+
+<h3>📌 ज़रूरी बात</h3>
+<ul>
+<li><b>"सभी पेज पर लगाओ"</b> टिक करने पर नीचे का कोई भी सुधार <b>सारे पेजों</b> पर एक साथ लगेगा।</li>
+<li><b>↶ Undo</b> से आख़िरी सुधार वापस; <b>🗑 Delete</b> से यह पेज हटेगा।</li>
+</ul>
+"""
+        en = """
+<h2>👁 Preview panel — complete guide</h2>
+<p class='t'>Click a page in the middle list — its large preview appears here and
+you can fix it in one click. The buttons below act on that page (or on ALL pages
+if the toggle is ticked).</p>
+
+<h3>🧭 Move & view</h3>
+<ul>
+<li><b>◀ ▶</b> previous/next page; <b>Page x/N</b> shows at the top.</li>
+<li><b>Filmstrip:</b> thumbnails of every page below — click one to jump.</li>
+<li><b>Zoom:</b> ➖ out · 🔳 Fit · ➕ in · ⛶ full screen (or <b>Ctrl+scroll</b>).</li>
+<li><b>Tabs:</b> 👁 Preview · 🔤 Text (OCR) · ℹ Info (size, DPI, date).</li>
+</ul>
+
+<h3>🔧 One-click fixes</h3>
+<ul>
+<li><b>Rotate:</b> ↩️ left · ↪️ right · 🎯 any angle.</li>
+<li><b>✂️ Crop</b> (auto border) · <b>📐 Straighten</b> (deskew).</li>
+<li><b>Colour/light:</b> ☀️ brighter · 🌙 darker · 🌗 contrast · ✨ auto-enhance · ⬜ whiten backing.</li>
+<li><b>⬛ B&W</b> · <b>🩶 Gray</b> · <b>🖼️ Restore</b> (old photo) · <b>✍️ Sign/stamp</b> · <b>🆔 Split ID</b>.</li>
+</ul>
+
+<h3>🎨 Editor (crop/erase/text/arrow) — the most powerful</h3>
+<p>The 🎨 <b>Editor</b> button opens a full canvas — work directly on the page with the mouse:</p>
+<ul>
+<li><b>✂ Crop</b> (drag to keep) · <b>🧽 Erase</b> (paint white) · <b>✍ Text</b> (click to type)</li>
+<li><b>➡ Arrow</b> · <b>🖍 Highlight</b> · <b>📐 Perspective</b> (click 4 corners → fix skew)</li>
+<li><b>🔢 Page number</b> · <b>☀◐ Brightness/Contrast sliders</b> · <b>↶ Undo</b> · <b>💾 Save</b> (applies to the page)</li>
+</ul>
+
+<h3>🛠 More (⋯ menu)</h3>
+<ul>
+<li><b>↕ Compare:</b> two pages side by side.</li>
+<li><b>🔎 Loupe:</b> a magnifier under the mouse.</li>
+<li><b>▶ Slideshow:</b> auto-advance through pages.</li>
+<li><b>⬆⬇ Move:</b> move the page up/down (reorder).</li>
+<li><b>📤 Save-as</b> this page as JPG/PDF · <b>📋 Copy image</b> (paste into WhatsApp/Word).</li>
+<li><b>🖨 Print</b> only this page · <b>🟢 Share</b> this page · <b>📭 Is it blank?</b></li>
+</ul>
+
+<h3>🔤 Text tab</h3>
+<ul>
+<li><b>🔤 Read text</b> (OCR) · <b>📋 Copy</b> · <b>🌐 Translate</b> (Hindi/English).</li>
+</ul>
+
+<h3>📌 Important</h3>
+<ul>
+<li>Tick <b>"Apply edits to ALL pages"</b> and any fix below is applied to <b>every page</b> at once.</li>
+<li><b>↶ Undo</b> reverts the last edit; <b>🗑 Delete</b> removes this page.</li>
+</ul>
+"""
+        self._show_panel_guide(self.L("👁 Preview — गाइड", "👁 Preview — Guide"), hi, en)
+
     def toggle_simple_mode(self):
         self._opts["simple_mode"] = bool(self.act_simple.isChecked())
         self._save_opts()
@@ -6751,7 +7002,15 @@ class ScannerWindow(QtWidgets.QMainWindow):
         _hdr.setTextFormat(QtCore.Qt.RichText)
         _hdr.setToolTip("Folders and documents in the save folder — create a new folder here "
                         "and save scanned PDFs straight into it.")
-        fp.addWidget(_hdr)
+        _hdrrow = QtWidgets.QHBoxLayout(); _hdrrow.setContentsMargins(0, 0, 0, 0)
+        _hdrrow.addWidget(_hdr); _hdrrow.addStretch(1)
+        _bfhelp = QtWidgets.QToolButton(); _bfhelp.setText("❓")
+        _bfhelp.setAutoRaise(True); _bfhelp.setCursor(QtCore.Qt.PointingHandCursor)
+        _bfhelp.setToolTip(self.L("Meri Files ki poori guide (Hindi + English)",
+                                  "Full My Files guide (Hindi + English)"))
+        _bfhelp.clicked.connect(self.show_files_guide)
+        _hdrrow.addWidget(_bfhelp)
+        fp.addLayout(_hdrrow)
         # Search: kisi bhi folder ke andar naam se dhoondo (folder chuna ho to
         # usi ke andar, warna poore save-folder me)
         _srow = QtWidgets.QHBoxLayout(); _srow.setSpacing(4)
@@ -6945,7 +7204,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.pv_title = QtWidgets.QLabel(self.L("👁 Preview", "👁 Preview"))
         self.pv_title.setAlignment(QtCore.Qt.AlignCenter)
         self.pv_title.setStyleSheet("font-weight:700;")
-        _nav.addWidget(_bprev); _nav.addWidget(self.pv_title, 1); _nav.addWidget(_bnext)
+        _bpvhelp = QtWidgets.QPushButton("❓"); _bpvhelp.setFixedWidth(30)
+        _bpvhelp.setToolTip(self.L("Preview panel ki poori guide (Hindi + English)",
+                                   "Full Preview panel guide (Hindi + English)"))
+        _bpvhelp.clicked.connect(self.show_preview_guide)
+        _nav.addWidget(_bprev); _nav.addWidget(self.pv_title, 1)
+        _nav.addWidget(_bnext); _nav.addWidget(_bpvhelp)
         pv.addLayout(_nav)
         # tabs: Preview | Text | Info
         self.pv_tabs = QtWidgets.QTabWidget()
