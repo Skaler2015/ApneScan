@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "90"
+VERSION = "91"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -4453,16 +4453,40 @@ class SparkBars(QtWidgets.QWidget):
 
 
 class LibraryModel(QtWidgets.QFileSystemModel):
-    """'Meri Files' panel ka model — AAJ banayi files hari dikhti hain."""
+    """'Meri Files' panel ka model — AAJ banayi files hari dikhti hain, aur
+    har file ke naam ke aage () me uska size bhi dikhta hai."""
+
+    @staticmethod
+    def _fmt_size(nbytes):
+        try:
+            nbytes = float(nbytes)
+        except Exception:
+            return ""
+        if nbytes < 1024:
+            return "%d B" % int(nbytes)
+        if nbytes < 1024 * 1024:
+            return "%d KB" % round(nbytes / 1024.0)
+        if nbytes < 1024 * 1024 * 1024:
+            v = nbytes / (1024.0 * 1024.0)
+            return ("%.1f MB" % v) if v < 10 else ("%d MB" % round(v))
+        return "%.1f GB" % (nbytes / (1024.0 * 1024.0 * 1024.0))
 
     def data(self, index, role=QtCore.Qt.DisplayRole):
-        if role == QtCore.Qt.ForegroundRole and index.column() == 0:
-            try:
-                fi = self.fileInfo(index)
-                if fi.isFile() and fi.lastModified().date() == QtCore.QDate.currentDate():
-                    return QtGui.QBrush(QtGui.QColor("#16a34a"))
-            except Exception:
-                pass
+        if index.column() == 0:
+            if role == QtCore.Qt.DisplayRole:
+                try:
+                    fi = self.fileInfo(index)
+                    if fi.isFile():
+                        return "(%s) %s" % (self._fmt_size(fi.size()), fi.fileName())
+                except Exception:
+                    pass
+            elif role == QtCore.Qt.ForegroundRole:
+                try:
+                    fi = self.fileInfo(index)
+                    if fi.isFile() and fi.lastModified().date() == QtCore.QDate.currentDate():
+                        return QtGui.QBrush(QtGui.QColor("#16a34a"))
+                except Exception:
+                    pass
         return super().data(index, role)
 
 
@@ -8069,43 +8093,19 @@ if the toggle is ticked).</p>
         self.pv_strip.itemClicked.connect(self._pv_strip_click)
         pv.addWidget(self.pv_strip)
 
-        # ---- "sab pages par" toggle ----
-        self.pv_apply_all = QtWidgets.QCheckBox(self.L("Edit SABHI pages par lagao",
-                                                       "Apply edits to ALL pages"))
-        self.pv_apply_all.setStyleSheet("font-size:11px;color:#475569;")
-        self.pv_apply_all.setToolTip(self.L(
-            "On karo to neeche ka koi bhi sudhaar (ghumana, saaf, whiten…) SABHI pages par lagega.",
-            "When on, any edit below applies to ALL pages at once."))
-        pv.addWidget(self.pv_apply_all)
-
-        _L = self.L
-        for _rowdef in (
-            (("↩️", _L("Baayen", "Left"), _L("Baayein ghumao", "Rotate left"), self.rotate_left, "blue"),
-             ("↪️", _L("Dayen", "Right"), _L("Daayein ghumao", "Rotate right"), self.rotate_right, "blue"),
-             ("🎯", _L("Angle", "Angle"), _L("Kisi bhi angle par seedha karo", "Rotate any angle"), self.rotate_any, "blue"),
-             ("✂️", _L("Crop", "Crop"), _L("Maus se area select karke crop karo", "Select an area with the mouse to crop"), self.crop_current_page, "blue"),
-             ("📐", _L("Seedha", "Straight"), _L("Tedha seedha karo", "Deskew"), self.deskew_current, "blue")),
-            (("☀️", _L("Ujla", "Bright"), _L("Ujla karo", "Brighter"), lambda: self._enhance_current(1.12, 1.0), "green"),
-             ("🌙", _L("Gehra", "Dark"), _L("Gehra karo", "Darker"), lambda: self._enhance_current(0.9, 1.0), "green"),
-             ("🌗", _L("Contrast", "Contrast"), _L("Contrast badhao", "More contrast"), lambda: self._enhance_current(1.0, 1.15), "green"),
-             ("✨", _L("Saaf", "Clean"), _L("Auto saaf/ujla", "Auto-enhance"), self.enhance_current_page, "green"),
-             ("⬜", _L("Whiten", "Whiten"), _L("Backing safed karo", "Whiten backing"), self.whiten_current_page, "green")),
-            (("⬛", _L("B&W", "B&W"), _L("Kaala-safed banao", "Black & white"), lambda: self._to_mode("1"), "purple"),
-             ("🩶", _L("Gray", "Gray"), _L("Grayscale banao", "Grayscale"), lambda: self._to_mode("L"), "purple"),
-             ("🖼️", _L("Restore", "Restore"), _L("Purani photo saaf", "Restore photo"), self.restore_photo_current, "purple"),
-             ("✍️", _L("Sign", "Sign"), _L("Sign/stamp lagao", "Add sign/stamp"), self.place_sign, "purple"),
-             ("🆔", _L("ID alag", "Split ID"), _L("ID cards alag karo", "Split ID cards"), self.split_id_cards, "purple")),
-            (("🎨", _L("Editor", "Editor"), _L("Crop/miṭao/text/teer/seedha…", "Crop/erase/text/arrow/perspective…"), self._pv_open_image_editor, "purple"),
-             ("✏️", _L("Rename", "Rename"), _L("Naam sikhao", "Rename"), self.rename_current_page, "slate"),
-             ("⧉", _L("Copy", "Duplicate"), _L("Is page ki nakal", "Duplicate this page"), self.duplicate_current_page, "slate"),
-             ("↶", _L("Undo", "Undo"), _L("Aakhri sudhaar wapas", "Undo last edit"), self._pv_undo, "slate"),
-             ("🗑️", _L("Delete", "Delete"), _L("Ye page hatao", "Delete this page"), self.delete_page, "slate"),
-             ("⋯", _L("Aur", "More"), _L("Compare/loupe/slideshow/save-as/print…", "Compare/loupe/slideshow/save-as/print…"), self._pv_more_menu, "slate")),
-        ):
-            _qe = QtWidgets.QHBoxLayout(); _qe.setSpacing(4)
-            for _ic, _lb, _tip, _fn, _g in _rowdef:
-                _qe.addWidget(self._mk_pv_btn(_ic, _lb, _tip, _fn, grp=_g))
-            pv.addLayout(_qe)
+        # ---- Ek hi "Open editor" button — saare edit tools ab naye
+        #      document editor me hain (double-click ya isse khulta hai). ----
+        _edit_btn = QtWidgets.QPushButton(self.L("🎨 Open editor", "🎨 Open editor"))
+        _edit_btn.setToolTip(self.L(
+            "Poora document editor kholo — crop, seedha, saaf, whiten, sign, text… sab kuch.",
+            "Open the full document editor — crop, straighten, clean, whiten, sign, text… everything."))
+        _edit_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        _edit_btn.setStyleSheet(
+            "QPushButton{font-size:12px;font-weight:700;padding:7px;border-radius:8px;"
+            "border:1px solid #0f766e;background:#0f766e;color:#fff;}"
+            "QPushButton:hover{background:#0d5f58;}")
+        _edit_btn.clicked.connect(lambda: self._pv_open_image_editor())
+        pv.addWidget(_edit_btn)
         self.pv_info = QtWidgets.QLabel("")
         self.pv_info.setStyleSheet("color:#64748b;font-size:11px;")
         self.pv_info.setWordWrap(True)
