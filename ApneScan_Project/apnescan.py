@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "83"
+VERSION = "84"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9467,8 +9467,46 @@ if the toggle is ticked).</p>
                 return None
         return None
 
+    def _render_pdf_all_pages_qimage(self, path, cap=30, zoom=1.3):
+        """PDF ke SAARE pages (cap tak) ko ek lambi image me jodo — user neeche
+        scroll karke sab dekh sake. QImage/QPainter background thread me safe
+        hai, isliye UI kabhi atkegi nahi. (qimage, total_pages) lautata hai."""
+        try:
+            doc = fitz.open(path)
+        except Exception:
+            return None, 0
+        total = doc.page_count
+        n = min(total, cap)
+        imgs = []
+        maxw = 1
+        for i in range(n):
+            try:
+                pix = doc.load_page(i).get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                qi = QtGui.QImage(pix.samples, pix.width, pix.height,
+                                  pix.stride, QtGui.QImage.Format_RGB888).copy()
+                imgs.append(qi); maxw = max(maxw, qi.width())
+            except Exception:
+                pass
+        doc.close()
+        if not imgs:
+            return None, total
+        gap = 14
+        total_h = sum(im.height() for im in imgs) + gap * (len(imgs) + 1)
+        canvas = QtGui.QImage(maxw, total_h, QtGui.QImage.Format_RGB888)
+        canvas.fill(QtGui.QColor("#e5e7eb"))     # halka grey — pages ke beech gap dikhe
+        p = QtGui.QPainter(canvas)
+        y = gap
+        for im in imgs:
+            x = (maxw - im.width()) // 2
+            p.fillRect(x, y, im.width(), im.height(), QtGui.QColor("#ffffff"))
+            p.drawImage(x, y, im)
+            y += im.height() + gap
+        p.end()
+        return canvas, total
+
     def _preview_file_in_panel(self, path):
-        """Preview panel me is file ki jhalak dikhao (band ho to khol do)."""
+        """Preview panel me is file ki jhalak dikhao (band ho to khol do).
+        Multi-page PDF ke SAARE pages neeche-neeche dikhte hain (scroll)."""
         if not getattr(self, "preview_panel", None):
             return
         if not self.preview_panel.isVisible():
@@ -9479,6 +9517,48 @@ if the toggle is ticked).</p>
             self.pv_tabs.setCurrentIndex(0)
         except Exception:
             pass
+        self._pv_file_path = path            # race-guard (beech me doosri file to)
+        try:
+            kb = os.path.getsize(path) / 1024.0
+            szt = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024))
+        except Exception:
+            szt = "-"
+        ext = os.path.splitext(path)[1].lower()
+
+        # Multi-page PDF -> saare pages ek lambi image me (BACKGROUND me)
+        if ext == ".pdf" and HAS_FITZ:
+            self.pv_title.setText(self.L("👁 Khul raha hai…", "👁 Loading…"))
+
+            def job():
+                return self._render_pdf_all_pages_qimage(path)
+
+            def done(res):
+                if getattr(self, "_pv_file_path", None) != path:
+                    return                    # tab tak user ne doosri file chun li
+                qi, total = (res if isinstance(res, tuple) else (None, 0))
+                if qi is None or qi.isNull():
+                    self.pv_img.clear(); self._pv_pm = None
+                    self.pv_title.setText(self.L("👁 Preview nahi bana", "👁 No preview"))
+                    self.pv_info.setText(name); self.pv_text.setPlainText("")
+                    return
+                self._pv_pm = QtGui.QPixmap.fromImage(qi)
+                self._pv_zoom = 1.0
+                capd = self.L(" (pehle 30)", " (first 30)") if total > 30 else ""
+                self.pv_title.setText("%s — %d %s%s"
+                                      % (name, total, self.L("page", "pages"), capd))
+                self._pv_render()
+                QtCore.QTimer.singleShot(30, self._pv_render)
+                self.pv_info.setText("%s · %s · %d %s"
+                                     % (name, szt, total, self.L("page", "pages")))
+                self.pv_info2.setText(
+                    "<b>%s</b><br>📄 %d %s<br>💾 %s<br>"
+                    "<span style='color:#94a3b8'>%s</span>"
+                    % (name, total, self.L("page", "pages"), szt, path))
+                self.pv_text.setPlainText("")
+            self._run_bg_quiet(job, done)
+            return
+
+        # Image / single -> seedha
         pm = self._render_file_pixmap(path)
         if pm is None:
             self.pv_img.clear(); self._pv_pm = None
@@ -9492,13 +9572,7 @@ if the toggle is ticked).</p>
         self._pv_zoom = 1.0
         self.pv_title.setText(name)
         self._pv_render()
-        # panel abhi-abhi khula ho to width settle hone par dobara render
         QtCore.QTimer.singleShot(30, self._pv_render)
-        try:
-            kb = os.path.getsize(path) / 1024.0
-            szt = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024))
-        except Exception:
-            szt = "-"
         self.pv_info.setText("%s · %s · %d×%d" % (name, szt, pm.width(), pm.height()))
         self.pv_info2.setText("<b>%s</b><br>📐 %d × %d px<br>💾 %s<br>"
                               "<span style='color:#94a3b8'>%s</span>"
