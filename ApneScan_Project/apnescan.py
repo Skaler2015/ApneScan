@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "91"
+VERSION = "92"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3482,11 +3482,15 @@ class ImageEditor(QtWidgets.QDialog):
         bfix.setToolTip(L("Seedha + crop + saaf + whiten — sab ek saath",
                           "Straighten + crop + enhance + whiten — all at once"))
         bfix.clicked.connect(self._auto_fix)
+        bmagic = QtWidgets.QPushButton("🪄 " + L("Magic", "Magic")); bmagic.setObjectName("ghost")
+        bmagic.setToolTip(L("Scanner jaisa: background pura safed, akshar gehre-saaf",
+                            "Scanner-clean: pure white background, crisp dark text"))
+        bmagic.clicked.connect(self._magic_color)
         bup = QtWidgets.QPushButton("🔤 " + L("Auto-seedha", "Auto-upright")); bup.setObjectName("ghost")
         bup.setToolTip(L("Text padhkar ulta/tirchha page seedha karo",
                          "Use OCR to turn a sideways page upright"))
         bup.clicked.connect(self._auto_upright)
-        top.addWidget(bfix); top.addWidget(bup)
+        top.addWidget(bfix); top.addWidget(bmagic); top.addWidget(bup)
         top.addSpacing(10)
         for ic, tip, fn in (("➖", L("Zoom kam", "Zoom out"), lambda: self._set_zoom(self.zoom / 1.25)),
                             ("🔳", L("Fit", "Fit"), lambda: self._set_zoom(1.0)),
@@ -3519,10 +3523,12 @@ class ImageEditor(QtWidgets.QDialog):
             ("rect", "▭", L("Aayat", "Rect"), L("Aayat", "Rectangle")),
             ("circle", "◯", L("Gola", "Circle"), L("Gola", "Circle")),
             ("box", "🖍", L("Mark", "Mark"), L("Peela highlight", "Highlight")),
-            ("redact", "🖤", L("Chhupao", "Redact"), L("Kaala box", "Black box")),
+            ("redact", "🖤", L("Chhupao", "Redact"), L("Kaala box (jaankari sach me mit jaati hai)", "Black box (data truly erased)")),
             ("blur", "🌫", L("Dhundhla", "Blur"), L("Chehra/jaankari dhundhli", "Blur an area")),
+            ("note", "🗒", L("Note", "Note"), L("Chipakne wala peela note", "Sticky note")),
+            ("stamp", "✔", L("Mohar", "Stamp"), L("Tick / cross / star / date", "Tick / cross / star / date")),
             ("sign", "✍", L("Sign", "Sign"), L("Sign/mohar", "Signature/stamp")),
-            ("persp", "📐", L("Kone", "Corners"), L("4 kone", "4 corners")),
+            ("persp", "📐", L("Kone", "Corners"), L("4 kone se seedha", "4-corner straighten")),
         ):
             b = QtWidgets.QToolButton(); b.setText(icon + "\n" + name)
             b.setToolTip(tip); b.setCheckable(True)
@@ -3562,7 +3568,12 @@ class ImageEditor(QtWidgets.QDialog):
         self.cmb_ratio.currentIndexChanged.connect(self._ratio_changed)
         self.sp_tsize = QtWidgets.QSpinBox(); self.sp_tsize.setRange(10, 200); self.sp_tsize.setValue(40)
         self.sp_tsize.valueChanged.connect(lambda v: setattr(self, "text_size", v))
-        for w in (QtWidgets.QLabel("○"), self.sl_brush, self.btn_col, self.cmb_ratio, self.sp_tsize):
+        self.cmb_stamp = QtWidgets.QComboBox()
+        for _g, _t in (("✔", L("Tick ✔", "Tick ✔")), ("✘", L("Cross ✘", "Cross ✘")),
+                       ("★", L("Star ★", "Star ★")), ("date", L("Aaj ki date", "Today's date")),
+                       ("approved", L("APPROVED", "APPROVED")), ("paid", L("PAID", "PAID"))):
+            self.cmb_stamp.addItem(_t, _g)
+        for w in (QtWidgets.QLabel("○"), self.sl_brush, self.btn_col, self.cmb_ratio, self.cmb_stamp, self.sp_tsize):
             ow.addWidget(w)
         ow.addStretch(1)
         sv.addWidget(self.opt_wrap)
@@ -3630,11 +3641,97 @@ class ImageEditor(QtWidgets.QDialog):
         cbtn(2, 1, "🩶", "Gray", lambda: self._op(lambda im: im.convert("L").convert("RGB")))
         cbtn(3, 0, "🔄", L("Ulta", "Invert"), lambda: self._op(lambda im: ImageOps.invert(im.convert("RGB"))))
         cbtn(3, 1, "🔢", "Page #", self._add_page_number)
+        cbtn(4, 0, "🟤", L("Purani", "Sepia"), lambda: self._op(self._sepia_fn))
+        cbtn(4, 1, "❄", L("Denoise", "Denoise"), lambda: self._op(lambda im: im.filter(ImageFilter.MedianFilter(5))))
         sv.addLayout(cg)
 
-        self.chk_all = QtWidgets.QCheckBox(L("Sab pages par lagao", "Apply to ALL pages"))
-        self.chk_all.setStyleSheet("font-size:11px;color:#475569;margin-top:4px;")
-        sv.addWidget(self.chk_all)
+        # ---- SMART (ek click) ----
+        grp(L("SMART", "SMART"))
+        sg = QtWidgets.QGridLayout(); sg.setSpacing(4)
+
+        def sgbtn(r, c, icon, name, fn, tip=""):
+            b = QtWidgets.QToolButton(); b.setText(icon + " " + name)
+            b.setProperty("class", "act"); b.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            if tip:
+                b.setToolTip(tip)
+            b.clicked.connect(fn); sg.addWidget(b, r, c)
+        sgbtn(0, 0, "🔲", L("Auto kinaara", "Auto edges"), self._smart_perspective,
+              L("Kagaz ke 4 kone khud dhoondh kar seedha aayat banao",
+                "Auto-detect the paper's 4 corners and flatten to a rectangle"))
+        sgbtn(0, 1, "🧾", L("Naam sujhao", "Suggest name"), self._suggest_name,
+              L("Andar ka text padhkar file ka naam sujhao", "Read the text and suggest a filename"))
+        sgbtn(1, 0, "🗑", L("Khaali hatao", "Drop blank"), self._remove_blank_pages,
+              L("Khaali pages dhoondh kar hatao (sabhi pages me)", "Find & remove blank pages (all pages)"))
+        sgbtn(1, 1, "⚖", L("Quality", "Quality"), self._quality_check,
+              L("Page ki quality jaancho + turant sudhaar", "Check page quality + one-click fix"))
+        sv.addLayout(sg)
+
+        # ---- PRIVACY ----
+        grp(L("NIJTA (privacy)", "PRIVACY"))
+        pg = QtWidgets.QGridLayout(); pg.setSpacing(4)
+
+        def pgbtn(r, c, icon, name, fn, tip=""):
+            b = QtWidgets.QToolButton(); b.setText(icon + " " + name)
+            b.setProperty("class", "act"); b.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            if tip:
+                b.setToolTip(tip)
+            b.clicked.connect(fn); pg.addWidget(b, r, c)
+        pgbtn(0, 0, "🙈", L("Auto chhupao", "Auto-hide"), self._auto_redact,
+              L("Mobile/Aadhaar/UHID jaisi jaankari khud kaali karo",
+                "Auto-black mobile/Aadhaar/UHID-like info"))
+        pgbtn(0, 1, "💧", L("Watermark", "Watermark"), self._add_watermark,
+              L("Poore page par halka COPY/naam", "Faint COPY/name across the page"))
+        sv.addLayout(pg)
+
+        # ---- CROP / LAYOUT ----
+        grp(L("CROP / LAYOUT", "CROP / LAYOUT"))
+        lg = QtWidgets.QGridLayout(); lg.setSpacing(4)
+
+        def lgbtn(r, c, icon, name, fn, tip=""):
+            b = QtWidgets.QToolButton(); b.setText(icon + " " + name)
+            b.setProperty("class", "act"); b.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            if tip:
+                b.setToolTip(tip)
+            b.clicked.connect(fn); lg.addWidget(b, r, c)
+        lgbtn(0, 0, "✂", L("Beech se kaato", "Split page"), self._split_page,
+              L("Ek page ko beech se do pages me kaato", "Cut one page into two"))
+        lgbtn(0, 1, "➕", L("Hashiya", "Margins"), self._add_margin,
+              L("Chaaro taraf safed border jodo", "Add a white border around the page"))
+        lgbtn(1, 0, "▦", L("Grid", "Grid"), self._toggle_grid,
+              L("Seedha karne ke liye jaali dikhao/chhupao", "Show/hide a straightening grid"))
+        lgbtn(1, 1, "🪪", L("ID 2-side", "ID 2-side"), self._id_two_side,
+              L("Is page ko agla page ke saath ek A4 par", "This + next page together on one A4"))
+        sv.addLayout(lg)
+
+        # ---- TEXT / OCR ----
+        grp(L("TEXT / OCR", "TEXT / OCR"))
+        tg = QtWidgets.QGridLayout(); tg.setSpacing(4)
+
+        def tgbtn(r, c, icon, name, fn, tip=""):
+            b = QtWidgets.QToolButton(); b.setText(icon + " " + name)
+            b.setProperty("class", "act"); b.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            if tip:
+                b.setToolTip(tip)
+            b.clicked.connect(fn); tg.addWidget(b, r, c)
+        tgbtn(0, 0, "📋", L("Text copy", "Copy text"), self._ocr_copy,
+              L("Page ka text padhkar clipboard me", "OCR the page text to the clipboard"))
+        tgbtn(0, 1, "🔍", L("Text dikhao", "Show text"), self._ocr_show,
+              L("Nikala hua text ek box me dikhao", "Show the extracted text in a box"))
+        sv.addLayout(tg)
+        self.chk_searchable = QtWidgets.QCheckBox(L("PDF me text bhi (khoja ja sake)",
+                                                    "Searchable PDF (embed text)"))
+        self.chk_searchable.setStyleSheet("font-size:11px;color:#475569;")
+        sv.addWidget(self.chk_searchable)
+
+        # ---- kis-kis page par lage ----
+        grp(L("KIS PAGE PAR?", "APPLY TO"))
+        self.cmb_scope = QtWidgets.QComboBox()
+        for _v, _t in (("one", L("Sirf yeh page", "This page only")),
+                       ("sel", L("Chune hue pages (filmstrip)", "Selected pages (filmstrip)")),
+                       ("all", L("SABHI pages", "ALL pages"))):
+            self.cmb_scope.addItem(_t, _v)
+        self.cmb_scope.setStyleSheet("font-size:11px;")
+        sv.addWidget(self.cmb_scope)
         sv.addStretch(1)
         side_scroll = QtWidgets.QScrollArea(); side_scroll.setWidgetResizable(True)
         side_scroll.setWidget(side); side_scroll.setFixedWidth(288)
@@ -3649,6 +3746,10 @@ class ImageEditor(QtWidgets.QDialog):
         self.film.setViewMode(QtWidgets.QListView.IconMode); self.film.setFlow(QtWidgets.QListView.LeftToRight)
         self.film.setWrapping(False); self.film.setFixedHeight(72); self.film.setIconSize(QtCore.QSize(48, 60))
         self.film.setMovement(QtWidgets.QListView.Static)
+        self.film.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.film.setToolTip(self.L(
+            "Click = us page par jao. Ctrl+click = kai pages chuno ('Chune hue pages' scope ke liye).",
+            "Click = go to that page. Ctrl+click = pick several ('Selected pages' scope)."))
         self.film.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         self.film.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.film.itemClicked.connect(self._film_click)
@@ -3677,6 +3778,9 @@ class ImageEditor(QtWidgets.QDialog):
             b = QtWidgets.QToolButton(); b.setText(ic + " " + name); b.setProperty("class", "act")
             b.clicked.connect(fn); bot.addWidget(b)
         bot.addStretch(1)
+        bmore = QtWidgets.QPushButton("⋯ " + L("Aur", "More")); bmore.setObjectName("ghost")
+        bmore.clicked.connect(self._more_menu)
+        bot.addWidget(bmore)
         bprint = QtWidgets.QPushButton("🖨 " + L("Print", "Print")); bprint.setObjectName("ghost")
         bprint.clicked.connect(self._print)
         bpdf = QtWidgets.QPushButton("📄 " + L("Poora PDF", "Save all PDF")); bpdf.setObjectName("ghost")
@@ -3776,9 +3880,10 @@ class ImageEditor(QtWidgets.QDialog):
     def _update_tool_opts(self):
         t = self.tool
         self.sl_brush.setVisible(t in ("erase", "pen", "blur"))
-        self.btn_col.setVisible(t in ("pen", "text", "line", "arrow", "rect", "circle"))
+        self.btn_col.setVisible(t in ("pen", "text", "line", "arrow", "rect", "circle", "note"))
         self.cmb_ratio.setVisible(t == "crop")
-        self.sp_tsize.setVisible(t == "text")
+        self.cmb_stamp.setVisible(t == "stamp")
+        self.sp_tsize.setVisible(t in ("text", "note", "stamp"))
 
     def _set_tool(self, t):
         self.tool = t
@@ -3829,6 +3934,10 @@ class ImageEditor(QtWidgets.QDialog):
             self._bake(); self._penning = True; self._pen_last = pos; self._pen_to(pos)
         elif t == "text":
             self._place_text(pos)
+        elif t == "note":
+            self._place_note(pos)
+        elif t == "stamp":
+            self._place_stamp(pos)
         elif t == "sign":
             self._place_sign(pos)
         elif t == "persp":
@@ -3877,9 +3986,19 @@ class ImageEditor(QtWidgets.QDialog):
         self.canvas.update()
 
     def _overlay(self, canvas):
-        if not (self._start and self._cur) and not self._corners:
+        grid_on = getattr(self, "_grid_on", False)
+        if not (self._start and self._cur) and not self._corners and not grid_on:
             return
         p = QtGui.QPainter(canvas)
+        if grid_on:
+            gp = QtGui.QPen(QtGui.QColor(15, 118, 110, 80)); gp.setWidth(1); p.setPen(gp)
+            w = canvas.width(); h = canvas.height(); step = max(24, w // 12)
+            x = step
+            while x < w:
+                p.drawLine(x, 0, x, h); x += step
+            y = step
+            while y < h:
+                p.drawLine(0, y, w, y); y += step
         if self._start and self._cur:
             col = "#111827" if self.tool == "redact" else "#0f766e"
             pen = QtGui.QPen(QtGui.QColor(col)); pen.setWidth(2); p.setPen(pen)
@@ -4059,17 +4178,57 @@ class ImageEditor(QtWidgets.QDialog):
         self.sl_angle.blockSignals(True); self.sl_angle.setValue(0); self.sl_angle.blockSignals(False)
         self.lbl_angle.setText("0°"); self._render()
 
-    # ---- generic op (single ya sab pages) ----
+    # ---- generic op (yeh page / chune hue / sabhi) ----
+    def _scope(self):
+        try:
+            return self.cmb_scope.currentData()
+        except Exception:
+            return "one"
+
     def _op(self, fn):
-        if self.chk_all.isChecked():
+        sc = self._scope()
+        if sc == "all":
             self._apply_all_pages(fn)
+        elif sc == "sel":
+            rows = sorted({self.film.row(it) for it in self.film.selectedItems()})
+            rows = [r for r in rows if r >= 0]
+            if len(rows) <= 1:
+                self._op_one(fn)
+            else:
+                self._apply_rows(fn, rows)
         else:
-            self._bake()
-            try:
-                self.base = fn(self.base).convert("RGB")
-            except Exception:
-                pass
-            self._render()
+            self._op_one(fn)
+
+    def _op_one(self, fn):
+        self._bake()
+        try:
+            self.base = fn(self.base).convert("RGB")
+        except Exception:
+            pass
+        self._render()
+
+    def _apply_rows(self, fn, rows):
+        self._persist()
+        try:
+            for i in rows:
+                if i == self.row:
+                    continue
+                p = self.win.list.item(i).data(QtCore.Qt.UserRole)
+                try:
+                    im = Image.open(p).convert("RGB")
+                    fn(im).convert("RGB").save(p, "PNG")
+                except Exception:
+                    pass
+            # current page bhi (agar chuna hai)
+            if self.row in rows:
+                self._op_one(fn)
+                self._persist()
+            if callable(self.on_saved):
+                self.on_saved()
+        except Exception:
+            pass
+        self._dirty_any = False
+        self._load_current(); self._build_film()
 
     def _apply_all_pages(self, fn):
         self._persist()
@@ -4288,8 +4447,22 @@ class ImageEditor(QtWidgets.QDialog):
             return
         try:
             paths = [self.win.list.item(i).data(QtCore.Qt.UserRole) for i in range(self.win.list.count())]
-            self.win._pages_as_pdf(paths, out)
-            self.win.status.showMessage(self.L("📄 PDF ban gaya: ", "📄 PDF saved: ") + os.path.basename(out), 7000)
+            want_txt = False
+            try:
+                want_txt = self.chk_searchable.isChecked()
+            except Exception:
+                pass
+            if want_txt and tesseract_available():
+                self.setCursor(QtCore.Qt.WaitCursor)
+                try:
+                    self.win._save_ocr_pdf(paths, out)
+                finally:
+                    self.unsetCursor()
+                self.win.status.showMessage(
+                    self.L("📄 Searchable PDF ban gaya: ", "📄 Searchable PDF saved: ") + os.path.basename(out), 7000)
+            else:
+                self.win._pages_as_pdf(paths, out)
+                self.win.status.showMessage(self.L("📄 PDF ban gaya: ", "📄 PDF saved: ") + os.path.basename(out), 7000)
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, APP_NAME, str(e))
 
@@ -4300,6 +4473,501 @@ class ImageEditor(QtWidgets.QDialog):
             self.win._do_print([self.path], per_page=1)
         except Exception:
             pass
+
+    # ================= SMART / COLOUR extras =================
+    def _sepia_fn(self, im):
+        try:
+            g = im.convert("L")
+            return ImageOps.colorize(g, black=(35, 22, 10), white=(255, 240, 205)).convert("RGB")
+        except Exception:
+            return im.convert("RGB")
+
+    def _magic_color(self):
+        def fn(im):
+            try:
+                im = whiten_dark_background(im)
+                im = auto_enhance(im).convert("RGB")
+                im = ImageEnhance.Contrast(im).enhance(1.15)
+                im = ImageEnhance.Sharpness(im).enhance(1.3)
+            except Exception:
+                pass
+            return im.convert("RGB")
+        self._op(fn)
+
+    def _smart_perspective(self):
+        def fn(im):
+            try:
+                im = deskew(im)
+                im = autocrop(im)
+            except Exception:
+                pass
+            return im.convert("RGB")
+        self._op(fn)
+
+    def _suggest_name(self):
+        if not tesseract_available():
+            QtWidgets.QMessageBox.information(self, APP_NAME,
+                self.L("Iske liye Tesseract OCR chahiye.", "This needs Tesseract OCR.")); return
+        self.setCursor(QtCore.Qt.WaitCursor)
+        txt = self._ocr_text(self.base)
+        self.unsetCursor()
+        import re as _re
+        cand = ""
+        for line in (txt or "").splitlines():
+            s = line.strip()
+            if len(s) >= 4 and any(c.isalpha() for c in s):
+                cand = s; break
+        cand = _re.sub(r"[^A-Za-z0-9 \-]", "", cand).strip().replace(" ", "_")[:40] or "document"
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Naam sujhao", "Suggest name"),
+            self.L("Document ka naam:", "Document name:"), text=cand)
+        if ok and name.strip():
+            try:
+                self.win.claim_edit.setText(name.strip())
+                self.win.status.showMessage(self.L("Naam set: ", "Name set: ") + name.strip(), 5000)
+            except Exception:
+                QtWidgets.QApplication.clipboard().setText(name.strip())
+
+    def _remove_blank_pages(self):
+        n = self.win.list.count()
+        if n <= 1:
+            QtWidgets.QMessageBox.information(self, APP_NAME,
+                self.L("Sirf ek page hai.", "Only one page.")); return
+        self._persist()
+        self.setCursor(QtCore.Qt.WaitCursor)
+        blanks = []
+        for i in range(n):
+            p = self.win.list.item(i).data(QtCore.Qt.UserRole)
+            try:
+                if is_blank_page(Image.open(p)):
+                    blanks.append(i)
+            except Exception:
+                pass
+        self.unsetCursor()
+        if not blanks:
+            QtWidgets.QMessageBox.information(self, APP_NAME,
+                self.L("Koi khaali page nahi mila.", "No blank pages found.")); return
+        if len(blanks) >= n:
+            blanks = blanks[1:]        # kam se kam ek page bacha rahe
+        if not blanks:
+            return
+        if QtWidgets.QMessageBox.question(
+                self, APP_NAME,
+                self.L("%d khaali page mile. Hataayein?" % len(blanks),
+                       "Found %d blank page(s). Remove them?" % len(blanks)),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            return
+        try:
+            self.win.list.clearSelection()
+            for i in blanks:
+                it = self.win.list.item(i)
+                if it:
+                    it.setSelected(True)
+            self.win.delete_page()
+            self.row = min(self.row, self.win.list.count() - 1)
+            self.win.list.setCurrentRow(self.row)
+            self.path = self.win.list.item(self.row).data(QtCore.Qt.UserRole)
+            self._dirty_any = False
+            self._load_current(); self._build_film()
+            if callable(self.on_saved):
+                self.on_saved()
+        except Exception:
+            pass
+
+    def _quality_check(self):
+        im = self.base.convert("L")
+        small = im.resize((min(420, im.width), min(420, im.height)))
+        px = list(small.getdata()); mean = (sum(px) / len(px)) if px else 128
+        issues = []
+        if mean < 90:
+            issues.append(self.L("Page bahut gehra/kaala hai — 'Ujla' ya Auto-Fix karein.",
+                                 "Page is too dark — try brighten or Auto-Fix."))
+        elif mean > 212:
+            issues.append(self.L("Page bahut halka/feeka hai — Contrast badhaayein.",
+                                 "Page is very faint — increase contrast."))
+        if HAS_NUMPY:
+            try:
+                import numpy as _np
+                a = _np.asarray(small, dtype=_np.float32)
+                sharp = _np.abs(_np.diff(a, axis=1)).mean()
+                if sharp < 4:
+                    issues.append(self.L("Page dhundhla lag raha hai — 'Dhaar' slider badhaayein.",
+                                         "Page looks blurry — raise the sharpness slider."))
+            except Exception:
+                pass
+        if not issues:
+            QtWidgets.QMessageBox.information(self, APP_NAME,
+                self.L("Page theek dikh raha hai ✔", "This page looks good ✔")); return
+        msg = self.L("Sujhaav:", "Suggestions:") + "\n\n• " + "\n• ".join(issues) + \
+            "\n\n" + self.L("Abhi Auto-Fix laga dein?", "Apply Auto-Fix now?")
+        if QtWidgets.QMessageBox.question(self, APP_NAME, msg,
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes:
+            self._auto_fix()
+
+    # ================= PRIVACY =================
+    def _auto_redact(self):
+        if not tesseract_available():
+            QtWidgets.QMessageBox.information(self, APP_NAME,
+                self.L("Iske liye Tesseract OCR chahiye.", "This needs Tesseract OCR.")); return
+        import re as _re
+        self.setCursor(QtCore.Qt.WaitCursor)
+        try:
+            data = pytesseract.image_to_data(self.base.convert("RGB"),
+                                             output_type=pytesseract.Output.DICT)
+        except Exception:
+            self.unsetCursor()
+            QtWidgets.QMessageBox.warning(self, APP_NAME,
+                self.L("OCR nahi ho paaya.", "OCR failed.")); return
+        self.unsetCursor()
+        boxes = []
+        words = data.get("text", [])
+        for i, wtok in enumerate(words):
+            digits = _re.sub(r"\D", "", (wtok or ""))
+            if len(digits) >= 8:      # mobile(10) / Aadhaar(12) / UHID jaise
+                try:
+                    boxes.append((data["left"][i], data["top"][i],
+                                  data["width"][i], data["height"][i]))
+                except Exception:
+                    pass
+        if not boxes:
+            QtWidgets.QMessageBox.information(self, APP_NAME,
+                self.L("Koi mobile/number jaisi jaankari nahi mili.",
+                       "No phone/number-like info found.")); return
+        self._bake()
+        d = ImageDraw.Draw(self.base)
+        for (x, y, w, h) in boxes:
+            d.rectangle([x - 2, y - 2, x + w + 2, y + h + 2], fill=(0, 0, 0))
+        self._render()
+        self.win.status.showMessage(
+            self.L("%d jagah chhupa di gayi." % len(boxes),
+                   "Hid %d spot(s)." % len(boxes)), 6000)
+
+    def _add_watermark(self):
+        txt, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Watermark", "Watermark"),
+            self.L("Kya likhein? (poore page par halka)", "Text (faint, across the page):"),
+            text="COPY")
+        if not ok or not txt.strip():
+            return
+        txt = txt.strip()
+
+        def fn(im):
+            im = im.convert("RGBA"); W, H = im.size
+            lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            d = ImageDraw.Draw(lay); f = self._font(max(28, int(W / 12)))
+            step = max(140, int(W / 3)); y = -H // 3
+            while y < int(H * 1.4):
+                x = -W // 3
+                while x < int(W * 1.4):
+                    d.text((x, y), txt, font=f, fill=(120, 120, 120, 55))
+                    x += step * 2
+                y += step
+            try:
+                lay = lay.rotate(30, expand=False)
+            except Exception:
+                pass
+            return Image.alpha_composite(im, lay).convert("RGB")
+        self._op(fn)
+
+    # ================= CROP / LAYOUT =================
+    def _split_page(self):
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle(APP_NAME)
+        box.setText(self.L("Page ko kaise kaatein?", "How to split the page?"))
+        b_lr = box.addButton(self.L("Baayen | Dayen", "Left | Right"), QtWidgets.QMessageBox.AcceptRole)
+        b_tb = box.addButton(self.L("Upar | Neeche", "Top | Bottom"), QtWidgets.QMessageBox.AcceptRole)
+        box.addButton(self.L("Rehne do", "Cancel"), QtWidgets.QMessageBox.RejectRole)
+        box.exec_()
+        clicked = box.clickedButton()
+        if clicked not in (b_lr, b_tb):
+            return
+        self._persist()
+        im = self.base.convert("RGB"); W, H = im.size
+        if clicked is b_lr:
+            p1 = im.crop((0, 0, W // 2, H)); p2 = im.crop((W // 2, 0, W, H))
+        else:
+            p1 = im.crop((0, 0, W, H // 2)); p2 = im.crop((0, H // 2, W, H))
+        try:
+            p1.save(self.path, "PNG")
+            fd, out = tempfile.mkstemp(suffix=".png", dir=self.win._tmpdir); os.close(fd)
+            p2.save(out, "PNG")
+            self.win._add_item_for_path(out, at=self.row + 1)
+            self._dirty_any = False
+            self._load_current(); self._build_film()
+            if callable(self.on_saved):
+                self.on_saved()
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, APP_NAME, str(e))
+
+    def _add_margin(self):
+        def fn(im):
+            im = im.convert("RGB")
+            m = max(12, int(im.width * 0.05))
+            return ImageOps.expand(im, border=m, fill="white")
+        self._op(fn)
+
+    def _toggle_grid(self):
+        self._grid_on = not getattr(self, "_grid_on", False)
+        self.canvas.update()
+
+    def _id_two_side(self):
+        n = self.win.list.count()
+        if self.row >= n - 1:
+            QtWidgets.QMessageBox.information(self, APP_NAME,
+                self.L("Iske aage koi page nahi. ID ke dono side do alag page par scan karein.",
+                       "No page after this. Scan both ID sides as two pages first.")); return
+        self._persist()
+        try:
+            a = Image.open(self.path).convert("RGB")
+            b = Image.open(self.win.list.item(self.row + 1).data(QtCore.Qt.UserRole)).convert("RGB")
+            A4 = (1240, 1754)
+            canvas = Image.new("RGB", A4, "white")
+            half = A4[1] // 2
+
+            def fit(im, bw, bh):
+                im = im.copy(); im.thumbnail((bw - 60, bh - 60)); return im
+            fa = fit(a, A4[0], half); fb = fit(b, A4[0], half)
+            canvas.paste(fa, ((A4[0] - fa.width) // 2, (half - fa.height) // 2))
+            canvas.paste(fb, ((A4[0] - fb.width) // 2, half + (half - fb.height) // 2))
+            fd, out = tempfile.mkstemp(suffix=".png", dir=self.win._tmpdir); os.close(fd)
+            canvas.save(out, "PNG")
+            self.win._add_item_for_path(out, at=self.row + 2)
+            self._build_film()
+            if callable(self.on_saved):
+                self.on_saved()
+            self.win.status.showMessage(
+                self.L("🪪 ID dono side ek A4 par ban gaya (naya page).",
+                       "🪪 Both ID sides placed on one A4 (new page)."), 6000)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, APP_NAME, str(e))
+
+    # ================= TEXT / OCR =================
+    def _ocr_text(self, im):
+        try:
+            return pytesseract.image_to_string(im.convert("RGB"), lang="eng+hin")
+        except Exception:
+            try:
+                return pytesseract.image_to_string(im.convert("RGB"))
+            except Exception:
+                return ""
+
+    def _ocr_copy(self):
+        if not tesseract_available():
+            QtWidgets.QMessageBox.information(self, APP_NAME,
+                self.L("Iske liye Tesseract OCR chahiye.", "This needs Tesseract OCR.")); return
+        self.setCursor(QtCore.Qt.WaitCursor)
+        t = self._ocr_text(self.base)
+        self.unsetCursor()
+        QtWidgets.QApplication.clipboard().setText(t or "")
+        if (t or "").strip():
+            self.win.status.showMessage(self.L("📋 Text copy ho gaya.", "📋 Text copied."), 5000)
+        else:
+            QtWidgets.QMessageBox.information(self, APP_NAME,
+                self.L("Is page par koi text nahi mila.", "No text found on this page."))
+
+    def _ocr_show(self):
+        if not tesseract_available():
+            QtWidgets.QMessageBox.information(self, APP_NAME,
+                self.L("Iske liye Tesseract OCR chahiye.", "This needs Tesseract OCR.")); return
+        self.setCursor(QtCore.Qt.WaitCursor)
+        t = self._ocr_text(self.base)
+        self.unsetCursor()
+        dlg = QtWidgets.QDialog(self); dlg.setWindowTitle(self.L("Page ka text", "Page text"))
+        dlg.resize(560, 600)
+        v = QtWidgets.QVBoxLayout(dlg)
+        te = QtWidgets.QTextEdit(); te.setPlainText(t or ""); v.addWidget(te)
+        h = QtWidgets.QHBoxLayout(); h.addStretch(1)
+        bc = QtWidgets.QPushButton(self.L("Copy", "Copy")); bc.setObjectName("ghost")
+        bc.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(te.toPlainText()))
+        bx = QtWidgets.QPushButton(self.L("Band karo", "Close")); bx.setObjectName("primary")
+        bx.clicked.connect(dlg.accept)
+        h.addWidget(bc); h.addWidget(bx); v.addLayout(h)
+        dlg.exec_()
+
+    # ================= NOTE / STAMP tools =================
+    def _place_note(self, pos):
+        txt, ok = QtWidgets.QInputDialog.getMultiLineText(
+            self, self.L("Note", "Sticky note"), self.L("Note likhein:", "Note text:"))
+        if not ok or not txt.strip():
+            return
+        self._bake(); x, y = self._d2i(pos)
+        f = self._font(self.text_size)
+        d = ImageDraw.Draw(self.base)
+        try:
+            bb = d.multiline_textbbox((0, 0), txt, font=f); tw = bb[2] - bb[0]; th = bb[3] - bb[1]
+        except Exception:
+            tw = len(txt) * self.text_size // 2; th = self.text_size * (txt.count("\n") + 1)
+        pad = max(6, int(self.text_size * 0.4))
+        d.rectangle([x, y, x + tw + 2 * pad, y + th + 2 * pad],
+                    fill=(255, 245, 157), outline=(251, 192, 45), width=2)
+        d.multiline_text((x + pad, y + pad), txt, fill=(60, 50, 10), font=f)
+        self._render()
+
+    def _place_stamp(self, pos):
+        g = self.cmb_stamp.currentData()
+        self._bake(); x, y = self._d2i(pos)
+        d = ImageDraw.Draw(self.base)
+        if g == "date":
+            import datetime as _dt
+            s = _dt.datetime.now().strftime("%d-%b-%Y")
+            d.text((x, y), s, fill=(200, 20, 20), font=self._font(max(20, self.text_size)))
+        elif g in ("approved", "paid"):
+            s = "APPROVED" if g == "approved" else "PAID"
+            f = self._font(max(24, int(self.text_size * 1.2)))
+            try:
+                bb = d.textbbox((0, 0), s, font=f); tw = bb[2] - bb[0]; th = bb[3] - bb[1]
+            except Exception:
+                tw = len(s) * self.text_size // 2; th = self.text_size
+            pad = max(6, int(self.text_size * 0.4))
+            d.rectangle([x, y, x + tw + 2 * pad, y + th + 2 * pad], outline=(200, 20, 20), width=4)
+            d.text((x + pad, y + pad), s, fill=(200, 20, 20), font=f)
+        else:
+            col = (22, 160, 80) if g == "✔" else ((200, 20, 20) if g == "✘" else (240, 170, 20))
+            d.text((x, y), g, fill=col, font=self._font(max(30, int(self.text_size * 1.6))))
+        self._render()
+
+    # ================= MORE menu (reorder / preset / share / password) =================
+    def _more_menu(self):
+        m = QtWidgets.QMenu(self)
+        m.addAction("◀ " + self.L("Page baayen le jao", "Move page left"), lambda: self._move_page(-1))
+        m.addAction("▶ " + self.L("Page dayen le jao", "Move page right"), lambda: self._move_page(1))
+        m.addAction("⭜ " + self.L("Agle page se jodo", "Merge with next page"), self._merge_next)
+        m.addSeparator()
+        pm = m.addMenu("⭐ " + self.L("Preset (slider yaad)", "Preset (saved sliders)"))
+        pm.addAction(self.L("Abhi ke slider save karo…", "Save current sliders…"), self._save_preset)
+        presets = self.win._opts.get("editor_presets", {}) or {}
+        if presets:
+            pm.addSeparator()
+            for nm in list(presets.keys()):
+                pm.addAction(nm, lambda _c=False, n=nm: self._apply_preset(n))
+        m.addSeparator()
+        m.addAction("🔒 " + self.L("Password-wali PDF…", "Password-protect PDF…"), self._password_pdf)
+        sm = m.addMenu("📤 " + self.L("Bhejo", "Share"))
+        sm.addAction("🟢 WhatsApp", lambda: self._share("wa"))
+        sm.addAction("✉ Email", lambda: self._share("mail"))
+        m.addSeparator()
+        m.addAction("⌨ " + self.L("Shortcut list", "Keyboard shortcuts"), self._shortcuts_help)
+        m.exec_(QtGui.QCursor.pos())
+
+    def _move_page(self, delta):
+        n = self.win.list.count(); new = self.row + delta
+        if new < 0 or new >= n:
+            return
+        self._persist()
+        try:
+            it = self.win.list.takeItem(self.row)
+            self.win.list.insertItem(new, it)
+            self.row = new; self.win.list.setCurrentRow(new)
+            self.path = self.win.list.item(new).data(QtCore.Qt.UserRole)
+            try:
+                self.win._renumber_pages()
+            except Exception:
+                pass
+            self._dirty_any = False
+            self._load_current(); self._build_film()
+            if callable(self.on_saved):
+                self.on_saved()
+        except Exception:
+            pass
+
+    def _merge_next(self):
+        n = self.win.list.count()
+        if self.row >= n - 1:
+            QtWidgets.QMessageBox.information(self, APP_NAME,
+                self.L("Iske aage koi page nahi.", "There is no next page.")); return
+        self._persist()
+        try:
+            nxt = self.win.list.item(self.row + 1).data(QtCore.Qt.UserRole)
+            a = Image.open(self.path).convert("RGB")
+            b = Image.open(nxt).convert("RGB")
+            W = max(a.width, b.width)
+
+            def rw(im):
+                return im if im.width == W else im.resize((W, max(1, int(im.height * W / im.width))))
+            a2 = rw(a); b2 = rw(b)
+            combo = Image.new("RGB", (W, a2.height + b2.height), "white")
+            combo.paste(a2, (0, 0)); combo.paste(b2, (0, a2.height))
+            combo.save(self.path, "PNG")
+            self.win.list.clearSelection()
+            self.win.list.item(self.row + 1).setSelected(True)
+            self.win.delete_page()
+            self.win.list.setCurrentRow(self.row)
+            self.path = self.win.list.item(self.row).data(QtCore.Qt.UserRole)
+            self._dirty_any = False
+            self._load_current(); self._build_film()
+            if callable(self.on_saved):
+                self.on_saved()
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, APP_NAME, str(e))
+
+    def _save_preset(self):
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Preset", "Preset"), self.L("Preset ka naam:", "Preset name:"))
+        if not ok or not name.strip():
+            return
+        d = {k: self._sliders[k].value() for k in self._sliders}
+        d["bw"] = self.sl_bw.value()
+        presets = self.win._opts.setdefault("editor_presets", {})
+        presets[name.strip()] = d
+        try:
+            self.win._save_opts()
+        except Exception:
+            pass
+        self.win.status.showMessage(self.L("⭐ Preset save: ", "⭐ Preset saved: ") + name.strip(), 5000)
+
+    def _apply_preset(self, name):
+        d = (self.win._opts.get("editor_presets", {}) or {}).get(name)
+        if not d:
+            return
+        for k, s in self._sliders.items():
+            if k in d:
+                s.blockSignals(True); s.setValue(int(d[k])); s.blockSignals(False)
+        if "bw" in d:
+            self.sl_bw.setValue(int(d["bw"]))
+        self._render()
+
+    def _password_pdf(self):
+        pw, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Password PDF", "Password PDF"),
+            self.L("PDF ka password:", "PDF password:"), QtWidgets.QLineEdit.Normal, "")
+        if not ok or not pw:
+            return
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("Password-wali PDF", "Password PDF"),
+            os.path.join(self.win._opts.get("save_folder", os.path.expanduser("~")), "document.pdf"),
+            "PDF (*.pdf)")
+        if not out:
+            return
+        self._persist()
+        try:
+            paths = [self.win.list.item(i).data(QtCore.Qt.UserRole) for i in range(self.win.list.count())]
+            self.win._pages_as_pdf(paths, out, password=pw)
+            self.win.status.showMessage(self.L("🔒 Password PDF ban gaya: ", "🔒 Password PDF saved: ")
+                                        + os.path.basename(out), 7000)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, APP_NAME, str(e))
+
+    def _share(self, how):
+        self._persist()
+        try:
+            paths = [self.win.list.item(i).data(QtCore.Qt.UserRole) for i in range(self.win.list.count())]
+            fd, out = tempfile.mkstemp(suffix=".pdf", dir=self.win._tmpdir); os.close(fd)
+            self.win._pages_as_pdf(paths, out)
+            if how == "wa":
+                self.win.share_whatsapp(out)
+            else:
+                self.win.share_email(out)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, APP_NAME, str(e))
+
+    def _shortcuts_help(self):
+        QtWidgets.QMessageBox.information(
+            self, self.L("Shortcut", "Keyboard shortcuts"),
+            "C — Crop\nE — Erase\nP — Pen\nT — Text\nA — Arrow\nH — Highlight\n"
+            "B — Blur\nV — Pan\n[  — " + self.L("Baayen ghumao", "Rotate left") + "\n"
+            "]  — " + self.L("Dayen ghumao", "Rotate right") + "\n"
+            "Ctrl+Z — Undo\nCtrl+Shift+Z / Ctrl+Y — Redo\nCtrl+S — " + self.L("Save", "Save") + "\n"
+            "Ctrl+" + self.L("scroll", "scroll") + " — Zoom\nEsc — " + self.L("Band karo", "Close"))
 
     def keyPressEvent(self, e):
         k = e.key(); mod = e.modifiers()
