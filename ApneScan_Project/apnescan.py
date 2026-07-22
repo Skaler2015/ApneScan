@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "107"
+VERSION = "108"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -382,6 +382,9 @@ DEFAULT_OPTIONS = {
     "activity_log": False,
     "backup": False,
     "backup_folder": os.path.join(os.path.expanduser("~"), "Documents", "NobleScans_Backup"),
+    # Daily JPEG backup: har scan hote hi date-wise folder me 0001.jpg, 0002.jpg…
+    "daily_jpeg_backup": True,
+    "daily_jpeg_folder": os.path.join(os.path.expanduser("~"), "Documents", "ApneScan_DailyScans"),
     "scanner_method": "twain",   # "twain" ya "wia"
     "twain_file_xfer": False,    # experimental: continuous ADF feed (TWAIN file transfer)
     "auto_orient": False,        # ulta page OCR se seedha karo
@@ -3058,6 +3061,19 @@ class OptionsDialog(QtWidgets.QDialog):
         br.addWidget(self.backup_edit, 1); br.addWidget(bb)
         bw = QtWidgets.QWidget(); bw.setLayout(br); form.addRow(lblhelp("Backup folder:", 'हिन्दी: बैकअप कहाँ रखे वह फ़ोल्डर।\nEnglish: Folder for backups.'), bw)
 
+        # ---- Daily JPEG backup (scan hote hi date-wale folder me 0001.jpg…) ----
+        self.chk_djpeg = QtWidgets.QCheckBox("Daily JPEG backup (auto, on every scan)")
+        self.chk_djpeg.setChecked(self.opts.get("daily_jpeg_backup", True))
+        form.addRow(chkrow(self.chk_djpeg, 'हिन्दी: चालू होने पर: हर स्कैन होते ही आज की तारीख़ वाले फ़ोल्डर में document की एक JPEG कॉपी अपने-आप 0001.jpg, 0002.jpg… के नाम से सेव होती रहेगी (बैकअप)।\nEnglish: ON: every scanned page is auto-saved as a JPEG (0001.jpg, 0002.jpg…) into a folder named by today\'s date — a running backup.'))
+        djr = QtWidgets.QHBoxLayout()
+        self.djpeg_edit = QtWidgets.QLineEdit(self.opts.get("daily_jpeg_folder", ""))
+        djb = QtWidgets.QPushButton("…"); djb.setFixedWidth(36)
+        djb.clicked.connect(lambda: (lambda d: self.djpeg_edit.setText(d) if d else None)(
+            QtWidgets.QFileDialog.getExistingDirectory(self, "Daily backup folder", self.djpeg_edit.text())))
+        djr.addWidget(self.djpeg_edit, 1); djr.addWidget(djb)
+        djw = QtWidgets.QWidget(); djw.setLayout(djr)
+        form.addRow(lblhelp("Daily backup folder:", 'हिन्दी: रोज़ के JPEG बैकअप किस जगह बनें, वह फ़ोल्डर (अपने हिसाब से बदलो)।\nEnglish: Where the daily JPEG backups are created (change as you like).'), djw)
+
         btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept); btns.rejected.connect(self.reject)
         outer.addWidget(btns)
@@ -3111,6 +3127,8 @@ class OptionsDialog(QtWidgets.QDialog):
         o["activity_log"] = self.chk_log.isChecked()
         o["backup"] = self.chk_backup.isChecked()
         o["backup_folder"] = self.backup_edit.text().strip()
+        o["daily_jpeg_backup"] = self.chk_djpeg.isChecked()
+        o["daily_jpeg_folder"] = self.djpeg_edit.text().strip()
         return o
 
 
@@ -9418,6 +9436,13 @@ if the toggle is ticked).</p>
             self.L("Aakhri save ki hui file — click karke kholo",
                    "Last saved file — click to open"))
         self.status.addWidget(self.foot_last)
+        # Daily backup folder — aaj ka folder + kitne doc, click = folder kholo
+        self.status.addWidget(_sep())
+        self.foot_backup = _foot(
+            lambda: self._open_backup_today(),
+            self.L("Aaj ka backup folder — click karke kholo (setting me location badlo)",
+                   "Today's backup folder — click to open (change location in Settings)"))
+        self.status.addWidget(self.foot_backup)
         # v74 extra (customize se on/off): aaj ke scan · online · apna sandesh
         self.foot_today = _foot(None, self.L("Aaj kitne pages scan hue",
                                              "Pages scanned today"))
@@ -9871,6 +9896,7 @@ if the toggle is ticked).</p>
                 self._scan_place = ("insert", idx + 1)
             self._scan_count += 1
             self._name_one_page(row, path)
+            self._daily_jpeg_backup(path)
             try:
                 self._pv_build_filmstrip()
             except Exception:
@@ -9882,6 +9908,7 @@ if the toggle is ticked).</p>
         self._scan_count += 1
         # NAAM turant padhna shuru (per-page) — sab pages ke baad delay na ho
         self._name_one_page(self.list.count() - 1, path)
+        self._daily_jpeg_backup(path)
         if self._progress:
             self._progress.set_page(self._scan_count)
         if (self._opts.get("barcode_autofill") and not self._barcode_tried
@@ -14871,6 +14898,68 @@ if the toggle is ticked).</p>
         except Exception:
             pass
 
+    # ---- Daily JPEG backup: har scan hote hi date-wale folder me 0001.jpg… ----
+    def _daily_backup_base(self):
+        return (self._opts.get("daily_jpeg_folder") or
+                os.path.join(os.path.expanduser("~"), "Documents", "ApneScan_DailyScans"))
+
+    def _daily_backup_dir_today(self):
+        return os.path.join(self._daily_backup_base(),
+                            datetime.datetime.now().strftime("%Y-%m-%d"))
+
+    def _next_backup_num(self, folder):
+        mx = 0
+        try:
+            for f in os.listdir(folder):
+                m = re.match(r"(\d+)\.jpe?g$", f, re.IGNORECASE)
+                if m:
+                    mx = max(mx, int(m.group(1)))
+        except Exception:
+            pass
+        return mx + 1
+
+    def _daily_jpeg_backup(self, path):
+        """Har scan-page ki ek JPEG copy aaj ke date-wale folder me (0001, 0002…)."""
+        if not self._opts.get("daily_jpeg_backup", True):
+            return
+        try:
+            folder = self._daily_backup_dir_today()
+            os.makedirs(folder, exist_ok=True)
+            out = os.path.join(folder, "%04d.jpg" % self._next_backup_num(folder))
+            with Image.open(path) as im:
+                im.convert("RGB").save(out, "JPEG", quality=90)
+            self._update_backup_footer()
+        except Exception:
+            pass
+
+    def _open_backup_today(self):
+        try:
+            folder = self._daily_backup_dir_today()
+            os.makedirs(folder, exist_ok=True)
+            self._open_path(folder)
+        except Exception:
+            pass
+
+    def _update_backup_footer(self):
+        if not hasattr(self, "foot_backup"):
+            return
+        try:
+            if not self._opts.get("daily_jpeg_backup", True):
+                self.foot_backup.setText(""); self.foot_backup.setToolTip(""); return
+            folder = self._daily_backup_dir_today()
+            try:
+                cnt = len([f for f in os.listdir(folder)
+                           if re.match(r"\d+\.jpe?g$", f, re.IGNORECASE)])
+            except Exception:
+                cnt = 0
+            day = datetime.datetime.now().strftime("%d-%b")
+            self.foot_backup.setText("🗂 %s · %d doc" % (day, cnt))
+            self.foot_backup.setToolTip(self.L(
+                "Aaj ka backup folder:\n%s\n%d document — click karke kholo.\n(location: Settings → Options)" % (folder, cnt),
+                "Today's backup folder:\n%s\n%d documents — click to open.\n(change location: Settings → Options)" % (folder, cnt)))
+        except Exception:
+            pass
+
     def _auto_save_pdf(self):
         paths = self._ordered_paths()
         if not paths:
@@ -15334,6 +15423,7 @@ if the toggle is ticked).</p>
         """Smart footer — sab ek nazar me. (kisi bhi hisse me error aaye to
         baaki footer chalta rahe.)"""
         L = self.L
+        self._update_backup_footer()
         # folder
         try:
             root = self._files_root()
