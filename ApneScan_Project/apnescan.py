@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "98"
+VERSION = "99"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2297,6 +2297,62 @@ def learned_name_for(text, learned, thr=0.45):
             best_score, best_name = sc, name
     # thr=0.40 (narm) — par containment 0.6+ ho to bhi maan lo
     return best_name if best_score >= 0.40 else None
+
+
+# ---------------------------------------------------------------------------
+# Visual (shakl se) name-matching — OCR ki zaroorat NAHI. Page ki design/
+# layout + rang dekh kar pehle diye gaye naam se milaan. Handwritten/X-ray/
+# ID jaise pages ke liye (jahan OCR fail hota hai) sabse kaam ka.
+# ---------------------------------------------------------------------------
+def visual_signature(img):
+    """Page ki 'shakl' ka chhota fingerprint (OCR nahi):
+      - gray 16x16 average-hash bits  -> design/layout (kahan kaala/safed hai)
+      - colour 8x8 grid ke RGB         -> rang / document-type
+      - aspect-ratio                   -> portrait/landscape
+    Do same-dikhne wale pages ka signature ~milta-julta hota hai."""
+    try:
+        im = img.convert("RGB")
+        g = im.convert("L").resize((16, 16))
+        px = list(g.getdata())
+        avg = (sum(px) / len(px)) if px else 128
+        bits = "".join("1" if p >= avg else "0" for p in px)   # 256 bits
+        c = im.resize((8, 8))
+        color = [v for rgb in c.getdata() for v in (rgb if isinstance(rgb, tuple) else (rgb, rgb, rgb))]
+        w, h = im.size
+        ar = round(w / float(h), 2) if h else 1.0
+        return {"bits": bits, "color": color, "ar": ar}
+    except Exception:
+        return None
+
+
+def _vsig_sim(a, b):
+    """Do visual signature kitne milte hain (0..1)."""
+    if not a or not b:
+        return 0.0
+    ba, bb = a.get("bits", ""), b.get("bits", "")
+    if not ba or len(ba) != len(bb):
+        return 0.0
+    lay = sum(1 for x, y in zip(ba, bb) if x == y) / float(len(ba))
+    ca, cb = a.get("color", []), b.get("color", [])
+    if ca and len(ca) == len(cb):
+        col = 1.0 - (sum(abs(x - y) for x, y in zip(ca, cb)) / (len(ca) * 255.0))
+    else:
+        col = 0.0
+    asp = 1.0 if abs(a.get("ar", 1) - b.get("ar", 1)) < 0.18 else 0.65
+    return (0.62 * lay + 0.38 * col) * asp
+
+
+def visual_name_for(sig, learned_visual, thr=0.72):
+    """learned_visual = list of {'vsig':..., 'name':...}. Sabse milta-julta
+    dhoondh kar naam do (agar >= thr milta ho)."""
+    if not sig:
+        return None, 0.0
+    best_name, best = None, 0.0
+    for e in (learned_visual or []):
+        sc = _vsig_sim(sig, e.get("vsig"))
+        if sc > best:
+            best, best_name = sc, e.get("name")
+    return (best_name, best) if best >= thr else (None, best)
 
 
 def extract_doc_number(text):
@@ -5792,28 +5848,66 @@ class ScannerWindow(QtWidgets.QMainWindow):
         PreviewDialog(self, row).exec_()
 
     def auto_name_pages(self):
-        if not tesseract_available():
-            self._warn(
-                "To read a document's name you must install the 'Tesseract OCR' program.\n\n"
-                "Download (free): https://github.com/UB-Mannheim/tesseract/wiki\n"
-                "Install it and reopen ApneScan. Then Tools \u2192 Auto-name pages will work."); return
         items = [(i, self.list.item(i).data(QtCore.Qt.UserRole)) for i in range(self.list.count())]
         if not items:
             self._warn("Scan or import a page first."); return
-        self._named_count = 0
-        self._named_total = len(items)
-        self.status.showMessage("Reading document names... (please wait)", 0)
-        self._namer = NameWorker(items, learned=self._learned_names())
-        self._namer.named.connect(self._apply_page_title)
-        self._namer.finished_all.connect(self._on_naming_done)
-        self._namer.start()
+        # 1) Pehle SHAKL se (design/rang/type \u2014 OCR nahi). Jo pages pehle diye
+        #    naam se milte hain unhe turant naam mil jata hai.
+        vnamed = 0
+        remaining = []
+        for row, path in items:
+            vname = None
+            try:
+                vname = self._visual_name_for_path(path)
+            except Exception:
+                vname = None
+            if vname:
+                self._apply_visual_title(row, vname); vnamed += 1
+            else:
+                remaining.append((row, path))
+        # 2) Baaki pages OCR (text) se \u2014 agar Tesseract ho
+        if remaining and tesseract_available():
+            self._named_count = vnamed
+            self._named_total = len(items)
+            self.status.showMessage("Reading document names... (please wait)", 0)
+            self._namer = NameWorker(remaining, learned=self._learned_names())
+            self._namer.named.connect(self._apply_page_title)
+            self._namer.finished_all.connect(self._on_naming_done)
+            self._namer.start()
+            return
+        # sirf visual (ya Tesseract nahi hai)
+        if vnamed:
+            self.status.showMessage(
+                self.L("%d page pichhle naam se pehchaan liye (shakl se)." % vnamed,
+                       "Named %d page(s) from their look (last-used names)." % vnamed), 6000)
+        elif not tesseract_available():
+            self._warn(
+                "No matching page seen before, and Tesseract OCR is not installed.\n\n"
+                "Tip: rename a page once (F2) \u2014 next time a similar-looking page is "
+                "scanned it will get that name automatically (no OCR needed).\n\n"
+                "For text-based naming, install Tesseract (free):\n"
+                "https://github.com/UB-Mannheim/tesseract/wiki")
+        else:
+            self.status.showMessage("No names matched.", 5000)
 
     def _name_one_page(self, row, path, force=False):
-        """Ek page ka naam TURANT background me padho (scan/import ke saath-saath).
-        Isse sab pages ke baad naming ka intezaar nahi karna padta."""
-        if not path or not tesseract_available():
+        """Ek page ka naam TURANT lagao. Pehle SHAKL se (design/rang/type —
+        OCR nahi): agar ye page pehle naam diye kisi page se ~72%+ milta ho to
+        wahi naam. Warna Tesseract ho to text (OCR) se."""
+        if not path:
             return
         if not force and not self._opts.get("auto_name"):
+            return
+        # 1) shakl se (handwritten/X-ray/ID par bhi kaam karta hai)
+        try:
+            vname = self._visual_name_for_path(path)
+        except Exception:
+            vname = None
+        if vname:
+            self._apply_visual_title(row, vname)
+            return
+        # 2) warna OCR se
+        if not tesseract_available():
             return
         self._page_namers = getattr(self, "_page_namers", [])
         w = NameWorker([(row, path)], learned=self._learned_names())
@@ -5822,6 +5916,60 @@ class ScannerWindow(QtWidgets.QMainWindow):
             lambda w=w: self._page_namers.remove(w) if w in self._page_namers else None)
         self._page_namers.append(w)
         w.start()
+
+    # ---- Visual (shakl se) naam yaad rakhna aur milaana ----
+    def _learned_visual(self):
+        return self._config.get("learned_visual", []) or []
+
+    def _visual_name_for_path(self, path):
+        """Is page ki shakl se pehle diya gaya naam (agar 72%+ milta ho)."""
+        try:
+            with Image.open(path) as im:
+                sig = visual_signature(im)
+        except Exception:
+            return None
+        name, _sc = visual_name_for(sig, self._learned_visual())
+        return name
+
+    def _store_visual_name(self, path, name):
+        """Rename par page ki shakl -> naam yaad rakho (OCR nahi chahiye).
+        Agli baar aisa hi dikhne wala page apne aap isi naam se aayega."""
+        if not path or not name:
+            return
+        try:
+            with Image.open(path) as im:
+                sig = visual_signature(im)
+        except Exception:
+            sig = None
+        if not sig:
+            return
+        lv = self._config.setdefault("learned_visual", [])
+        for e in lv:                       # bahut milta-julta pehle se ho to update
+            if _vsig_sim(sig, e.get("vsig")) >= 0.90:
+                e["vsig"] = sig; e["name"] = name
+                break
+        else:
+            lv.append({"vsig": sig, "name": name})
+            if len(lv) > 600:
+                del lv[0:len(lv) - 600]
+        try:
+            save_config(self._config)
+        except Exception:
+            pass
+
+    def _apply_visual_title(self, row, label):
+        """Shakl se mila naam seedha laga do (OCR post-processing nahi)."""
+        if not (0 <= row < self.list.count()):
+            return
+        it = self.list.item(row)
+        label = underscore_name(label or "")
+        it.setData(TITLE_ROLE, label)
+        it.setData(NAMEKEY_ROLE, name_key(label))
+        it.setText(label if label.strip() else ("Page %d" % (row + 1)))
+        try:
+            self._pstats_bump(ocr_named=1)
+        except Exception:
+            pass
 
     def _learned_names(self):
         out = []
@@ -13900,6 +14048,7 @@ if the toggle is ticked).</p>
             for it in sel:
                 it.setData(TITLE_ROLE, name)
                 it.setText(name)
+                self._store_visual_name(it.data(QtCore.Qt.UserRole), name)   # har page ki shakl yaad
             self._learn_name(sel[0].data(QtCore.Qt.UserRole), name)
             self.status.showMessage("Renamed %d pages to '%s'" % (len(sel), name), 4000)
             return
@@ -13917,6 +14066,9 @@ if the toggle is ticked).</p>
         it.setText(name)
         # LEARN: remember this document's content -> this name, so next time a
         # similar page is scanned it gets named automatically.
+        # (a) SHAKL se (design/rang/type) — OCR nahi chahiye, handwritten par bhi
+        self._store_visual_name(it.data(QtCore.Qt.UserRole), name)
+        # (b) TEXT se (OCR) — chhapa hua document ho to
         self._learn_name(it.data(QtCore.Qt.UserRole), name)
 
     def _learn_name(self, path, name):
