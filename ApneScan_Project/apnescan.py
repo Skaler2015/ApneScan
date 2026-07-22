@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "106"
+VERSION = "107"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8806,10 +8806,11 @@ if the toggle is ticked).</p>
         prow = QtWidgets.QHBoxLayout(); prow.setSpacing(4)
         self.cmb_profile = QtWidgets.QComboBox(); self.cmb_profile.currentTextChanged.connect(self._on_profile_changed)
         prow.addWidget(self.cmb_profile, 1)
-        bnew = QtWidgets.QPushButton("+"); bnew.setFixedWidth(26); bnew.setToolTip(self.L("Naya profile", "New profile")); bnew.clicked.connect(self._quick_new_profile); prow.addWidget(bnew)
-        bedit = QtWidgets.QPushButton("✎"); bedit.setFixedWidth(26); bedit.setToolTip(self.L("Profile badlo", "Edit profile")); bedit.clicked.connect(self._quick_edit_profile); prow.addWidget(bedit)
-        bdup = QtWidgets.QPushButton("⧉"); bdup.setFixedWidth(26); bdup.setToolTip(self.L("Is profile ki nakal", "Duplicate this profile")); bdup.clicked.connect(self._duplicate_profile); prow.addWidget(bdup)
-        self.btn_lock = QtWidgets.QToolButton(); self.btn_lock.setCheckable(True); self.btn_lock.setFixedWidth(26)
+        bnew = QtWidgets.QPushButton("➕"); bnew.setFixedWidth(30); bnew.setToolTip(self.L("Naya profile", "New profile")); bnew.clicked.connect(self._quick_new_profile); prow.addWidget(bnew)
+        bedit = QtWidgets.QPushButton("✏️"); bedit.setFixedWidth(30); bedit.setToolTip(self.L("Profile badlo", "Edit profile")); bedit.clicked.connect(self._quick_edit_profile); prow.addWidget(bedit)
+        bdup = QtWidgets.QPushButton("📋"); bdup.setFixedWidth(30); bdup.setToolTip(self.L("Is profile ki nakal", "Duplicate this profile")); bdup.clicked.connect(self._duplicate_profile); prow.addWidget(bdup)
+        self.btn_lock = QtWidgets.QToolButton(); self.btn_lock.setCheckable(True); self.btn_lock.setFixedWidth(30)
+        self.btn_lock.setText("🔓")
         self.btn_lock.setToolTip(self.L("Profile lock — galti se setting na badle",
                                         "Lock profile — prevent accidental changes"))
         self.btn_lock.toggled.connect(self._toggle_profile_lock)
