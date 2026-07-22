@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "109"
+VERSION = "110"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8655,7 +8655,7 @@ if the toggle is ticked).</p>
                                  tip=self.L("Save — PDF / Images / Word / Excel / Text… (tir se chuno)",
                                             "Save — PDF / Images / Word / Excel / Text… (use the arrow)"))
         self.btn_print = tbtn("print", "Print", self.print_all, advanced=True, key="print")
-        tbtn_e("🟢", self.L("Share", "Share"), self.share_whatsapp, "share",
+        tbtn_e("🟢", self.L("Share", "Share"), lambda: self._share_current_pages("wa"), "share",
                tip=self.L("WhatsApp / Email se bhejo (tir se chuno)", "Share via WhatsApp / Email"), advanced=True)
         tbsep()
         tbtn_e("🎨", "Editor", self._pv_open_image_editor, "editor",
@@ -8693,10 +8693,10 @@ if the toggle is ticked).</p>
         _sharebtn = self._tb_buttons.get("share")
         if _sharebtn is not None:
             shmenu = QtWidgets.QMenu(_sharebtn); shmenu.setToolTipsVisible(True)
-            self._ma(shmenu, "🟢 WhatsApp", lambda: self.share_whatsapp(),
-                     "हिन्दी: बनी PDF WhatsApp से भेजो।\nEnglish: Share the PDF on WhatsApp.")
-            self._ma(shmenu, "✉ Email", lambda: self.share_email(),
-                     "हिन्दी: बनी PDF Email से भेजो।\nEnglish: Share the PDF by Email.")
+            self._ma(shmenu, "🟢 WhatsApp", lambda: self._share_current_pages("wa"),
+                     "हिन्दी: अभी के pages की PDF WhatsApp से भेजो।\nEnglish: Share the current pages as a PDF on WhatsApp.")
+            self._ma(shmenu, "✉ Email", lambda: self._share_current_pages("mail"),
+                     "हिन्दी: अभी के pages की PDF Email से भेजो।\nEnglish: Share the current pages as a PDF by Email.")
             _sharebtn.setMenu(shmenu)
             _sharebtn.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         printmenu = QtWidgets.QMenu(self.btn_print); printmenu.setToolTipsVisible(True)
@@ -14372,6 +14372,10 @@ if the toggle is ticked).</p>
         menu = QtWidgets.QMenu(self)
         act_rename = menu.addAction("\u270f Rename")
         act_del = menu.addAction("\U0001f5d1 Delete")
+        # Share \u2014 wahi jo My Files panel me hota hai (pages ki PDF bhejta hai)
+        menu.addSeparator()
+        act_wa = menu.addAction("\ud83d\udfe2 Send via WhatsApp")
+        act_em = menu.addAction("\u2709 Send via Email")
         act_rescan = act_insert = None
         if item is not None:
             menu.addSeparator()
@@ -14384,10 +14388,30 @@ if the toggle is ticked).</p>
             self.rename_current_page()
         elif chosen == act_del:
             self.delete_page()
+        elif chosen == act_wa:
+            self._share_current_pages("wa")
+        elif chosen == act_em:
+            self._share_current_pages("mail")
         elif act_rescan is not None and chosen == act_rescan:
             self._rescan_page(self.list.row(item))
         elif act_insert is not None and chosen == act_insert:
             self._insert_scan_after(self.list.row(item))
+
+    def _share_current_pages(self, how):
+        """Abhi ke pages ki ek PDF banakar WhatsApp/Email se bhejo \u2014 wahi jo
+        My Files panel me file par hota hai."""
+        paths = self._ordered_paths()
+        if not paths:
+            self._warn("Scan or import a page first."); return
+        try:
+            fd, out = tempfile.mkstemp(suffix=".pdf", dir=self._tmpdir); os.close(fd)
+            self._pages_as_pdf(paths, out)
+        except Exception as e:
+            self._warn(str(e)); return
+        if how == "wa":
+            self.share_whatsapp(out)
+        else:
+            self.share_email(out)
 
     def _rescan_page(self, row):
         """Us page ko hata kar us HI jagah naya scan lagao (Glass/flatbed ke
