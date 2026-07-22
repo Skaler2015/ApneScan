@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "105"
+VERSION = "106"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5627,6 +5627,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, self.L("Left sidebar dikhao/chhupao", "Show/hide left sidebar"), self.toggle_left_panel, "हिन्दी: बाईं तरफ़ का scan-settings panel चालू/बंद (ज़्यादा जगह के लिए)।\nEnglish: Show/hide the left scan-settings sidebar for more space.", "F9")
         self.act_files_panel = self._ma(ms, self.L("Right sidebar (Meri Files) dikhao/chhupao", "Show/hide right sidebar (My Files)"), self.toggle_files_panel, "हिन्दी: दाईं तरफ़ का folders वाला panel चालू/बंद करो।\nEnglish: Show/hide the right-side files panel.", "F10")
         self._ma(ms, "🎨 Customize UI…", self.customize_ui, "हिन्दी: ऐप का लुक अपने हिसाब से: dashboard, status-पट्टी, sidebar graph, Dark Pro theme — जो चाहो चालू/बंद करो।\nEnglish: Customize the UI: dashboard, status bar, sidebar graph, Dark Pro theme.")
+        self._ma(ms, "🧰 Customize toolbar…", self.customize_toolbar, "हिन्दी: ऊपर की toolbar पर कौन-कौन से button दिखें, वो चुनो (बाकी छुप जाएँ)।\nEnglish: Choose which buttons appear on the top toolbar.")
         self.act_touch = self._ma(ms, "Touch / large-button mode", self.toggle_touch_mode, "हिन्दी: buttons/लिखाई बड़ी हो जाएगी — touch screen या बुज़ुर्गों के लिए आसान।\nEnglish: Bigger buttons and text for touch screens or elderly users.")
         self.act_touch.setCheckable(True)
         self.act_touch.setChecked(bool(self._opts.get("touch_mode")))
@@ -8583,9 +8584,12 @@ if the toggle is ticked).</p>
             "guide": self.L("📖 Complete Guide — har option kya karta hai (F1)",
                             "📖 Complete Guide — what every option does (F1)"),
         }
-        def tbtn(kind, label, fn, advanced=False, checkable=False):
+        self._tb_buttons = {}
+        self._tb_seps = []
+
+        def tbtn(kind, label, fn, advanced=False, checkable=False, key=None, tip=None):
             b = QtWidgets.QToolButton()
-            b.setToolTip(tips.get(kind, label))
+            b.setToolTip(tip or tips.get(kind, label))
             b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
             b.setIcon(_make_icon(kind)); b.setIconSize(QtCore.QSize(28, 28))
             b.setText(label); b.setAutoRaise(True); b.setMinimumWidth(62)
@@ -8597,11 +8601,28 @@ if the toggle is ticked).</p>
             tb.addWidget(b)
             if advanced:
                 self._adv_btns.append(b)
+            self._tb_buttons[key or kind] = b
             return b
 
-        self.btn_scan_top = tbtn("scan", tr("scan", self._lang), self.do_scan)
-        self.btn_profiles = tbtn("profiles", tr("profiles", self._lang).replace("…", ""), self.open_profiles, advanced=True)
-        self.chk_ocr = tbtn("ocr", "OCR", None, checkable=True)
+        def tbtn_e(emoji, label, fn, key, tip="", advanced=False):
+            # emoji wala toolbar button (jinke liye _make_icon me icon nahi hai)
+            b = QtWidgets.QToolButton()
+            b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+            b.setText("%s\n%s" % (emoji, label)); b.setToolTip(tip or label)
+            b.setAutoRaise(True); b.setMinimumWidth(62)
+            b.clicked.connect(fn)
+            tb.addWidget(b)
+            if advanced:
+                self._adv_btns.append(b)
+            self._tb_buttons[key] = b
+            return b
+
+        def tbsep():
+            s = self._vsep(); tb.addWidget(s); self._tb_seps.append(s)
+
+        self.btn_scan_top = tbtn("scan", tr("scan", self._lang), self.do_scan, key="scan")
+        self.btn_profiles = tbtn("profiles", tr("profiles", self._lang).replace("…", ""), self.open_profiles, advanced=True, key="profiles")
+        self.chk_ocr = tbtn("ocr", "OCR", None, checkable=True, key="ocr")
         if not HAS_OCR_LIBS:
             self.chk_ocr.setEnabled(False)
         # 'Fast' button toolbar se hata diya (user ki request). chk_fast object
@@ -8609,29 +8630,57 @@ if the toggle is ticked).</p>
         self.chk_fast = QtWidgets.QToolButton(); self.chk_fast.setCheckable(True); self.chk_fast.hide()
         self.chk_fast.setChecked(bool(self._opts.get("fast_mode")))
         self.chk_fast.toggled.connect(self._on_fast_toggled)
-        tb.addWidget(self._vsep())
-        self.btn_import = tbtn("import", tr("import", self._lang), self.import_images, advanced=True)
-        tbtn("import", self.L("Camera", "Camera"), self.scan_from_camera, advanced=True)
-        self.btn_save_pdf = tbtn("savepdf", tr("save_pdf", self._lang), self.save_pdf)
-        tbtn("images", "Save Images", self.save_images, advanced=True)
-        self.btn_print = tbtn("print", "Print", self.print_all, advanced=True)
-        tb.addWidget(self._vsep())
-        tbtn("rotate", "Rotate", self.rotate_right, advanced=True)
-        tbtn("up", tr("up", self._lang), self.move_up, advanced=True)
-        tbtn("down", tr("down", self._lang), self.move_down, advanced=True)
-        tbtn("delete", tr("delete", self._lang), self.delete_page, advanced=True)
-        tbtn("clear", tr("clear", self._lang), self.clear_all, advanced=True)
+        tbsep()
+        self.btn_import = tbtn("import", tr("import", self._lang), self.import_images, advanced=True, key="import")
+        tbtn("import", self.L("Camera", "Camera"), self.scan_from_camera, advanced=True, key="camera")
+        self.btn_save_pdf = tbtn("savepdf", self.L("Save", "Save"), self.save_pdf, key="savepdf",
+                                 tip=self.L("Save — PDF / Images / Word / Excel / Text… (tir se chuno)",
+                                            "Save — PDF / Images / Word / Excel / Text… (use the arrow)"))
+        self.btn_print = tbtn("print", "Print", self.print_all, advanced=True, key="print")
+        tbtn_e("🟢", self.L("Share", "Share"), self.share_whatsapp, "share",
+               tip=self.L("WhatsApp / Email se bhejo (tir se chuno)", "Share via WhatsApp / Email"), advanced=True)
+        tbsep()
+        tbtn_e("🎨", "Editor", self._pv_open_image_editor, "editor",
+               tip=self.L("Chune page ko document editor me kholo", "Open the selected page in the editor"), advanced=True)
+        tbtn("rotate", "Rotate", self.rotate_right, advanced=True, key="rotate")
+        tbtn_e("↩", self.L("Undo", "Undo"), self.undo_delete, "undo",
+               tip=self.L("Aakhri hataya page wapas", "Undo the last deleted page"), advanced=True)
+        tbtn("delete", tr("delete", self._lang), self.delete_page, advanced=True, key="delete")
+        tbtn("clear", tr("clear", self._lang), self.clear_all, advanced=True, key="clear")
         tb.addStretch(1)
-        tbtn("guide", self.L("Guide", "Guide"), self.show_guide)
-        tbtn("language", "Language", self.choose_language)
-        tbtn("about", tr("about", self._lang), self.show_about)
+        tbtn("guide", self.L("Guide", "Guide"), self.show_guide, key="guide")
+        tbtn("language", "Language", self.choose_language, key="language")
+        tbtn("about", tr("about", self._lang), self.show_about, key="about")
         pdfmenu = QtWidgets.QMenu(self.btn_save_pdf); pdfmenu.setToolTipsVisible(True)
-        self._ma(pdfmenu, tr("save_all", self._lang), self.save_pdf_all,
+        self._ma(pdfmenu, self.L("📄 PDF — sabhi pages", "📄 PDF — all pages"), self.save_pdf_all,
                  "हिन्दी: सभी पेजों की एक PDF बनाओ।\nEnglish: Save all pages as one PDF.")
-        self._ma(pdfmenu, tr("save_sel", self._lang), self.save_pdf_selected,
+        self._ma(pdfmenu, self.L("📄 PDF — chune hue", "📄 PDF — selected"), self.save_pdf_selected,
                  "हिन्दी: सिर्फ़ चुने हुए पेजों की PDF।\nEnglish: PDF of only the selected pages.")
+        self._ma(pdfmenu, self.L("🔒 PDF — password wali", "🔒 PDF — password protected"), self.save_pdf_password,
+                 "हिन्दी: खोलने के लिए पासवर्ड वाली PDF।\nEnglish: Password-protected PDF.")
+        self._ma(pdfmenu, self.L("🗄 PDF — archival (lambe samay)", "🗄 PDF — archival (long-term)"), self.save_archival_pdf,
+                 "हिन्दी: सालों तक सुरक्षित रखने वाली PDF/A।\nEnglish: PDF/A for long-term storage.")
+        pdfmenu.addSeparator()
+        self._ma(pdfmenu, self.L("🖼 Images (JPG/PNG)", "🖼 Images (JPG/PNG)"), self.save_images,
+                 "हिन्दी: पेजों को अलग-अलग इमेज में सेव करो।\nEnglish: Save pages as JPG/PNG images.")
+        self._ma(pdfmenu, self.L("📝 Word (.docx)", "📝 Word (.docx)"), self.pdf_to_word,
+                 "हिन्दी: PDF को Word फ़ाइल बनाओ।\nEnglish: Convert a PDF to a Word file.")
+        self._ma(pdfmenu, self.L("📊 Excel (.xlsx)", "📊 Excel (.xlsx)"), self.pdf_to_excel,
+                 "हिन्दी: PDF की टेबल को Excel बनाओ।\nEnglish: Convert a PDF's tables to Excel.")
+        self._ma(pdfmenu, self.L("🔤 Text (.txt) — OCR", "🔤 Text (.txt) — OCR"), self.export_ocr_text,
+                 "हिन्दी: पेजों का text (OCR) एक .txt में।\nEnglish: OCR the pages' text to a .txt file.")
         self.btn_save_pdf.setMenu(pdfmenu)
         self.btn_save_pdf.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
+        # Share button ka menu: WhatsApp / Email
+        _sharebtn = self._tb_buttons.get("share")
+        if _sharebtn is not None:
+            shmenu = QtWidgets.QMenu(_sharebtn); shmenu.setToolTipsVisible(True)
+            self._ma(shmenu, "🟢 WhatsApp", lambda: self.share_whatsapp(),
+                     "हिन्दी: बनी PDF WhatsApp से भेजो।\nEnglish: Share the PDF on WhatsApp.")
+            self._ma(shmenu, "✉ Email", lambda: self.share_email(),
+                     "हिन्दी: बनी PDF Email से भेजो।\nEnglish: Share the PDF by Email.")
+            _sharebtn.setMenu(shmenu)
+            _sharebtn.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         printmenu = QtWidgets.QMenu(self.btn_print); printmenu.setToolTipsVisible(True)
         self._ma(printmenu, "All print (sabhi pages)", self.print_all,
                  "हिन्दी: सारे पेज प्रिंट करो।\nEnglish: Print all pages.")
@@ -8645,6 +8694,7 @@ if the toggle is ticked).</p>
         self.btn_print.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         self._classic_toolbar = tbwrap
         outer.addWidget(tbwrap)
+        self._apply_toolbar_visibility()
         # ---- UI #1: Ribbon toolbar (MS-Office jaisa — tabs me buttons) ----
         self.ribbon = QtWidgets.QTabWidget()
         self.ribbon.setObjectName("ribbon")
@@ -13265,6 +13315,57 @@ if the toggle is ticked).</p>
         "auto_update_check", "dbl_action", "files_panel_side", "sound_on_done",
         "confirm_exit", "footer_clock", "footer_today", "footer_online", "footer_msg",
     )
+
+    # Toolbar ke button jinko dikhana/chhupana user chun sakta hai
+    TB_ITEMS = [
+        ("scan", "Scan"), ("profiles", "Profiles"), ("ocr", "OCR"),
+        ("import", "Import"), ("camera", "Camera"), ("savepdf", "Save"),
+        ("print", "Print"), ("share", "Share"), ("editor", "Editor"),
+        ("rotate", "Rotate"), ("undo", "Undo"), ("delete", "Delete"),
+        ("clear", "Clear"), ("guide", "Guide"), ("language", "Language"),
+        ("about", "About"),
+    ]
+
+    def _apply_toolbar_visibility(self):
+        """Sirf wahi toolbar-button dikhao jo user ne chune hain."""
+        hidden = set(self._opts.get("tb_hidden", []) or [])
+        for key, b in (getattr(self, "_tb_buttons", {}) or {}).items():
+            try:
+                b.setVisible(key not in hidden)
+            except Exception:
+                pass
+
+    def customize_toolbar(self):
+        """Toolbar par kaun-kaun se button dikhein — user chune (baaki chhupe)."""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("🧰 Toolbar customize", "🧰 Customize toolbar"))
+        dlg.resize(340, 460)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel(self.L(
+            "Toolbar par kaun-kaun se button dikhein, tick karo:",
+            "Tick the buttons you want on the toolbar:")))
+        hidden = set(self._opts.get("tb_hidden", []) or [])
+        boxes = {}
+        scroll = QtWidgets.QScrollArea(); scroll.setWidgetResizable(True)
+        inner = QtWidgets.QWidget(); il = QtWidgets.QVBoxLayout(inner)
+        for key, label in self.TB_ITEMS:
+            cb = QtWidgets.QCheckBox(label); cb.setChecked(key not in hidden)
+            il.addWidget(cb); boxes[key] = cb
+        il.addStretch(1); scroll.setWidget(inner); v.addWidget(scroll, 1)
+        row = QtWidgets.QHBoxLayout(); row.addStretch(1)
+        bok = QtWidgets.QPushButton("OK"); bok.setObjectName("primary")
+        bcancel = QtWidgets.QPushButton(self.L("Rehne do", "Cancel"))
+        row.addWidget(bcancel); row.addWidget(bok); v.addLayout(row)
+        bcancel.clicked.connect(dlg.reject)
+
+        def _ok():
+            newhidden = [k for k, cb in boxes.items() if not cb.isChecked()]
+            self._opts["tb_hidden"] = newhidden
+            self._save_opts()
+            self._apply_toolbar_visibility()
+            dlg.accept()
+        bok.clicked.connect(_ok)
+        dlg.exec_()
 
     def customize_ui(self):
         """UI customize — 40+ settings tabs me, LIVE-PREVIEW ke saath (v73).
