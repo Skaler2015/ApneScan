@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "80"
+VERSION = "81"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3206,6 +3206,11 @@ def _make_icon(kind, color="#0f766e"):
         p.drawEllipse(6, 6, 18, 18); p.drawLine(6, 15, 24, 15); p.drawArc(11, 6, 8, 18, 0, 360*16)
     elif kind == "about":
         p.drawEllipse(6, 6, 18, 18); f=p.font(); f.setBold(True); f.setPixelSize(13); p.setFont(f); p.drawText(pm.rect(), QtCore.Qt.AlignCenter, "i")
+    elif kind == "guide":
+        # document with a "?" — Complete Guide / help
+        p.drawRoundedRect(7, 4, 16, 22, 2, 2)
+        f = p.font(); f.setBold(True); f.setPixelSize(14); p.setFont(f)
+        p.drawText(QtCore.QRect(7, 4, 16, 22), QtCore.Qt.AlignCenter, "?")
     else:
         doc()
     p.end()
@@ -6422,6 +6427,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "rotate": "Selected page ghumao", "up": "Page upar karo", "down": "Page neeche karo",
             "delete": "Selected page hatao (Ctrl+Z se wapas)", "clear": "Sab pages hatao",
             "language": "Bhasha badlo (Hindi/English)", "about": "App ke baare me",
+            "guide": self.L("📖 Complete Guide — har option kya karta hai (F1)",
+                            "📖 Complete Guide — what every option does (F1)"),
         }
         def tbtn(kind, label, fn, advanced=False, checkable=False):
             b = QtWidgets.QToolButton()
@@ -6461,6 +6468,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         tbtn("delete", tr("delete", self._lang), self.delete_page, advanced=True)
         tbtn("clear", tr("clear", self._lang), self.clear_all, advanced=True)
         tb.addStretch(1)
+        tbtn("guide", self.L("Guide", "Guide"), self.show_guide)
         tbtn("language", "Language", self.choose_language)
         tbtn("about", tr("about", self._lang), self.show_about)
         pdfmenu = QtWidgets.QMenu(self.btn_save_pdf); pdfmenu.setToolTipsVisible(True)
