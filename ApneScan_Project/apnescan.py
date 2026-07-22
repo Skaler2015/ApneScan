@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "99"
+VERSION = "100"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8509,10 +8509,13 @@ if the toggle is ticked).</p>
         self.ribbon.addTab(_ribbon_tab([
             ("🟢", "WhatsApp", self.share_whatsapp),
             ("✉", "Email", self.share_email)]), L("📤 Share", "📤 Share"))
+        # PEHLE layout me daalo (parent mile), TAB visibility set karo. Warna
+        # parentless ribbon par setVisible(True) use ek alag top-level "ApneScan"
+        # window bana deta tha jo startup par khaali box ban kar aa jaata tha.
+        outer.addWidget(self.ribbon)
         self.ribbon.setVisible(bool(self._opts.get("ui_ribbon", False)))
         if self._opts.get("ui_ribbon"):
             tbwrap.hide()
-        outer.addWidget(self.ribbon)
         # ---- Toolbar ke NEECHE ek patli shortcut-line (DPI F-keys + Enter/Space) ----
         self.lbl_shortcuts = QtWidgets.QLabel("")
         self.lbl_shortcuts.setObjectName("scutline")
@@ -8548,8 +8551,8 @@ if the toggle is ticked).</p>
         _hb.addStretch(1)
         _hb.addWidget(self.hdr_today)
         self._apply_branding()
+        outer.addWidget(self.ui_header)          # pehle parent, phir visibility
         self.ui_header.setVisible(bool(self._opts.get("ui_header", True)))
-        outer.addWidget(self.ui_header)
         # ---- UI #10: Job-chips bar (ek click me profile+folder+naming set) ----
         self.jobs_bar = QtWidgets.QWidget()
         self.jobs_bar.setObjectName("jobsbar")
@@ -8557,8 +8560,8 @@ if the toggle is ticked).</p>
         self._jobs_lay = QtWidgets.QHBoxLayout(self.jobs_bar)
         self._jobs_lay.setContentsMargins(10, 4, 10, 4)
         self._jobs_lay.setSpacing(6)
+        outer.addWidget(self.jobs_bar)          # pehle parent, phir visibility
         self.jobs_bar.setVisible(bool(self._opts.get("ui_jobs", False)))
-        outer.addWidget(self.jobs_bar)
         self._rebuild_jobs_bar()
         hr = QtWidgets.QFrame(); hr.setObjectName("hr"); hr.setFrameShape(QtWidgets.QFrame.HLine); outer.addWidget(hr)
 
@@ -9080,8 +9083,8 @@ if the toggle is ticked).</p>
             "QPushButton:hover{background:#0d5f58;}")
         _edit_btn.clicked.connect(lambda: self._pv_open_image_editor())
         pv.addWidget(_edit_btn)
+        body.addWidget(self.preview_panel)      # pehle parent, phir visibility
         self.preview_panel.setVisible(bool(self._opts.get("ui_preview", False)))
-        body.addWidget(self.preview_panel)
         self.list.currentItemChanged.connect(lambda cur, prev: self._update_preview_panel())
         self.pv_scroll.viewport().installEventFilter(self)   # Ctrl+scroll zoom
 
