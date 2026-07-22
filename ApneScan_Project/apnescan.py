@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "110"
+VERSION = "111"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -14369,33 +14369,214 @@ if the toggle is ticked).</p>
         if self.list.count() == 0:
             return
         item = self.list.itemAt(pos)
-        menu = QtWidgets.QMenu(self)
-        act_rename = menu.addAction("\u270f Rename")
-        act_del = menu.addAction("\U0001f5d1 Delete")
-        # Share \u2014 wahi jo My Files panel me hota hai (pages ki PDF bhejta hai)
-        menu.addSeparator()
-        act_wa = menu.addAction("\ud83d\udfe2 Send via WhatsApp")
-        act_em = menu.addAction("\u2709 Send via Email")
-        act_rescan = act_insert = None
         if item is not None:
-            menu.addSeparator()
-            act_rescan = menu.addAction(self.L("\ud83d\udd04 Is page ko dobara scan karo",
-                                               "\ud83d\udd04 Rescan this page"))
-            act_insert = menu.addAction(self.L("\u2795 Iske baad naya scan jodo",
-                                               "\u2795 Scan & insert after this"))
-        chosen = menu.exec_(self.list.viewport().mapToGlobal(pos))
-        if chosen == act_rename:
-            self.rename_current_page()
-        elif chosen == act_del:
-            self.delete_page()
-        elif chosen == act_wa:
-            self._share_current_pages("wa")
-        elif chosen == act_em:
-            self._share_current_pages("mail")
-        elif act_rescan is not None and chosen == act_rescan:
-            self._rescan_page(self.list.row(item))
-        elif act_insert is not None and chosen == act_insert:
-            self._insert_scan_after(self.list.row(item))
+            self.list.setCurrentItem(item)      # saare actions ISI page par lagein
+        row = self.list.row(item) if item is not None else -1
+        L = self.L
+        m = QtWidgets.QMenu(self)
+
+        # ---- Basic ----
+        m.addAction("\u270f\ufe0f " + L("Naam badlo", "Rename"), self.rename_current_page)
+        m.addAction("\ud83d\udccb " + L("Nakal (duplicate)", "Duplicate"), self.duplicate_current_page)
+        m.addAction("\ud83d\uddd1 " + L("Hatao", "Delete"), self.delete_page)
+        m.addAction("\u21a9 " + L("Delete wapas (undo)", "Undo delete"), self.undo_delete)
+        m.addSeparator()
+
+        # ---- Edit / Fix ----
+        em = m.addMenu("\ud83c\udfa8 " + L("Sudhaar / Edit", "Edit / Fix"))
+        em.addAction("\ud83c\udfa8 " + L("Editor me kholo", "Open in editor"), lambda: self._pv_open_image_editor())
+        em.addAction("\u21ba " + L("Baayen ghumao", "Rotate left"), self.rotate_left)
+        em.addAction("\u21bb " + L("Dayen ghumao", "Rotate right"), self.rotate_right)
+        em.addAction("\u293e " + L("180\u00b0 ghumao", "Rotate 180\u00b0"), self._rotate180_current)
+        em.addSeparator()
+        em.addAction("\u2702 " + L("Crop", "Crop"), self.crop_current_page)
+        em.addAction("\ud83d\udcd0 " + L("Seedha (straighten)", "Straighten"), self.deskew_current)
+        em.addAction("\u2728 " + L("Auto-fix (saaf+seedha)", "Auto-fix"), self._autofix_current)
+        em.addAction("\u2b1c " + L("Whiten", "Whiten"), self.whiten_current_page)
+        em.addAction("\u2728 " + L("Enhance", "Enhance"), self.enhance_current_page)
+        em.addSeparator()
+        em.addAction("\u2b1b B&W", lambda: self._to_mode("1"))
+        em.addAction("\ud83e\ude76 " + L("Grayscale", "Grayscale"), lambda: self._to_mode("L"))
+
+        # ---- Move / order ----
+        mm = m.addMenu("\ud83d\udd00 " + L("Kram / Move", "Move / Order"))
+        mm.addAction("\u2b06 " + L("Upar", "Up"), self.move_up)
+        mm.addAction("\u2b07 " + L("Neeche", "Down"), self.move_down)
+        mm.addAction("\u2912 " + L("Sabse upar", "To top"), self._move_to_top)
+        mm.addAction("\u2913 " + L("Sabse neeche", "To bottom"), self._move_to_bottom)
+        mm.addAction("\u2611 " + L("Sab chuno", "Select all"), self.list.selectAll)
+
+        # ---- Scan ----
+        if row >= 0:
+            sm = m.addMenu("\ud83d\udda8 " + L("Scan", "Scan"))
+            sm.addAction("\ud83d\udd04 " + L("Is page ko dobara scan", "Rescan this page"),
+                         lambda r=row: self._rescan_page(r))
+            sm.addAction("\u2795 " + L("Iske BAAD scan jodo", "Scan & insert AFTER"),
+                         lambda r=row: self._insert_scan_after(r))
+            sm.addAction("\u2795 " + L("Iske PEHLE scan jodo", "Scan & insert BEFORE"),
+                         lambda r=row: self._insert_scan_after(r - 1))
+
+        # ---- Save / Print ----
+        vm = m.addMenu("\ud83d\udcbe " + L("Save / Print", "Save / Print"))
+        vm.addAction("\ud83d\udcc4 " + L("Is page ki PDF", "This page as PDF"), self._save_page_pdf)
+        vm.addAction("\ud83d\uddbc " + L("Is page ki image (JPG/PNG)", "This page as image"), self._save_page_image)
+        vm.addAction("\ud83d\udcc4 " + L("Chune pages ki PDF", "Selected pages as PDF"), self.save_pdf_selected)
+        vm.addAction("\ud83d\udda8 " + L("Is page ko print", "Print this page"), self._print_current_page)
+
+        # ---- Share ----
+        shm = m.addMenu("\ud83d\udce4 " + L("Bhejo / Share", "Share"))
+        shm.addAction("\ud83d\udfe2 WhatsApp", lambda: self._share_current_pages("wa"))
+        shm.addAction("\u2709 Email", lambda: self._share_current_pages("mail"))
+        shm.addAction("\ud83d\udccb " + L("Image copy karo", "Copy image"), self._copy_page_image)
+
+        # ---- Info / OCR ----
+        nm = m.addMenu("\u2139 " + L("Jaankari / OCR", "Info / OCR"))
+        nm.addAction("\u2139 " + L("Page ki jaankari", "Page info"), self._page_info_dialog)
+        nm.addAction("\ud83d\udd24 " + L("Text padho (OCR)", "Read text (OCR)"), self._ocr_page_show_current)
+        nm.addAction("\ud83e\udde0 " + L("Is naam se yaad rakho", "Remember this name"), self.rename_current_page)
+
+        m.exec_(self.list.viewport().mapToGlobal(pos))
+
+    # ---- context-menu ke naye chhote helpers ----
+    def _rotate180_current(self):
+        self._edit_current_bg(lambda im: im.rotate(180, expand=True).convert("RGB"),
+                              self.L("Ghuma rahe hain\u2026", "Rotating\u2026"))
+
+    def _autofix_current(self):
+        def fn(im):
+            try:
+                im = deskew(im); im = autocrop(im)
+                im = whiten_dark_background(im); im = auto_enhance(im)
+            except Exception:
+                pass
+            return im.convert("RGB")
+        self._edit_current_bg(fn, self.L("Auto-fix ho raha hai\u2026", "Auto-fixing\u2026"))
+
+    def _move_to_top(self):
+        it = self.list.currentItem()
+        if it is None:
+            return
+        r = self.list.row(it)
+        if r <= 0:
+            return
+        self.list.takeItem(r); self.list.insertItem(0, it)
+        self.list.setCurrentItem(it); self._renumber_pages(); self._dirty = True
+
+    def _move_to_bottom(self):
+        it = self.list.currentItem()
+        if it is None:
+            return
+        r = self.list.row(it); n = self.list.count()
+        if r >= n - 1:
+            return
+        self.list.takeItem(r); self.list.insertItem(n - 1, it)
+        self.list.setCurrentItem(it); self._renumber_pages(); self._dirty = True
+
+    def _save_page_pdf(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        path = item.data(QtCore.Qt.UserRole)
+        name = (item.data(TITLE_ROLE) or "page")
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("Is page ki PDF", "This page as PDF"),
+            os.path.join(self._opts.get("save_folder", os.path.expanduser("~")), name + ".pdf"),
+            "PDF (*.pdf)")
+        if not out:
+            return
+        try:
+            self._pages_as_pdf([path], out)
+            self.status.showMessage(self.L("\ud83d\udcc4 PDF ban gayi: ", "\ud83d\udcc4 PDF saved: ") + os.path.basename(out), 6000)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _save_page_image(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        path = item.data(QtCore.Qt.UserRole)
+        name = (item.data(TITLE_ROLE) or "page")
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("Is page ki image", "This page as image"),
+            os.path.join(self._opts.get("save_folder", os.path.expanduser("~")), name + ".jpg"),
+            "JPEG (*.jpg);;PNG (*.png)")
+        if not out:
+            return
+        try:
+            with Image.open(path) as im:
+                if out.lower().endswith(".png"):
+                    im.save(out, "PNG")
+                else:
+                    im.convert("RGB").save(out, "JPEG", quality=92)
+            self.status.showMessage(self.L("\ud83d\uddbc Image save: ", "\ud83d\uddbc Image saved: ") + os.path.basename(out), 6000)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _print_current_page(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        try:
+            self._do_print([item.data(QtCore.Qt.UserRole)], per_page=1)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _copy_page_image(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        try:
+            QtWidgets.QApplication.clipboard().setPixmap(
+                QtGui.QPixmap(item.data(QtCore.Qt.UserRole)))
+            self.status.showMessage(self.L("\ud83d\udccb Image copy ho gayi (Ctrl+V se paste karo).",
+                                           "\ud83d\udccb Image copied (paste with Ctrl+V)."), 5000)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _page_info_dialog(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        path = item.data(QtCore.Qt.UserRole)
+        try:
+            w = h = 0; mode = "-"
+            with Image.open(path) as im:
+                w, h = im.size
+                mode = {"1": "Black & White", "L": "Grayscale", "RGB": "Colour",
+                        "RGBA": "Colour"}.get(im.mode, im.mode)
+            kb = os.path.getsize(path) / 1024.0
+            szt = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024.0))
+            name = item.data(TITLE_ROLE) or os.path.basename(path)
+            QtWidgets.QMessageBox.information(
+                self, self.L("Page ki jaankari", "Page info"),
+                "%s\n\n\ud83d\udcd0 %d \u00d7 %d px\n\ud83c\udfa8 %s\n\ud83d\udcbe %s" % (name, w, h, mode, szt))
+        except Exception as e:
+            self._warn(str(e))
+
+    def _ocr_page_show_current(self):
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        if not tesseract_available():
+            self._warn(self.L("Iske liye Tesseract OCR chahiye.", "This needs Tesseract OCR.")); return
+        path = item.data(QtCore.Qt.UserRole)
+        self.setCursor(QtCore.Qt.WaitCursor)
+        try:
+            with Image.open(path) as im:
+                txt = pytesseract.image_to_string(im.convert("RGB"), lang="eng+hin")
+        except Exception:
+            txt = ""
+        self.unsetCursor()
+        dlg = QtWidgets.QDialog(self); dlg.setWindowTitle(self.L("Page ka text", "Page text"))
+        dlg.resize(560, 600)
+        v = QtWidgets.QVBoxLayout(dlg)
+        te = QtWidgets.QPlainTextEdit(); te.setPlainText(txt or ""); v.addWidget(te)
+        h = QtWidgets.QHBoxLayout(); h.addStretch(1)
+        bc = QtWidgets.QPushButton(self.L("Copy", "Copy"))
+        bc.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(te.toPlainText()))
+        bx = QtWidgets.QPushButton(self.L("Band karo", "Close")); bx.clicked.connect(dlg.accept)
+        h.addWidget(bc); h.addWidget(bx); v.addLayout(h)
+        dlg.exec_()
 
     def _share_current_pages(self, how):
         """Abhi ke pages ki ek PDF banakar WhatsApp/Email se bhejo \u2014 wahi jo
