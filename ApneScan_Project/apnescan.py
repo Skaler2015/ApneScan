@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "88"
+VERSION = "89"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -319,8 +319,13 @@ RESOLUTIONS = ["150", "200", "300", "600"]
 # (id, label, default key) — all reassignable via Settings -> Keyboard Shortcuts
 SHORTCUTS = [
     ("scan", "Scan", "Return"),
+    ("dpi_150", "Resolution 150 dpi", "F2"),
+    ("dpi_200", "Resolution 200 dpi", "F3"),
+    ("dpi_300", "Resolution 300 dpi", "F4"),
+    ("dpi_600", "Resolution 600 dpi", "F6"),
+    ("dpi_custom", "Resolution custom dpi", "F7"),
     ("import", "Import images / PDF", "Ctrl+I"),
-    ("rename", "Rename page", "F2"),
+    ("rename", "Rename page", "F8"),
     ("save_all", "Save all as PDF", "Ctrl+S"),
     ("save_sel", "Save selected as PDF", "Space"),
     ("save_pw", "Save PDF (password)", ""),
@@ -4841,6 +4846,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _build_shortcuts(self):
         methods = {
             "scan": self.do_scan,
+            "dpi_150": lambda: self._set_panel_dpi(150),
+            "dpi_200": lambda: self._set_panel_dpi(200),
+            "dpi_300": lambda: self._set_panel_dpi(300),
+            "dpi_600": lambda: self._set_panel_dpi(600),
+            "dpi_custom": self._set_panel_dpi_custom,
             "import": self.import_images,
             "rename": self.rename_current_page,
             "save_all": self.save_pdf_all,
@@ -4893,6 +4903,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 app.focusChanged.connect(self._on_focus_changed_scan)
         except Exception:
             pass
+        QtCore.QTimer.singleShot(0, self._refresh_shortcut_line)
 
     def _on_focus_changed_scan(self, _old, now):
         """Meri Files panel me focus ho to Enter=Scan band, warna chalu."""
@@ -4906,10 +4917,54 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
 
+    def _set_panel_dpi(self, n):
+        """Resolution combo ko is dpi par set karo (shortcut se)."""
+        if not hasattr(self, "cmb_dpi"):
+            return
+        item = "%d dpi" % n
+        self.cmb_dpi.blockSignals(True)
+        if self.cmb_dpi.findText(item) < 0:
+            self.cmb_dpi.insertItem(max(0, self.cmb_dpi.count() - 1), item)
+        self.cmb_dpi.setCurrentText(item)
+        self.cmb_dpi.blockSignals(False)
+        try:
+            self.status.showMessage(self.L("Resolution: %d dpi", "Resolution: %d dpi") % n, 3000)
+        except Exception:
+            pass
+
+    def _set_panel_dpi_custom(self):
+        n, ok = QtWidgets.QInputDialog.getInt(
+            self, self.L("Apni DPI", "Custom DPI"),
+            self.L("DPI likho (50–1200):", "Enter DPI (50–1200):"), 300, 50, 1200, 50)
+        if ok:
+            self._set_panel_dpi(n)
+
+    def _refresh_shortcut_line(self):
+        """Toolbar ke neeche wali line — abhi ke (user ke) shortcuts dikhao."""
+        if not hasattr(self, "lbl_shortcuts"):
+            return
+        custom = self._opts.get("shortcuts", {}) or {}
+
+        def k(sid, default):
+            key = custom.get(sid, default)
+            return "—" if not key else key.replace("Return", "Enter")
+        dpis = (("dpi_150", "F2", "150"), ("dpi_200", "F3", "200"),
+                ("dpi_300", "F4", "300"), ("dpi_600", "F6", "600"),
+                ("dpi_custom", "F7", "Custom"))
+        parts = ["<b>%s</b>→%s" % (k(sid, dflt), lbl) for sid, dflt, lbl in dpis]
+        scan_k = k("scan", "Return")
+        save_k = k("save_sel", "Space")
+        self.lbl_shortcuts.setText(
+            self.L("⌨ DPI: ", "⌨ DPI: ") + "  ·  ".join(parts)
+            + "&nbsp;&nbsp;|&nbsp;&nbsp;"
+            + self.L("<b>%s</b> = Scan · <b>%s</b> = Selected save",
+                     "<b>%s</b> = Scan · <b>%s</b> = Save selected") % (scan_k, save_k))
+
     def _apply_shortcut(self, sid, key):
         scut = self._sc.get(sid)
         if scut is not None:
             scut.setKey(QtGui.QKeySequence(key) if key else QtGui.QKeySequence())
+        self._refresh_shortcut_line()      # neeche wali line bhi update
 
     def _cur_shortcut(self, sid, default):
         return (self._opts.get("shortcuts", {}) or {}).get(sid, default)
@@ -7239,6 +7294,19 @@ if the toggle is ticked).</p>
         if self._opts.get("ui_ribbon"):
             tbwrap.hide()
         outer.addWidget(self.ribbon)
+        # ---- Toolbar ke NEECHE ek patli shortcut-line (DPI F-keys + Enter/Space) ----
+        self.lbl_shortcuts = QtWidgets.QLabel("")
+        self.lbl_shortcuts.setObjectName("scutline")
+        self.lbl_shortcuts.setTextFormat(QtCore.Qt.RichText)
+        self.lbl_shortcuts.setStyleSheet(
+            "#scutline{background:#f1f5f9;border-bottom:1px solid #e2e8f0;"
+            "color:#475569;font-size:11px;padding:3px 12px;}")
+        self.lbl_shortcuts.setToolTip(self.L(
+            "Ye shortcuts Settings → Keyboard Shortcuts se badal sakte ho — yahan "
+            "wahi dikhega jo aapne set kiya.",
+            "Change these in Settings → Keyboard Shortcuts — this line always shows "
+            "your current keys."))
+        outer.addWidget(self.lbl_shortcuts)
         # ---- UI #7: Status-header card (toolbar ke neeche patli smart patti) ----
         self.ui_header = QtWidgets.QWidget()
         self.ui_header.setObjectName("uiheader")
