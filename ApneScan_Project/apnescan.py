@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "97"
+VERSION = "98"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5219,7 +5219,11 @@ class PagesList(QtWidgets.QListWidget):
     def __init__(self, on_files):
         super().__init__()
         self._on_files = on_files
+        self._on_reorder = None          # kram badalne par main window ko batao
         self.setAcceptDrops(True)
+        self.setDragEnabled(True)
+        self.setDropIndicatorShown(True)
+        self.setDefaultDropAction(QtCore.Qt.MoveAction)
 
     def _dropped_files(self, e):
         md = e.mimeData()
@@ -5252,8 +5256,45 @@ class PagesList(QtWidgets.QListWidget):
                 self._on_files(files)
             except Exception:
                 pass
-        else:
-            super().dropEvent(e)      # andar-hi-andar reorder
+            return
+        # ---- Andar-hi-andar reorder (drag se pages ka kram badlo) ----
+        # IconMode me Qt ka default internal-move icon ko free-place karta hai
+        # (sahi reorder nahi). Isliye khud model me item(s) ko target par le
+        # jaate hain — pakka aur saaf kram-badlaav.
+        src_rows = sorted(self.row(it) for it in self.selectedItems())
+        src_rows = [r for r in src_rows if r >= 0]
+        if not src_rows:
+            e.ignore(); return
+        idx = self.indexAt(e.pos())
+        tgt = idx.row() if idx.isValid() else self.count()
+        if tgt < 0:
+            tgt = self.count()
+        moving = [self.item(r) for r in src_rows]
+        # niche se uthao taaki upar ke index valid rahein
+        taken = []
+        for r in reversed(src_rows):
+            taken.append(self.takeItem(r))
+        taken.reverse()
+        removed_before = sum(1 for r in src_rows if r < tgt)
+        tgt = max(0, min(tgt - removed_before, self.count()))
+        for i, it in enumerate(taken):
+            self.insertItem(tgt + i, it)
+        self.clearSelection()
+        for i in range(len(taken)):
+            self.item(tgt + i).setSelected(True)
+        self.setCurrentRow(tgt)
+        # IconMode ke free-placement se bachne ke liye poora grid model-order me
+        # dobara laga do (warna icon jahan chhoda wahin ruk jata tha).
+        try:
+            self.doItemsLayout()
+        except Exception:
+            pass
+        e.accept()
+        if callable(self._on_reorder):
+            try:
+                self._on_reorder()
+            except Exception:
+                pass
 
 
 class UrlListWidget(QtWidgets.QListWidget):
@@ -6525,6 +6566,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 it.setText(title)
             else:
                 it.setText(("Page %d" % (i + 1)) if show else "")
+
+    def _on_pages_reordered(self):
+        """Drag-drop se pages ka kram badla — number dobara lagao, dirty mark
+        karo aur preview taaza karo (banne wali PDF me yahi kram jayega)."""
+        self._dirty = True
+        try:
+            self._renumber_pages()
+        except Exception:
+            pass
+        try:
+            self._update_status()
+        except Exception:
+            pass
+        try:
+            self._update_preview_panel()
+        except Exception:
+            pass
+        self.status.showMessage(self.L("Kram badal gaya", "Order changed"), 2500)
 
     def _update_empty_state(self):
         empty = self.list.count() == 0
@@ -8493,6 +8552,8 @@ if the toggle is ticked).</p>
         self.list.setUniformItemSizes(False)
         self.list.setWordWrap(True)          # naam poora dikhe (kate nahi, 2 line me)
         self.list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        # drag-drop se kram badalne par pages ko renumber + dirty mark karo
+        self.list._on_reorder = self._on_pages_reordered
         self._thumb_w, self._thumb_h = self.THUMB_W, self.THUMB_H   # zoomable display size
         self._apply_thumb_zoom(self.THUMB_W)
         # empty-state hint (shown when no pages)
@@ -8828,6 +8889,21 @@ if the toggle is ticked).</p>
         _p2l.addLayout(_tb)
         self.pv_tabs.addTab(_p2, self.L("🔤 Text", "🔤 Text"))
         pv.addWidget(self.pv_tabs, 1)
+        # ---- Complete info SEEDHA preview ke neeche (alag 'Info' tab nahi) ----
+        _infhdr = QtWidgets.QLabel(self.L("ℹ <b>Poori jaankari</b>", "ℹ <b>File info</b>"))
+        _infhdr.setStyleSheet("color:#0f766e;font-size:11px;font-weight:700;margin-top:2px;")
+        pv.addWidget(_infhdr)
+        self.pv_info = QtWidgets.QLabel("")
+        self.pv_info.setTextFormat(QtCore.Qt.RichText)
+        self.pv_info.setWordWrap(True)
+        self.pv_info.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        self.pv_info.setStyleSheet(
+            "color:#475569;font-size:11px;padding:6px 8px;background:#f8fafc;"
+            "border:1px solid #e2e8f0;border-radius:8px;")
+        pv.addWidget(self.pv_info)
+        # 'Info' ab alag tab me nahi — saari jaankari isi label me. Upar wale
+        # sabhi pv_info2.setText(...) ab seedha isi complete-info par jaate hain.
+        self.pv_info2 = self.pv_info
 
         # ---- Filmstrip: sabhi pages ki chhoti jhalak (click = wo page) ----
         self.pv_strip = QtWidgets.QListWidget()
@@ -8856,21 +8932,6 @@ if the toggle is ticked).</p>
             "QPushButton:hover{background:#0d5f58;}")
         _edit_btn.clicked.connect(lambda: self._pv_open_image_editor())
         pv.addWidget(_edit_btn)
-        # ---- Complete info seedha preview ke NEECHE (alag 'Info' tab nahi) ----
-        _infhdr = QtWidgets.QLabel(self.L("ℹ <b>Poori jaankari</b>", "ℹ <b>File info</b>"))
-        _infhdr.setStyleSheet("color:#0f766e;font-size:11px;font-weight:700;margin-top:2px;")
-        pv.addWidget(_infhdr)
-        self.pv_info = QtWidgets.QLabel("")
-        self.pv_info.setTextFormat(QtCore.Qt.RichText)
-        self.pv_info.setWordWrap(True)
-        self.pv_info.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        self.pv_info.setStyleSheet(
-            "color:#475569;font-size:11px;padding:6px 8px;background:#f8fafc;"
-            "border:1px solid #e2e8f0;border-radius:8px;")
-        pv.addWidget(self.pv_info)
-        # 'Info' ab alag tab me nahi — saari jaankari isi label me (upar wale
-        # sabhi pv_info2.setText(...) ab seedha isi complete-info par jaate hain).
-        self.pv_info2 = self.pv_info
         self.preview_panel.setVisible(bool(self._opts.get("ui_preview", False)))
         body.addWidget(self.preview_panel)
         self.list.currentItemChanged.connect(lambda cur, prev: self._update_preview_panel())
