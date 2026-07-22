@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "96"
+VERSION = "97"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5331,6 +5331,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
 
+        # Install ke baad ek default profile khud ban jaaye (DPI 150, colour, auto).
+        self._ensure_default_profile()
+
         self._build_menu()
         self._build_ui()
         self._apply_style()
@@ -5568,6 +5571,28 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._warn("Could not open file:\n%s" % exc)
 
     # ---- profiles / options ----
+    def _ensure_default_profile(self):
+        """Install ke baad (jab koi profile na ho) ek 'Default' profile khud
+        bana do: DPI 150, 24-bit colour, page-size Auto, single side. Device
+        pehli-baar auto-detect se aata hai (auto_detect_scanner)."""
+        if self._profiles:
+            return
+        self._profiles = [{
+            "name": "Default",
+            "dpi": 150,
+            "color": "color",
+            "duplex": False,
+            "page_size": "auto",
+            "paper_source": "feeder",
+            "source_name": self._opts.get("scanner_name", ""),
+        }]
+        self._config["profiles"] = self._profiles
+        self._config["selected_profile"] = "Default"
+        try:
+            save_config(self._config)
+        except Exception:
+            pass
+
     def _refresh_profile_combo(self):
         self.cmb_profile.blockSignals(True); self.cmb_profile.clear()
         for p in self._profiles:
@@ -5650,6 +5675,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
         color = "color" if d.startswith("24") else ("gray" if d.startswith("Gray") else "bw")
         duplex = "Both" in self.cmb_sides.currentText()
         return dpi, color, duplex
+
+    def _profile_scan_params(self, prof, dpi_override=None):
+        """Scan settings SIRF profile se — panel ke manual badlaav se nahi. Isi
+        liye Enter/Scan hamesha profile ki saved setting par scan karta hai.
+        dpi_override diya ho (DPI shortcut se) to sirf us ek scan ke liye dpi
+        badal jata hai — panel/profile nahi badalta."""
+        prof = prof or {}
+        try:
+            dpi = int(dpi_override) if dpi_override else int(prof.get("dpi", 150))
+        except Exception:
+            dpi = 150
+        color = prof.get("color", "color")
+        if color not in ("color", "gray", "bw"):
+            color = "color"
+        duplex = bool(prof.get("duplex"))
+        page_size = (prof.get("page_size") or "auto").lower()
+        source = (prof.get("paper_source") or "feeder").lower()
+        return dpi, color, duplex, page_size, source
 
     def _refresh_method_label(self):
         if not hasattr(self, "method_lbl"):
@@ -5901,19 +5944,17 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._set_panel_dpi(n)
 
     def _scan_at_dpi(self, n):
-        """DPI shortcut: resolution set karo AUR usi dpi par turant scan karo
-        (jo bhi device chuna hai usi se)."""
-        self._set_panel_dpi(n)
-        self.do_scan()
+        """DPI shortcut: profile ki baaki setting + is dpi par ek scan.
+        Panel/profile me kuch nahi badalta (sirf yeh ek scan us dpi par)."""
+        self.do_scan(dpi_override=n)
 
     def _scan_at_dpi_custom(self):
-        """F7: apni DPI poochho, phir usi par scan karo."""
+        """F7: apni DPI poochho, phir usi par ek scan (panel nahi badalta)."""
         n, ok = QtWidgets.QInputDialog.getInt(
             self, self.L("Apni DPI", "Custom DPI"),
             self.L("DPI likho (50–1200):", "Enter DPI (50–1200):"), 300, 50, 1200, 50)
         if ok:
-            self._set_panel_dpi(n)
-            self.do_scan()
+            self.do_scan(dpi_override=n)
 
     def _refresh_shortcut_line(self):
         """Toolbar ke neeche wali line — abhi ke (user ke) shortcuts dikhao."""
@@ -9212,33 +9253,37 @@ if the toggle is ticked).</p>
 
 
     def _apply_speed_preset(self, name):
-        """Ek click me poori scan-setting badlo (dpi + rang + processing)."""
+        """Ek click me poori scan-setting badlo. Kyunki scan ab PROFILE ki
+        setting se hota hai, ye preset chune hue profile me hi save hota hai
+        (dpi + rang), taaki Enter bhi isi par scan kare."""
         presets = {
-            "fast":   ("150 dpi", "Black & White", False, False),
-            "normal": ("200 dpi", "Grayscale",     False, False),
-            "best":   ("300 dpi", "24-bit Colour",  True,  True),
+            "fast":   (150, "bw",    "150 dpi", "Black & White", False, False),
+            "normal": (200, "gray",  "200 dpi", "Grayscale",     False, False),
+            "best":   (300, "color", "300 dpi", "24-bit Colour", True,  True),
         }
         p = presets.get(name)
         if not p:
             return
-        dpi, depth, enhance, clean = p
+        dpi_n, color, dpi, depth, enhance, clean = p
         try:
-            self.chk_fast.setChecked(False)   # combo choti driver bane, fast-toggle na
+            self.chk_fast.setChecked(False)
         except Exception:
             pass
-        try:
-            self.cmb_dpi.setCurrentText(dpi)
-            self.cmb_depth.setCurrentText(depth)
-        except Exception:
-            pass
+        # profile me save karo (yahi Enter/Scan par lagta hai)
+        prof = self._selected_profile()
+        if prof is not None:
+            prof["dpi"] = dpi_n
+            prof["color"] = color
+            self._save_profiles()
+            self._load_profile_to_panel(prof)     # panel ko profile jaisa dikhao
         self._opts["quality_enhance"] = enhance
         self._opts["clean_edges"] = clean
         self._save_opts()
         self.status.showMessage(self.L(
-            "Scan setting: %s · %s" % (dpi, depth),
-            "Scan settings: %s · %s" % (dpi, depth)), 4000)
+            "Profile setting: %s · %s" % (dpi, depth),
+            "Profile settings: %s · %s" % (dpi, depth)), 4000)
 
-    def do_scan(self):
+    def do_scan(self, _checked=False, dpi_override=None):
         # Startup guard: agar window abhi-abhi khuli hai to scan mat karo. Isse
         # app ko Enter dabakar launch karne par startup par galat scan-box nahi aata.
         try:
@@ -9277,18 +9322,19 @@ if the toggle is ticked).</p>
         self._scan_count = 0
         self._progress = ScanProgressDialog(self, prof.get("source_name") or self.L("Scan ho raha hai…", "Scanning…"), self._lang)
         self._progress.cancelled.connect(self._cancel_scan)
-        dpi, color, duplex = self._panel_scan_params(prof or {})
+        # Scan settings sirf PROFILE se (panel ke manual badlaav se nahi).
+        # dpi_override sirf DPI-shortcut wale ek scan ke liye.
+        dpi, color, duplex, page_size, source = self._profile_scan_params(prof or {}, dpi_override)
         opts = self._opts
         if self.chk_fast.isChecked():
-            dpi, color = 200, "bw"     # keep the user's duplex (both-side) choice
+            dpi, color = 200, "bw"     # keep the profile's duplex (both-side) choice
             opts = dict(self._opts)    # lean copy: skip heavy per-page processing
             for k in ("remove_blank", "auto_crop", "deskew", "quality_enhance",
                       "clean_edges", "split_two_page"):
                 opts[k] = False
         opts = dict(opts)
-        opts["page_size"] = self.cmb_pagesize.currentText().strip().lower()
-        # "Feeder (ADF)" / "Glass (Flatbed)" — flatbed par WIA sirf 1 page scan kare
-        opts["paper_source"] = "glass" if self.cmb_source.currentIndex() == 1 else "feeder"
+        opts["page_size"] = page_size
+        opts["paper_source"] = source
         self._worker = ScanWorker(int(self.winId()), (prof or {}).get("source_name"),
                                   dpi, color, duplex, self._tmpdir, opts)
         self._worker.page_done.connect(self._on_page_scanned)
