@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "101"
+VERSION = "102"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5464,6 +5464,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._refresh_method_label()
         self._refresh_recent_menu()
         self._update_status()
+        # Profile-lock ki pichhli haalat wapas laga do
+        try:
+            _lk = bool(self._opts.get("profile_locked"))
+            self.btn_lock.blockSignals(True); self.btn_lock.setChecked(_lk); self.btn_lock.blockSignals(False)
+            self._toggle_profile_lock(_lk)
+        except Exception:
+            pass
 
         QtCore.QTimer.singleShot(400, self.check_connection)
         self._conn_timer = QtCore.QTimer(self)
@@ -5846,6 +5853,91 @@ class ScannerWindow(QtWidgets.QMainWindow):
             for k in range(self.cmb_pagesize.count()):
                 if self.cmb_pagesize.itemText(k).lower().startswith(_ps[:4]):
                     self.cmb_pagesize.setCurrentIndex(k); break
+
+    # ================= Panel: doc-type presets / lock / simple / dup =========
+    DOCTYPE_PRESETS = {
+        "presc": {"dpi": 300, "color": "color", "page_size": "auto", "duplex": False},
+        "lab":   {"dpi": 200, "color": "gray",  "page_size": "a4",   "duplex": False},
+        "id":    {"dpi": 300, "color": "color", "page_size": "auto", "duplex": True},
+        "xray":  {"dpi": 300, "color": "gray",  "page_size": "auto", "duplex": False},
+    }
+
+    def _doctype_tip(self, key):
+        return {
+            "presc": self.L("Prescription — 300dpi · colour", "Prescription — 300dpi · colour"),
+            "lab":   self.L("Lab report — 200dpi · grayscale · A4", "Lab report — 200dpi · grayscale · A4"),
+            "id":    self.L("ID card — 300dpi · colour · dono side", "ID card — 300dpi · colour · both sides"),
+            "xray":  self.L("X-ray — 300dpi · grayscale", "X-ray — 300dpi · grayscale"),
+        }.get(key, "")
+
+    def _apply_doctype_preset(self, key):
+        p = self.DOCTYPE_PRESETS.get(key)
+        if not p:
+            return
+        if self._opts.get("profile_locked"):
+            self.status.showMessage(self.L("Profile lock hai — pehle 🔓 unlock karo.",
+                                           "Profile is locked — unlock 🔓 first."), 4000)
+            return
+        prof = self._selected_profile()
+        if prof is None:
+            return
+        prof.update({"dpi": p["dpi"], "color": p["color"],
+                     "page_size": p["page_size"], "duplex": p["duplex"]})
+        self._save_profiles()
+        self._load_profile_to_panel(prof)
+        self.status.showMessage(self.L("Profile set: %s" % key, "Profile set: %s" % key), 4000)
+
+    def _set_scan_opt(self, key, on):
+        self._opts[key] = bool(on)
+        self._save_opts()
+
+    def _toggle_profile_lock(self, on):
+        self._opts["profile_locked"] = bool(on)
+        self._save_opts()
+        try:
+            self.btn_lock.setText("🔒" if on else "🔓")
+            self.cmb_profile.setEnabled(not on)
+            if hasattr(self, "_adv_box"):
+                self._adv_box.setEnabled(not on)
+        except Exception:
+            pass
+        self.status.showMessage(self.L("Profile LOCK on" if on else "Profile lock off",
+                                       "Profile LOCKED" if on else "Profile unlocked"), 3000)
+
+    def _refresh_adv_toggle_text(self):
+        if not hasattr(self, "btn_adv"):
+            return
+        arrow = "▲" if self.btn_adv.isChecked() else "▼"
+        self.btn_adv.setText(self.L("⚙ Advanced settings %s" % arrow,
+                                    "⚙ Advanced settings %s" % arrow))
+
+    def _toggle_adv_panel(self, on):
+        self._opts["panel_simple"] = not bool(on)
+        self._save_opts()
+        if hasattr(self, "_adv_box"):
+            self._adv_box.setVisible(bool(on))
+        self._refresh_adv_toggle_text()
+
+    def _duplicate_profile(self):
+        prof = self._selected_profile()
+        if prof is None:
+            self._quick_new_profile(); return
+        import copy
+        new = copy.deepcopy(prof)
+        names = {p.get("name") for p in self._profiles}
+        base = (prof.get("name", "Profile") + " copy")
+        nm = base; i = 2
+        while nm in names:
+            nm = "%s %d" % (base, i); i += 1
+        new["name"] = nm
+        self._profiles.append(new); self._save_profiles(); self._refresh_profile_combo()
+        self.cmb_profile.setCurrentText(nm)
+        self.status.showMessage(self.L("Nakal bani: %s" % nm, "Duplicated: %s" % nm), 4000)
+
+    def _scan_and_save(self):
+        """Scan karo, aur scan ke baad seedha chune folder me PDF save."""
+        self._save_after_scan_once = True
+        self.do_scan()
 
     def _quick_new_profile(self):
         dlg = EditProfileDialog(self)
@@ -8603,14 +8695,27 @@ if the toggle is ticked).</p>
         prow = QtWidgets.QHBoxLayout(); prow.setSpacing(4)
         self.cmb_profile = QtWidgets.QComboBox(); self.cmb_profile.currentTextChanged.connect(self._on_profile_changed)
         prow.addWidget(self.cmb_profile, 1)
-        bnew = QtWidgets.QPushButton("+"); bnew.setFixedWidth(30); bnew.clicked.connect(self._quick_new_profile); prow.addWidget(bnew)
-        bedit = QtWidgets.QPushButton("✎"); bedit.setFixedWidth(30); bedit.clicked.connect(self._quick_edit_profile); prow.addWidget(bedit)
+        bnew = QtWidgets.QPushButton("+"); bnew.setFixedWidth(26); bnew.setToolTip(self.L("Naya profile", "New profile")); bnew.clicked.connect(self._quick_new_profile); prow.addWidget(bnew)
+        bedit = QtWidgets.QPushButton("✎"); bedit.setFixedWidth(26); bedit.setToolTip(self.L("Profile badlo", "Edit profile")); bedit.clicked.connect(self._quick_edit_profile); prow.addWidget(bedit)
+        bdup = QtWidgets.QPushButton("⧉"); bdup.setFixedWidth(26); bdup.setToolTip(self.L("Is profile ki nakal", "Duplicate this profile")); bdup.clicked.connect(self._duplicate_profile); prow.addWidget(bdup)
+        self.btn_lock = QtWidgets.QToolButton(); self.btn_lock.setCheckable(True); self.btn_lock.setFixedWidth(26)
+        self.btn_lock.setToolTip(self.L("Profile lock — galti se setting na badle",
+                                        "Lock profile — prevent accidental changes"))
+        self.btn_lock.toggled.connect(self._toggle_profile_lock)
+        prow.addWidget(self.btn_lock)
         pw = QtWidgets.QWidget(); pw.setLayout(prow); pl.addWidget(pw)
 
-        pl.addSpacing(4); pl.addWidget(QtWidgets.QLabel("Device:"))
+        _devrow = QtWidgets.QHBoxLayout(); _devrow.setSpacing(4)
+        _devrow.addWidget(QtWidgets.QLabel("Device:"))
+        self.dev_status = QtWidgets.QLabel("● ")
+        self.dev_status.setToolTip(self.L("Scanner ki halat: 🟢 taiyar · 🟡 busy · 🔴 band",
+                                          "Scanner status: 🟢 ready · 🟡 busy · 🔴 offline"))
+        _devrow.addWidget(self.dev_status); _devrow.addStretch(1)
+        _devw = QtWidgets.QWidget(); _devw.setLayout(_devrow); pl.addSpacing(4); pl.addWidget(_devw)
         self.dev_lbl = QtWidgets.QLabel(self._opts.get("scanner_name") or "(no device)")
         self.dev_lbl.setObjectName("dev"); self.dev_lbl.setWordWrap(True)
         pl.addWidget(self.dev_lbl)
+        self._set_dev_status("unknown")
         # 🔄 Scanner badlo (kai scanner ho to) — auto-detect list dikhata hai
         self.btn_change_dev = QtWidgets.QPushButton(
             self.L("🔄 Scanner badlo / dhoondo", "🔄 Change / find scanner"))
@@ -8627,24 +8732,83 @@ if the toggle is ticked).</p>
         pl.addSpacing(4); pl.addWidget(QtWidgets.QLabel("Claim No.:"))
         self.claim_edit = QtWidgets.QLineEdit(); self.claim_edit.setPlaceholderText("optional"); pl.addWidget(self.claim_edit)
 
-        pl.addWidget(QtWidgets.QLabel("Paper source:"))
-        self.cmb_source = QtWidgets.QComboBox(); self.cmb_source.addItems(["Feeder (ADF)", "Glass (Flatbed)"]); pl.addWidget(self.cmb_source)
-        pl.addWidget(QtWidgets.QLabel("Scan sides:"))
+        # ---- 🗂 Document-type quick presets: ek tap me profile (dpi/rang/size) ----
+        pl.addWidget(QtWidgets.QLabel(self.L("Document type (1 tap):", "Document type (1 tap):")))
+        _dtrow = QtWidgets.QHBoxLayout(); _dtrow.setSpacing(3)
+        for _ic, _lbl, _key in (("💊", "Presc", "presc"), ("🧪", "Lab", "lab"),
+                                ("🪪", "ID", "id"), ("🩻", "X-ray", "xray")):
+            _b = QtWidgets.QPushButton("%s\n%s" % (_ic, _lbl))
+            _b.setToolTip(self._doctype_tip(_key)); _b.setCursor(QtCore.Qt.PointingHandCursor)
+            _b.setStyleSheet("QPushButton{font-size:10px;padding:3px 1px;border:1px solid "
+                             "#cbd5e1;border-radius:7px;background:#fff;}"
+                             "QPushButton:hover{border-color:#0f766e;color:#0f766e;}")
+            _b.clicked.connect(lambda _c, k=_key: self._apply_doctype_preset(k))
+            _dtrow.addWidget(_b)
+        _dtw = QtWidgets.QWidget(); _dtw.setLayout(_dtrow); pl.addWidget(_dtw)
+
+        # ---- ⚙ Advanced settings (Simple mode me chhup jate hain) ----
+        self.btn_adv = QtWidgets.QToolButton(); self.btn_adv.setCheckable(True)
+        self.btn_adv.setChecked(not bool(self._opts.get("panel_simple", False)))
+        self.btn_adv.setStyleSheet("QToolButton{border:none;color:#64748b;font-size:11px;padding:2px;}")
+        self.btn_adv.toggled.connect(self._toggle_adv_panel)
+        pl.addWidget(self.btn_adv)
+        self._adv_box = QtWidgets.QWidget()
+        _av = QtWidgets.QVBoxLayout(self._adv_box); _av.setContentsMargins(0, 0, 0, 0); _av.setSpacing(4)
+        _av.addWidget(QtWidgets.QLabel("Paper source:"))
+        self.cmb_source = QtWidgets.QComboBox(); self.cmb_source.addItems(["Feeder (ADF)", "Glass (Flatbed)"]); _av.addWidget(self.cmb_source)
+        _av.addWidget(QtWidgets.QLabel("Scan sides:"))
         self.cmb_sides = QtWidgets.QComboBox()
         self.cmb_sides.addItems(["Single side", "Both sides (duplex)"])
         self.cmb_sides.setToolTip("Both side = scan both sides of the paper (duplex)")
-        pl.addWidget(self.cmb_sides)
-        pl.addWidget(QtWidgets.QLabel("Page size:"))
-        self.cmb_pagesize = QtWidgets.QComboBox(); self.cmb_pagesize.addItems(["Auto (detect each page's size)", "A4 (210x297 mm)", "Letter", "Legal", "A5"]); pl.addWidget(self.cmb_pagesize)
+        _av.addWidget(self.cmb_sides)
+        _av.addWidget(QtWidgets.QLabel("Page size:"))
+        self.cmb_pagesize = QtWidgets.QComboBox(); self.cmb_pagesize.addItems(["Auto (detect each page's size)", "A4 (210x297 mm)", "Letter", "Legal", "A5"]); _av.addWidget(self.cmb_pagesize)
         self.cmb_pagesize.setToolTip("Auto = detect each page's real size (mixed sizes / ID card / half page too). A4/Letter/Legal = fixed size.")
-        pl.addWidget(QtWidgets.QLabel("Resolution:"))
+        _av.addWidget(QtWidgets.QLabel("Resolution:"))
         self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.addItems([d + " dpi" for d in RESOLUTIONS])
         self.cmb_dpi.addItem(self.L("Custom… (apni dpi)", "Custom…"))
         self.cmb_dpi.setCurrentText("200 dpi")
         self.cmb_dpi.currentTextChanged.connect(self._on_panel_dpi_changed)
-        pl.addWidget(self.cmb_dpi)
-        pl.addWidget(QtWidgets.QLabel("Bit depth:"))
-        self.cmb_depth = QtWidgets.QComboBox(); self.cmb_depth.addItems(["24-bit Colour", "Grayscale", "Black & White"]); self.cmb_depth.setCurrentText("Grayscale"); pl.addWidget(self.cmb_depth)
+        _av.addWidget(self.cmb_dpi)
+        _av.addWidget(QtWidgets.QLabel("Bit depth:"))
+        self.cmb_depth = QtWidgets.QComboBox(); self.cmb_depth.addItems(["24-bit Colour", "Grayscale", "Black & White"]); self.cmb_depth.setCurrentText("Grayscale"); _av.addWidget(self.cmb_depth)
+        pl.addWidget(self._adv_box)
+        self._adv_box.setVisible(self.btn_adv.isChecked())
+        self._refresh_adv_toggle_text()
+
+        # ---- ⚙ Auto-fixes quick chips (yahin on/off) ----
+        pl.addWidget(QtWidgets.QLabel(self.L("Auto sudhaar:", "Auto fixes:")))
+        _ocrow = QtWidgets.QHBoxLayout(); _ocrow.setSpacing(3)
+        self._opt_chips = {}
+        for _key, _lbl, _tip in (("auto_crop", "Crop", "Auto-crop the border"),
+                                 ("deskew", "Straight", "Auto-straighten (deskew)"),
+                                 ("remove_blank", "Blank", "Remove blank pages"),
+                                 ("quality_enhance", "Clean", "Auto clean / enhance")):
+            _cb = QtWidgets.QToolButton(); _cb.setText(_lbl); _cb.setCheckable(True)
+            _cb.setToolTip(_tip); _cb.setChecked(bool(self._opts.get(_key)))
+            _cb.setCursor(QtCore.Qt.PointingHandCursor)
+            _cb.setStyleSheet("QToolButton{font-size:10px;padding:3px 2px;border:1px solid "
+                              "#cbd5e1;border-radius:7px;background:#fff;color:#475569;}"
+                              "QToolButton:checked{background:#0f766e;color:#fff;border-color:#0f766e;}")
+            _cb.toggled.connect(lambda on, k=_key: self._set_scan_opt(k, on))
+            self._opt_chips[_key] = _cb; _ocrow.addWidget(_cb)
+        _ocw = QtWidgets.QWidget(); _ocw.setLayout(_ocrow); pl.addWidget(_ocw)
+
+        # ---- 📂 "Scan ke baad" + save-folder jhalak ----
+        _asrow = QtWidgets.QHBoxLayout(); _asrow.setSpacing(4)
+        _asrow.addWidget(QtWidgets.QLabel(self.L("Baad me:", "After:")))
+        self.cmb_after_scan = QtWidgets.QComboBox()
+        for _v, _t in (("nothing", self.L("Kuch nahi", "Nothing")),
+                       ("folder", self.L("Folder kholo", "Open folder")),
+                       ("savehere", self.L("Yahin PDF save", "Save PDF here"))):
+            self.cmb_after_scan.addItem(_t, _v)
+        _cur_after = self._opts.get("after_scan_panel", "nothing")
+        _ix = self.cmb_after_scan.findData(_cur_after)
+        self.cmb_after_scan.setCurrentIndex(_ix if _ix >= 0 else 0)
+        self.cmb_after_scan.currentIndexChanged.connect(
+            lambda _i: (self._opts.__setitem__("after_scan_panel", self.cmb_after_scan.currentData()), self._save_opts()))
+        _asrow.addWidget(self.cmb_after_scan, 1)
+        _asw = QtWidgets.QWidget(); _asw.setLayout(_asrow); pl.addWidget(_asw)
 
         pl.addStretch(1)
         # UPDATE BANNER: naya version website par aate hi yahan dikhta hai —
@@ -8705,7 +8869,17 @@ if the toggle is ticked).</p>
         _spdw = QtWidgets.QWidget(); _spdw.setLayout(_spd); pl.addWidget(_spdw)
         self.btn_scan = QtWidgets.QPushButton("▶  " + tr("scan", self._lang)); self.btn_scan.setObjectName("primary")
         self.btn_scan.setMinimumHeight(38); self.btn_scan.clicked.connect(self.do_scan); pl.addWidget(self.btn_scan)
-        self.btn_scan.setToolTip("Start scan (F5)")
+        self.btn_scan.setToolTip("Start scan (Enter / F-keys)")
+        # ⚡ Scan → Save: scan hote hi seedha chune folder me PDF ban jaaye
+        self.btn_scan_save = QtWidgets.QPushButton(self.L("⚡ Scan → Save (folder me)", "⚡ Scan → Save (to folder)"))
+        self.btn_scan_save.setToolTip(self.L(
+            "Scan karo aur seedha 'Meri Files' me chune folder me PDF save kar do — ek click.",
+            "Scan and save a PDF straight into the selected 'My Files' folder — one click."))
+        self.btn_scan_save.setStyleSheet(
+            "QPushButton{font-size:11px;padding:6px;border-radius:8px;border:1px solid #0f766e;"
+            "background:#e6fffa;color:#0f766e;font-weight:600;}QPushButton:hover{background:#0f766e;color:#fff;}")
+        self.btn_scan_save.clicked.connect(self._scan_and_save)
+        pl.addWidget(self.btn_scan_save)
         self.claim_edit.setToolTip("Claim/Patient number (appears in the file name)")
         self.cmb_dpi.setToolTip("Resolution: lower dpi = faster scan")
         self.cmb_depth.setToolTip("Black & White is fastest, Colour is slower")
@@ -9367,10 +9541,23 @@ if the toggle is ticked).</p>
             """)
 
 
+    def _set_dev_status(self, state):
+        """Panel me Device ke paas chhota status dot: 🟢 taiyar · 🟡 busy · 🔴 band."""
+        dot = {"free": "🟢", "ready": "🟢", "busy": "🟡",
+               "offline": "🔴", "unknown": "⚪"}.get(state, "⚪")
+        try:
+            self.dev_status.setText(dot)
+        except Exception:
+            pass
+
     def _set_conn_display(self, state, message):
         colour = {True: "#16a34a", False: "#dc2626", None: "#9ca3af"}[state]
         dot = '<span style="color:%s; font-size:16px;">&#9679;</span>' % colour
         self.lbl_conn.setText("%s&nbsp; %s" % (dot, message))
+        if state is False:
+            self._set_dev_status("offline")
+        elif state is True:
+            self._set_dev_status("ready")
 
     def check_connection(self):
         ip = self.ip_field.text().strip()
@@ -9396,6 +9583,7 @@ if the toggle is ticked).</p>
             txt, col = "Scanner: --", "#9ca3af"
         self.lbl_busy.setText(
             '<span style="color:%s; font-size:15px;">&#9679;</span>&nbsp;<b>%s</b>' % (col, txt))
+        self._set_dev_status("busy" if kind == "busy" else ("free" if kind == "free" else "unknown"))
         # UI header ki scanner-pill bhi yahi dikhaye
         try:
             self.hdr_scanner.setText(
@@ -9667,9 +9855,25 @@ if the toggle is ticked).</p>
             saved = self._auto_save_pdf()
             if saved and self._opts.get("batch_mode"):
                 self._start_next_batch()
+        # Panel: "Scan → Save" button ya "Baad me: Yahin PDF save" — scan hote
+        # hi seedha chune folder me PDF save. "Folder kholo" -> folder khol do.
+        _once = getattr(self, "_save_after_scan_once", False)
+        self._save_after_scan_once = False
+        _after = self._opts.get("after_scan_panel", "nothing")
+        if kept and (_once or _after == "savehere"):
+            try:
+                self.save_into_selected_folder()
+            except Exception:
+                pass
+        elif kept and _after == "folder":
+            try:
+                self._open_path(self._files_root())
+            except Exception:
+                pass
 
     def _on_scan_failed(self, msg):
         self._scan_place = None          # rescan/insert mode khatam
+        self._save_after_scan_once = False
         self._pstats_bump(scan_fail=1)
         self._last_error = msg
         if self._progress:
