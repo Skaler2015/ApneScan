@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "84"
+VERSION = "85"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -404,6 +404,7 @@ DEFAULT_OPTIONS = {
     "jobs": [],                  # job-chips: [{name,icon,profile,folder,template}]
     "ui_ribbon": False,          # ribbon toolbar (classic toolbar ki jagah)
     "wia_device_id": None,
+    "scanner_name": "",          # abhi chuni gayi scanner ka naam (dikhane ke liye)
     "language": "en",            # "hi" ya "en" (default English)
     "simple_mode": False,
     "feedback_email": "",
@@ -2710,7 +2711,10 @@ class EditProfileDialog(QtWidgets.QDialog):
         dev_row.addWidget(self.device_label, 1); dev_row.addWidget(btn_dev)
         dw = QtWidgets.QWidget(); dw.setLayout(dev_row)
         form.addRow(qh("Device:", "हिन्दी: स्कैनर प्रोफ़ाइल में कौन-सा स्कैनर इस्तेमाल होगा (TWAIN डिवाइस चुनें)।\nEnglish: Which scanner this profile uses (choose a TWAIN device)."), dw)
-        self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.addItems(RESOLUTIONS)
+        self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.setEditable(True)
+        self.cmb_dpi.setValidator(QtGui.QIntValidator(50, 1200, self.cmb_dpi))
+        self.cmb_dpi.addItems(RESOLUTIONS)
+        self.cmb_dpi.setToolTip("Aap yahan apni koi bhi DPI bhi type kar sakte ho (jaise 250).")
         self.cmb_dpi.setCurrentText(str(self.profile.get("dpi", 200)))
         form.addRow(qh("Resolution (DPI):", "हिन्दी: स्कैन की सफ़ाई (रेज़ॉल्यूशन)। 200 = तेज़ और टेक्स्ट के लिए ठीक; 300 = बेहतर (धीमा); 600 = फ़ोटो के लिए।\nEnglish: Scan sharpness. 200 = fast, fine for text; 300 = better (slower); 600 = for photos."), self.cmb_dpi)
         self.cmb_color = QtWidgets.QComboBox(); self.cmb_color.addItems(list(COLOUR_MODES.keys()))
@@ -2744,18 +2748,23 @@ class EditProfileDialog(QtWidgets.QDialog):
         btns.accepted.connect(self._ok); btns.rejected.connect(self.reject)
         form.addRow(btns)
 
+    def _main_window(self):
+        w = self.parent()
+        while w is not None and not hasattr(w, "pick_scanner_dialog"):
+            w = w.parent()
+        return w
+
     def _choose_device(self):
-        if not HAS_TWAIN:
-            QtWidgets.QMessageBox.warning(self, "Error", "TWAIN is not installed."); return
-        try:
-            names = list_sources(int(self.winId()))
-        except Exception as exc:
-            QtWidgets.QMessageBox.warning(self, "Error", "Could not get scanner list:\n%s" % exc); return
-        if not names:
-            QtWidgets.QMessageBox.warning(self, "Error", "No scanner found."); return
-        name, ok = QtWidgets.QInputDialog.getItem(self, "Choose device", "Scanner:", names, 0, False)
-        if ok and name:
-            self.profile["source_name"] = name; self.device_label.setText(name)
+        """Sabhi scanner (LAN + USB + TWAIN) KHUD dhoondh kar list dikhao —
+        koi TWAIN-error nahi. Chuna hua device is profile me lag jayega."""
+        win = self._main_window()
+        if win is None:
+            QtWidgets.QMessageBox.warning(self, "Error", "Cannot detect scanners here."); return
+        win.pick_scanner_dialog(on_done=self._device_picked)
+
+    def _device_picked(self, name, kind, value):
+        self.profile["source_name"] = name
+        self.device_label.setText(name)
 
     def _ok(self):
         if not self.name_edit.text().strip():
@@ -2764,7 +2773,10 @@ class EditProfileDialog(QtWidgets.QDialog):
 
     def get_profile(self):
         self.profile["name"] = self.name_edit.text().strip() or "Profile"
-        self.profile["dpi"] = int(self.cmb_dpi.currentText())
+        try:
+            self.profile["dpi"] = max(50, min(1200, int(self.cmb_dpi.currentText().strip())))
+        except Exception:
+            self.profile["dpi"] = 200
         self.profile["color"] = COLOUR_MODES[self.cmb_color.currentText()]
         self.profile["duplex"] = self.chk_duplex.isChecked()
         self.profile["page_size"] = self._PSIZES[self.cmb_psize.currentIndex()][1]
@@ -4305,6 +4317,23 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _vsep(self):
         f = QtWidgets.QFrame(); f.setObjectName("hr"); f.setFrameShape(QtWidgets.QFrame.VLine); return f
 
+    def _on_panel_dpi_changed(self, txt):
+        """'Custom…' chunne par apni dpi pucho aur list me jod do."""
+        if not txt.startswith("Custom"):
+            return
+        n, ok = QtWidgets.QInputDialog.getInt(
+            self, self.L("Apni DPI", "Custom DPI"),
+            self.L("DPI likho (50–1200):", "Enter DPI (50–1200):"), 300, 50, 1200, 50)
+        item = ("%d dpi" % n)
+        self.cmb_dpi.blockSignals(True)
+        if ok:
+            if self.cmb_dpi.findText(item) < 0:
+                self.cmb_dpi.insertItem(self.cmb_dpi.count() - 1, item)
+            self.cmb_dpi.setCurrentText(item)
+        else:
+            self.cmb_dpi.setCurrentText("200 dpi")
+        self.cmb_dpi.blockSignals(False)
+
     def _panel_scan_params(self, prof):
         try:
             dpi = int(self.cmb_dpi.currentText().split()[0])
@@ -4326,8 +4355,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _load_profile_to_panel(self, prof):
         if prof is None or not hasattr(self, "cmb_dpi"):
             return
-        self.dev_lbl.setText(prof.get("source_name") or "(no device)")
-        self.cmb_dpi.setCurrentText(str(prof.get("dpi", 200)) + " dpi")
+        self.dev_lbl.setText(prof.get("source_name")
+                             or self._opts.get("scanner_name") or "(no device)")
+        _dpitem = str(prof.get("dpi", 200)) + " dpi"
+        if self.cmb_dpi.findText(_dpitem) < 0:           # custom dpi — list me jodo
+            self.cmb_dpi.blockSignals(True)
+            self.cmb_dpi.insertItem(max(0, self.cmb_dpi.count() - 1), _dpitem)
+            self.cmb_dpi.blockSignals(False)
+        self.cmb_dpi.setCurrentText(_dpitem)
         c = prof.get("color", "gray")
         self.cmb_depth.setCurrentText("24-bit Colour" if c == "color"
                                       else ("Grayscale" if c == "gray" else "Black & White"))
@@ -6897,7 +6932,19 @@ if the toggle is ticked).</p>
         pw = QtWidgets.QWidget(); pw.setLayout(prow); pl.addWidget(pw)
 
         pl.addSpacing(4); pl.addWidget(QtWidgets.QLabel("Device:"))
-        self.dev_lbl = QtWidgets.QLabel("(no device)"); self.dev_lbl.setObjectName("dev"); self.dev_lbl.setWordWrap(True); pl.addWidget(self.dev_lbl)
+        self.dev_lbl = QtWidgets.QLabel(self._opts.get("scanner_name") or "(no device)")
+        self.dev_lbl.setObjectName("dev"); self.dev_lbl.setWordWrap(True)
+        pl.addWidget(self.dev_lbl)
+        # 🔄 Scanner badlo (kai scanner ho to) — auto-detect list dikhata hai
+        self.btn_change_dev = QtWidgets.QPushButton(
+            self.L("🔄 Scanner badlo / dhoondo", "🔄 Change / find scanner"))
+        self.btn_change_dev.setToolTip(self.L(
+            "Sabhi scanner (LAN + USB) KHUD dhoondh kar list dikhata hai — kai "
+            "scanner ho to yahan se badlo.",
+            "Auto-detects all scanners (LAN + USB) and lists them — switch here "
+            "if you use more than one."))
+        self.btn_change_dev.clicked.connect(lambda: self.pick_scanner_dialog())
+        pl.addWidget(self.btn_change_dev)
         self.method_lbl = QtWidgets.QLabel(""); self.method_lbl.setObjectName("dev")
         pl.addWidget(self.method_lbl)
 
@@ -6915,7 +6962,11 @@ if the toggle is ticked).</p>
         self.cmb_pagesize = QtWidgets.QComboBox(); self.cmb_pagesize.addItems(["Auto (alag-alag size khud pakde)", "A4 (210x297 mm)", "Letter", "Legal", "A5"]); pl.addWidget(self.cmb_pagesize)
         self.cmb_pagesize.setToolTip("Auto = detect each page's real size (mixed sizes / ID card / half page too). A4/Letter/Legal = fixed size.")
         pl.addWidget(QtWidgets.QLabel("Resolution:"))
-        self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.addItems([d + " dpi" for d in RESOLUTIONS]); self.cmb_dpi.setCurrentText("200 dpi"); pl.addWidget(self.cmb_dpi)
+        self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.addItems([d + " dpi" for d in RESOLUTIONS])
+        self.cmb_dpi.addItem(self.L("Custom… (apni dpi)", "Custom…"))
+        self.cmb_dpi.setCurrentText("200 dpi")
+        self.cmb_dpi.currentTextChanged.connect(self._on_panel_dpi_changed)
+        pl.addWidget(self.cmb_dpi)
         pl.addWidget(QtWidgets.QLabel("Bit depth:"))
         self.cmb_depth = QtWidgets.QComboBox(); self.cmb_depth.addItems(["24-bit Colour", "Grayscale", "Black & White"]); self.cmb_depth.setCurrentText("Grayscale"); pl.addWidget(self.cmb_depth)
 
@@ -8133,14 +8184,21 @@ if the toggle is ticked).</p>
     def _on_auto_detect_done(self, net):
         self.status.clearMessage()
         usb = getattr(self, "_auto_usb", []) or []
-        # combined choices banao
+        # combined choices banao — LAN (eSCL) + USB (WIA) + TWAIN
         choices = []   # (label, kind, value)
         for ip, model in (net or []):
             choices.append(("🌐 LAN: %s  (%s)" % (model, ip), "escl", ip))
         for _id, name in usb:
             choices.append(("🔌 USB: %s" % name, "wia", _id))
+        if HAS_TWAIN:
+            try:
+                for nm in (list_sources(int(self.winId())) or []):
+                    choices.append(("🖭 TWAIN: %s" % nm, "twain", nm))
+            except Exception:
+                pass
 
-        def _apply(kind, value):
+        def _apply(kind, value, label=""):
+            disp = (label.split(":", 1)[1].strip() if ":" in label else label) or value
             if kind == "escl":
                 self._opts["scanner_method"] = "escl"
                 self._opts["scanner_ip"] = value
@@ -8148,17 +8206,38 @@ if the toggle is ticked).</p>
                 self.ip_field.setText(value)
                 msg = self.L("Scanner set ho gaya (LAN / network): %s" % value,
                              "Scanner set (LAN / network): %s" % value)
+            elif kind == "twain":
+                self._opts["scanner_method"] = "twain"
+                # TWAIN device ka naam abhi ke profile me bhi rakh do
+                try:
+                    prof = self._selected_profile()
+                    if prof is not None:
+                        prof["source_name"] = value
+                        self._config["profiles"] = self._profiles
+                except Exception:
+                    pass
+                msg = self.L("Scanner set ho gaya (TWAIN): %s" % value,
+                             "Scanner set (TWAIN): %s" % value)
             else:
                 self._opts["scanner_method"] = "wia"
                 self._opts["wia_device_id"] = value
-                msg = self.L("Scanner set ho gaya (USB): mil gaya",
-                             "Scanner set (USB)")
+                msg = self.L("Scanner set ho gaya (USB): %s" % disp,
+                             "Scanner set (USB): %s" % disp)
+            self._opts["scanner_name"] = disp
             self._save_opts(); save_config(self._config)
             try:
                 self._refresh_conn_and_method()
             except Exception:
                 pass
-            QtWidgets.QMessageBox.information(self, self.L("Ho gaya", "Done"), msg)
+            cb = getattr(self, "_auto_detect_cb", None)
+            self._auto_detect_cb = None
+            if callable(cb):
+                try:
+                    cb(disp, kind, value)
+                except Exception:
+                    pass
+            else:
+                QtWidgets.QMessageBox.information(self, self.L("Ho gaya", "Done"), msg)
 
         if not choices:
             r = QtWidgets.QMessageBox.question(
@@ -8168,12 +8247,13 @@ if the toggle is ticked).</p>
                        "No scanner found on LAN or USB.\n\nIs it on and connected/on the "
                        "same WiFi?\n\nEnter a network IP manually?"),
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            self._auto_detect_cb = None
             if r == QtWidgets.QMessageBox.Yes:
                 self.set_scanner_ip()
             return
         if len(choices) == 1:
             lbl, kind, value = choices[0]
-            _apply(kind, value)
+            _apply(kind, value, lbl)
             return
         # ek se zyada mile — user chune (LAN pehle)
         labels = [c[0] for c in choices]
@@ -8183,13 +8263,26 @@ if the toggle is ticked).</p>
                    "%d scanners found — which to use?" % len(choices)),
             labels, 0, False)
         if not ok or not pick:
+            self._auto_detect_cb = None
             return
         c = choices[labels.index(pick)]
-        _apply(c[1], c[2])
+        _apply(c[1], c[2], c[0])
+
+    def pick_scanner_dialog(self, on_done=None):
+        """Sabhi scanner (LAN eSCL + USB WIA + TWAIN) auto-detect karke list
+        dikhao aur chuna hua set kar do. on_done(name, kind, value) callback."""
+        self._auto_detect_cb = on_done
+        self.auto_detect_scanner()
 
     def _refresh_conn_and_method(self):
         try:
             self.method_lbl.setText("Connected via: %s" % self._opts.get("scanner_method", "").upper())
+        except Exception:
+            pass
+        try:
+            nm = self._opts.get("scanner_name") or ""
+            if nm and hasattr(self, "dev_lbl"):
+                self.dev_lbl.setText(nm)
         except Exception:
             pass
 
