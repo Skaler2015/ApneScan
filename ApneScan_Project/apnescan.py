@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "86"
+VERSION = "87"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3395,11 +3395,12 @@ class _EditorCanvas(QtWidgets.QLabel):
 class ImageEditor(QtWidgets.QDialog):
     """Interactive page editor: Crop, Erase, Text, Arrow, Highlight, Perspective
     fix, page-number, straighten, brightness/contrast — Save page par wapas."""
-    def __init__(self, win, path, on_saved=None):
+    def __init__(self, win, path, on_saved=None, tool=None):
         super().__init__(win)
         self.win = win
         self.path = path
         self.on_saved = on_saved
+        self._start_tool = tool          # khulte hi ye tool chalu ho jaye
         L = win.L
         self.setWindowTitle(L("🎨 Page sudhaar (editor)", "🎨 Page editor"))
         self.resize(1000, 840)
@@ -3450,6 +3451,8 @@ class ImageEditor(QtWidgets.QDialog):
             act.addWidget(b); return b
         act_btn("↺", L("Baayen", "Rot L"), lambda: self._rotate90(-90))
         act_btn("↻", L("Dayen", "Rot R"), lambda: self._rotate90(90))
+        act_btn("✂", L("Auto-crop", "Auto-crop"), self._auto_crop,
+                L("Border apne aap kaato", "Auto-trim the border"))
         act_btn("📐", L("Auto-seedha", "Straighten"), self._straighten)
         act_btn("🔢", L("Page number", "Page #"), self._add_page_number,
                 L("Kone me page number lagao", "Stamp a page number in the corner"))
@@ -3486,6 +3489,8 @@ class ImageEditor(QtWidgets.QDialog):
         bot.addWidget(bsave); bot.addWidget(bclose)
         root.addLayout(bot)
         QtCore.QTimer.singleShot(0, self._render)
+        if self._start_tool:              # jaise Crop button se khula ho
+            QtCore.QTimer.singleShot(0, lambda: self._set_tool(self._start_tool))
 
     # ---- helpers ----
     def _pil_to_qpix(self, im):
@@ -3723,6 +3728,14 @@ class ImageEditor(QtWidgets.QDialog):
         self._bake()
         try:
             self.base = deskew(self.base).convert("RGB")
+        except Exception:
+            pass
+        self._render()
+
+    def _auto_crop(self):
+        self._bake()
+        try:
+            self.base = autocrop(self.base).convert("RGB")
         except Exception:
             pass
         self._render()
@@ -7432,7 +7445,7 @@ if the toggle is ticked).</p>
             (("↩️", _L("Baayen", "Left"), _L("Baayein ghumao", "Rotate left"), self.rotate_left, "blue"),
              ("↪️", _L("Dayen", "Right"), _L("Daayein ghumao", "Rotate right"), self.rotate_right, "blue"),
              ("🎯", _L("Angle", "Angle"), _L("Kisi bhi angle par seedha karo", "Rotate any angle"), self.rotate_any, "blue"),
-             ("✂️", _L("Crop", "Crop"), _L("Border apne aap kaato", "Auto-crop"), self.autocrop_current, "blue"),
+             ("✂️", _L("Crop", "Crop"), _L("Maus se area select karke crop karo", "Select an area with the mouse to crop"), self.crop_current_page, "blue"),
              ("📐", _L("Seedha", "Straight"), _L("Tedha seedha karo", "Deskew"), self.deskew_current, "blue")),
             (("☀️", _L("Ujla", "Bright"), _L("Ujla karo", "Brighter"), lambda: self._enhance_current(1.12, 1.0), "green"),
              ("🌙", _L("Gehra", "Dark"), _L("Gehra karo", "Darker"), lambda: self._enhance_current(0.9, 1.0), "green"),
@@ -10792,7 +10805,7 @@ if the toggle is ticked).</p>
                     self._check_blank_page)
         m.exec_(QtGui.QCursor.pos())
 
-    def _pv_open_image_editor(self):
+    def _pv_open_image_editor(self, tool=None):
         item = self._current_item_or_warn()
         if not item:
             return
@@ -10807,7 +10820,12 @@ if the toggle is ticked).</p>
                 self._dirty = True
             except Exception:
                 pass
-        ImageEditor(self, path, on_saved=_saved).exec_()
+        ImageEditor(self, path, on_saved=_saved, tool=tool).exec_()
+
+    def crop_current_page(self):
+        """Crop button — editor 'Crop' tool ke saath khol do: maus se area
+        select karke crop karo (auto-crop bhi editor me maujood hai)."""
+        self._pv_open_image_editor(tool="crop")
 
     def _pv_move(self, direction):
         """Current page ko upar/niche (list me) le jao — crop bigade bina."""
