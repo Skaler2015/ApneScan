@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "78"
+VERSION = "79"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -4182,7 +4182,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mh, "View error report…", self.open_crash_report, "हिन्दी: Agar app kabhi crash hui ho to uski report kholo (feedback me bhejne ke liye).\nEnglish: Open the saved crash report, if any.")
         self._ma(mh, tr("feedback", self._lang), self.send_feedback, "हिन्दी: Sujhav/shikayat bhejo.\nEnglish: Send feedback.")
         mh.addSeparator()
-        self._ma(mh, "📣 ApneScan share karo (doston ko batao)…", self.share_app, "हिन्दी: Is free app ko doston/customers tak pahuchao — WhatsApp, link copy, QR code ya poster/pamphlet (dukaan/hospital me lagane layak). Jitne zyada log, utna achha.\nEnglish: Spread this free app — WhatsApp, copy link, QR code, or a printable poster for your shop/clinic.")
+        self._ma(mh, "📣 Share ApneScan (tell friends)…", self.share_app, "हिन्दी: Is free app ko doston/customers tak pahuchao — WhatsApp, link copy, QR code ya poster/pamphlet (dukaan/hospital me lagane layak). Jitne zyada log, utna achha.\nEnglish: Spread this free app — WhatsApp, copy link, QR code, or a printable poster for your shop/clinic.")
         self._ma(mh, "⭐ Review / Star (GitHub)…", self.ask_review, "हिन्दी: Pasand aaya to GitHub par ⭐ star ya review dein — isse app aur logon tak pahunchega.\nEnglish: Like it? Give a ⭐ or a review on GitHub — it helps others find ApneScan.")
         self._ma(mh, tr("about", self._lang), self.show_about, "हिन्दी: App ke baare me.\nEnglish: About this app.")
 
@@ -6303,7 +6303,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         dlg.resize(780, 660)
         v = QtWidgets.QVBoxLayout(dlg)
         search = QtWidgets.QLineEdit()
-        search.setPlaceholderText("🔍 Search any option / koi bhi option dhoondo…")
+        search.setPlaceholderText(self.L("🔍 Koi bhi option dhoondo…", "🔍 Search any option…"))
         search.setClearButtonEnabled(True)
         v.addWidget(search)
         view = QtWidgets.QTextBrowser()
