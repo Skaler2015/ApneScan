@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "100"
+VERSION = "101"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2305,22 +2305,25 @@ def learned_name_for(text, learned, thr=0.45):
 # ID jaise pages ke liye (jahan OCR fail hota hai) sabse kaam ka.
 # ---------------------------------------------------------------------------
 def visual_signature(img):
-    """Page ki 'shakl' ka chhota fingerprint (OCR nahi):
-      - gray 16x16 average-hash bits  -> design/layout (kahan kaala/safed hai)
-      - colour 8x8 grid ke RGB         -> rang / document-type
-      - aspect-ratio                   -> portrait/landscape
-    Do same-dikhne wale pages ka signature ~milta-julta hota hai."""
+    """Page ki 'shakl' ka fingerprint (OCR nahi). v2 — zyada barik taaki
+    ek jaise letterhead wale alag document (Referral vs Lab-report) bhi
+    thoda alag pehchane jaayein:
+      - gray 24x24 average-hash bits  -> layout/design (576 bits)
+      - dark-pixel %                   -> ghana table vs khaali vs kaali X-ray
+      - colour 8x8 grid ke RGB         -> rang / type (blue ink, dark X-ray…)
+      - aspect-ratio                   -> portrait/landscape"""
     try:
         im = img.convert("RGB")
-        g = im.convert("L").resize((16, 16))
+        g = im.convert("L").resize((24, 24))
         px = list(g.getdata())
         avg = (sum(px) / len(px)) if px else 128
-        bits = "".join("1" if p >= avg else "0" for p in px)   # 256 bits
+        bits = "".join("1" if p >= avg else "0" for p in px)       # 576 bits
+        dark = round(sum(1 for p in px if p < 100) / float(len(px)), 3)
         c = im.resize((8, 8))
         color = [v for rgb in c.getdata() for v in (rgb if isinstance(rgb, tuple) else (rgb, rgb, rgb))]
         w, h = im.size
         ar = round(w / float(h), 2) if h else 1.0
-        return {"bits": bits, "color": color, "ar": ar}
+        return {"v": 2, "bits": bits, "dark": dark, "color": color, "ar": ar}
     except Exception:
         return None
 
@@ -2331,28 +2334,41 @@ def _vsig_sim(a, b):
         return 0.0
     ba, bb = a.get("bits", ""), b.get("bits", "")
     if not ba or len(ba) != len(bb):
-        return 0.0
+        return 0.0                                    # alag version/size -> match nahi
     lay = sum(1 for x, y in zip(ba, bb) if x == y) / float(len(ba))
     ca, cb = a.get("color", []), b.get("color", [])
-    if ca and len(ca) == len(cb):
-        col = 1.0 - (sum(abs(x - y) for x, y in zip(ca, cb)) / (len(ca) * 255.0))
-    else:
-        col = 0.0
-    asp = 1.0 if abs(a.get("ar", 1) - b.get("ar", 1)) < 0.18 else 0.65
-    return (0.62 * lay + 0.38 * col) * asp
+    col = 1.0 - (sum(abs(x - y) for x, y in zip(ca, cb)) / (len(ca) * 255.0)) \
+        if (ca and len(ca) == len(cb)) else 0.0
+    dsim = 1.0 - abs(a.get("dark", 0) - b.get("dark", 0))          # ink-density milaan
+    asp = 1.0 if abs(a.get("ar", 1) - b.get("ar", 1)) < 0.18 else 0.6
+    return (0.52 * lay + 0.28 * col + 0.20 * dsim) * asp
 
 
-def visual_name_for(sig, learned_visual, thr=0.72):
-    """learned_visual = list of {'vsig':..., 'name':...}. Sabse milta-julta
-    dhoondh kar naam do (agar >= thr milta ho)."""
+def visual_name_for(sig, learned_visual, thr=0.80, margin=0.06):
+    """Sabse milta-julta naam do — PAR sirf tab jab match SAAF ho:
+      - best score >= thr, AUR
+      - ya to best >= 0.93 (yaani wahi document dobara), ya best se alag NAAM
+        wala doosra signature kaafi peeche ho (margin). Warna 'ambiguous' —
+        koi naam mat do (galat naam dene se accha koi naam nahi)."""
     if not sig:
         return None, 0.0
-    best_name, best = None, 0.0
+    scored = []
     for e in (learned_visual or []):
-        sc = _vsig_sim(sig, e.get("vsig"))
-        if sc > best:
-            best, best_name = sc, e.get("name")
-    return (best_name, best) if best >= thr else (None, best)
+        scored.append((_vsig_sim(sig, e.get("vsig")), e.get("name") or ""))
+    if not scored:
+        return None, 0.0
+    scored.sort(key=lambda t: t[0], reverse=True)
+    best_sc, best_name = scored[0]
+    if best_sc < thr:
+        return None, best_sc
+    if best_sc >= 0.93:                    # लगभग वही page दोबारा — pakka
+        return best_name, best_sc
+    for sc, nm in scored[1:]:              # pehla ALAG-naam wala competitor
+        if nm and nm != best_name:
+            if best_sc - sc < margin:
+                return None, best_sc       # do naam bahut paas -> ambiguous, chhodo
+            break
+    return best_name, best_sc
 
 
 def extract_doc_number(text):
@@ -5410,6 +5426,15 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._opts["_english_migrated"] = True
             self._opts["language"] = "en"
             self._lang = "en"
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+        # v100: visual-name signature ka naya (barik) format — purane (v99)
+        # signatures alag size ke the, match nahi honge; hata do taaki saaf rahe.
+        if not self._opts.get("_vsig_v2"):
+            self._opts["_vsig_v2"] = True
+            self._config["learned_visual"] = []
             try:
                 self._save_opts()
             except Exception:
