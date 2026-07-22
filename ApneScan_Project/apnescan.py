@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "82"
+VERSION = "83"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6348,9 +6348,58 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "<span style='color:#94a3b8;font-size:11px;'>This guide is built "
             "automatically from the app's menus — it stays up to date on every "
             "update. / यह सूची menus से खुद बनती है, हर update में up-to-date रहती है।</span>"))
-        b = QtWidgets.QPushButton("Close"); b.clicked.connect(dlg.accept)
-        v.addWidget(b)
+        brow = QtWidgets.QHBoxLayout()
+        bpdf = QtWidgets.QPushButton(self.L("📄 PDF में सेव करें", "📄 Save as PDF"))
+        bpdf.setToolTip(self.L("Poori guide ki ek PDF banao (print/share ke liye)",
+                               "Make a PDF of the whole guide (to print or share)"))
+        bpdf.clicked.connect(lambda: self._export_doc_to_pdf(
+            view.document(), "ApneScan_Complete_Guide.pdf",
+            self.L("ApneScan — पूरी गाइड", "ApneScan — Complete Guide")))
+        b = QtWidgets.QPushButton(self.L("बंद करें", "Close")); b.clicked.connect(dlg.accept)
+        brow.addWidget(bpdf); brow.addStretch(1); brow.addWidget(b)
+        v.addLayout(brow)
         dlg.exec_()
+
+    def _export_doc_to_pdf(self, doc, default_name, title=""):
+        """Kisi bhi guide (QTextDocument) ko PDF me save karo — Windows ke Nirmala
+        font se Hindi sahi aati hai, koi extra font chahiye nahi."""
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("गाइड PDF में सेव करें", "Save guide as PDF"),
+            os.path.join(self._opts.get("save_folder", os.path.expanduser("~")), default_name),
+            "PDF (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        try:
+            printer = QPrinter(QPrinter.HighResolution)
+            printer.setOutputFormat(QPrinter.PdfFormat)
+            printer.setOutputFileName(path)
+            try:
+                printer.setPageSize(QtGui.QPageSize(QtGui.QPageSize.A4))
+                printer.setPageMargins(QtCore.QMarginsF(14, 14, 14, 16),
+                                       QtGui.QPageLayout.Millimeter)
+            except Exception:
+                pass
+            if title:
+                printer.setDocName(title)
+            # ek clone par title jodkar print karo (asli view badle bina)
+            d = doc.clone()
+            if title:
+                cur = QtGui.QTextCursor(d)
+                cur.setPosition(0)
+                cur.insertHtml("<h1 style='color:#0f766e'>%s</h1>"
+                               "<p style='color:#64748b;font-size:11px'>ApneScan v%s "
+                               "· apnescan.apnesoft.com</p><hr>" % (title, VERSION))
+            d.print_(printer)
+            self.status.showMessage(self.L("📄 गाइड PDF सेव हो गई: ", "📄 Guide PDF saved: ")
+                                    + os.path.basename(path), 8000)
+            try:
+                self._open_path(path)
+            except Exception:
+                pass
+        except Exception as e:
+            self._warn(str(e))
 
     def show_about(self):
         QtWidgets.QMessageBox.information(
@@ -6381,9 +6430,15 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # user ki abhi ki bhasha wala tab pehle khol do
         tabs.setCurrentIndex(1 if self._lang == "en" else 0)
         v.addWidget(tabs, 1)
+        row = QtWidgets.QHBoxLayout()
+        bpdf = QtWidgets.QPushButton(self.L("📄 PDF में सेव करें", "📄 Save as PDF"))
+        _fname = "ApneScan_Guide.pdf"
+        bpdf.clicked.connect(lambda: self._export_doc_to_pdf(
+            tabs.currentWidget().document(), _fname, title))
         b = QtWidgets.QPushButton(self.L("बंद करें", "Close"))
         b.clicked.connect(dlg.accept)
-        v.addWidget(b)
+        row.addWidget(bpdf); row.addStretch(1); row.addWidget(b)
+        v.addLayout(row)
         dlg.exec_()
 
     def show_files_guide(self):

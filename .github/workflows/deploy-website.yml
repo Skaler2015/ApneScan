@@ -50,6 +50,7 @@ jobs:
           cp ApneScan_Project/apnescan_logo.png _site/ 2>/dev/null || true
           cp ApneScan_Project/apnescan_logo.svg _site/ 2>/dev/null || true
           cp ApneScan_Project/apnescan_icon.png _site/ 2>/dev/null || true
+          cp ApneScan_Project/ApneScan_Guide.pdf _site/ 2>/dev/null || true
           # Custom subdomain (Hostinger DNS: CNAME apnescan -> skaler2015.github.io)
           echo "apnescan.apnesoft.com" > _site/CNAME
           # App ka in-app update-check isi file se naya version pehchanta hai
