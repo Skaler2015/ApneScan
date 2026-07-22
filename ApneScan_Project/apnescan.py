@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "85"
+VERSION = "86"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -318,7 +318,7 @@ RESOLUTIONS = ["150", "200", "300", "600"]
 
 # (id, label, default key) — all reassignable via Settings -> Keyboard Shortcuts
 SHORTCUTS = [
-    ("scan", "Scan", "Return"),
+    ("scan", "Scan", "F5"),
     ("import", "Import images / PDF", "Ctrl+I"),
     ("rename", "Rename page", "F2"),
     ("save_all", "Save all as PDF", "Ctrl+S"),
@@ -2735,10 +2735,10 @@ class EditProfileDialog(QtWidgets.QDialog):
         _dxw = QtWidgets.QWidget(); _dxw.setLayout(_dxr)
         form.addRow("", _dxw)
         self.cmb_psize = QtWidgets.QComboBox()
-        self._PSIZES = [("Auto (alag-alag size khud pakde)", "auto"),
+        self._PSIZES = [("Auto (detect each page's size)", "auto"),
                         ("A4 (210x297 mm)", "a4"), ("Letter", "letter"),
                         ("Legal", "legal"), ("A5", "a5"),
-                        ("Lambi parchi / custom (length Settings me)", "custom")]
+                        ("Long receipt / custom (length in Settings)", "custom")]
         self.cmb_psize.addItems([t for t, _c in self._PSIZES])
         _ps = (self.profile.get("page_size") or "auto").lower()
         _idx = next((k for k, (_t, c) in enumerate(self._PSIZES) if _ps.startswith(c[:4])), 0)
@@ -2892,9 +2892,9 @@ class OptionsDialog(QtWidgets.QDialog):
         self.chk_claimfolder.setChecked(self.opts["make_claim_folder"]); form.addRow(chkrow(self.chk_claimfolder, 'हिन्दी: चालू करने पर: हर claim नंबर का अलग फ़ोल्डर बनेगा (एक claim के सारे पेज एक जगह)।\nEnglish: ON: a separate folder per claim number.'))
         self.chk_ymfolder = QtWidgets.QCheckBox("Year/Month folders (2026/07/...)")
         self.chk_ymfolder.setChecked(self.opts["year_month_folders"]); form.addRow(chkrow(self.chk_ymfolder, 'हिन्दी: चालू करने पर: साल/महीने के फ़ोल्डर (2026/07/…) — पुराने स्कैन आसानी से मिलें।\nEnglish: ON: year/month folders (2026/07/...) for easy filing.'))
-        self.cmb_after = QtWidgets.QComboBox(); self.cmb_after.addItems(["Kuch nahi", "PDF kholo", "Folder kholo"])
+        self.cmb_after = QtWidgets.QComboBox(); self.cmb_after.addItems(["Do nothing", "Open the PDF", "Open the folder"])
         self.cmb_after.setCurrentIndex({"nothing": 0, "open": 1, "folder": 2}.get(self.opts.get("after_save", "nothing"), 0))
-        form.addRow(lblhelp("Save ke baad:", 'हिन्दी: सेव के बाद क्या हो — कुछ नहीं / PDF खुले / फ़ोल्डर खुले।\nEnglish: After save — do nothing / open the PDF / open the folder.'), self.cmb_after)
+        form.addRow(lblhelp("After save:", 'हिन्दी: सेव के बाद क्या हो — कुछ नहीं / PDF खुले / फ़ोल्डर खुले।\nEnglish: After save — do nothing / open the PDF / open the folder.'), self.cmb_after)
         self.chk_imgtoo = QtWidgets.QCheckBox("Also save a separate image (JPG) for each page")
         self.chk_imgtoo.setChecked(self.opts.get("save_images_too", False)); form.addRow(chkrow(self.chk_imgtoo, 'हिन्दी: चालू करने पर: PDF के साथ हर पेज की अलग JPG इमेज भी बनेगी।\nEnglish: ON: also save each page as a separate JPG image.'))
         self.chk_searchable = QtWidgets.QCheckBox("Searchable PDF (find text with Ctrl+F)")
@@ -3907,11 +3907,22 @@ class FilesTree(QtWidgets.QTreeView):
     def __init__(self, on_drop):
         super().__init__()
         self._on_drop = on_drop
+        self._on_activate = None      # Enter dabane par folder/file kholo
         self.setAcceptDrops(True)
         # Files ko yahan se KHEENCH kar doc-area me drop karke import karo
         self.setDragEnabled(True)
         self.setDragDropMode(QtWidgets.QAbstractItemView.DragDrop)
         self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+
+    def keyPressEvent(self, e):
+        # Enter = chuna hua folder kholo / file dikhaao (SCAN nahi hona chahiye)
+        if e.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+            idx = self.currentIndex()
+            if self._on_activate is not None and idx.isValid():
+                self._on_activate(idx)
+                e.accept()
+                return
+        super().keyPressEvent(e)
 
     def dragEnterEvent(self, e):
         e.acceptProposedAction()
@@ -4367,7 +4378,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.cmb_depth.setCurrentText("24-bit Colour" if c == "color"
                                       else ("Grayscale" if c == "gray" else "Black & White"))
         self.cmb_source.setCurrentText("Feeder (ADF)")
-        self.cmb_sides.setCurrentText("Both side (dono taraf)" if prof.get("duplex") else "Single side (ek taraf)")
+        self.cmb_sides.setCurrentText("Both sides (duplex)" if prof.get("duplex") else "Single side")
         # page size (per-profile)
         if hasattr(self, "cmb_pagesize"):
             _ps = (prof.get("page_size") or "auto").lower()
@@ -4751,11 +4762,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
         day = (st.get("days") or {}).get(datetime.datetime.now().strftime("%Y-%m-%d"), {})
         lines = [
             '<b>📊 ApneScan</b> <span style="color:#94a3b8;font-size:10px;">(click = detail)</span>',
-            "🌍 World scans: <b>%s</b>" % self._an_wv("total"),
-            "📅 Aaj (world): <b>%s</b>" % self._an_wv("today"),
-            "🟢 Abhi online: <b>%s</b>" % self._an_wv("online"),
-            "📄 Mere aaj: <b>%d</b> pages" % day.get("pages", 0),
-            "🔥 Streak: <b>%d din</b>" % self._pstats_streak(),
+            self.L("🌍 Duniya bhar ke scans: <b>%s</b>", "🌍 World scans: <b>%s</b>") % self._an_wv("total"),
+            self.L("📅 Aaj (duniya): <b>%s</b>", "📅 Today (world): <b>%s</b>") % self._an_wv("today"),
+            self.L("🟢 Abhi online: <b>%s</b>", "🟢 Online now: <b>%s</b>") % self._an_wv("online"),
+            self.L("📄 Mere aaj: <b>%d</b> pages", "📄 My today: <b>%d</b> pages") % day.get("pages", 0),
+            self.L("🔥 Streak: <b>%d din</b>", "🔥 Streak: <b>%d days</b>") % self._pstats_streak(),
         ]
         try:
             self.an_box.setText("<br>".join(lines))
@@ -6955,11 +6966,11 @@ if the toggle is ticked).</p>
         self.cmb_source = QtWidgets.QComboBox(); self.cmb_source.addItems(["Feeder (ADF)", "Glass (Flatbed)"]); pl.addWidget(self.cmb_source)
         pl.addWidget(QtWidgets.QLabel("Scan sides:"))
         self.cmb_sides = QtWidgets.QComboBox()
-        self.cmb_sides.addItems(["Single side (ek taraf)", "Both side (dono taraf)"])
+        self.cmb_sides.addItems(["Single side", "Both sides (duplex)"])
         self.cmb_sides.setToolTip("Both side = scan both sides of the paper (duplex)")
         pl.addWidget(self.cmb_sides)
         pl.addWidget(QtWidgets.QLabel("Page size:"))
-        self.cmb_pagesize = QtWidgets.QComboBox(); self.cmb_pagesize.addItems(["Auto (alag-alag size khud pakde)", "A4 (210x297 mm)", "Letter", "Legal", "A5"]); pl.addWidget(self.cmb_pagesize)
+        self.cmb_pagesize = QtWidgets.QComboBox(); self.cmb_pagesize.addItems(["Auto (detect each page's size)", "A4 (210x297 mm)", "Letter", "Legal", "A5"]); pl.addWidget(self.cmb_pagesize)
         self.cmb_pagesize.setToolTip("Auto = detect each page's real size (mixed sizes / ID card / half page too). A4/Letter/Legal = fixed size.")
         pl.addWidget(QtWidgets.QLabel("Resolution:"))
         self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.addItems([d + " dpi" for d in RESOLUTIONS])
@@ -7227,6 +7238,7 @@ if the toggle is ticked).</p>
         self.files_tree.setRootIsDecorated(False)
         self.files_tree.setExpandsOnDoubleClick(False)
         self.files_tree.doubleClicked.connect(self._files_tree_open)
+        self.files_tree._on_activate = self._files_tree_open   # Enter = folder kholo
         self.files_tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.files_tree.customContextMenuRequested.connect(self._files_tree_menu)
         self.files_tree.selectionModel().currentChanged.connect(self._files_sel_changed)
@@ -7248,6 +7260,7 @@ if the toggle is ticked).</p>
             "QListWidget::item{padding:5px 4px;border-bottom:1px solid #eef2f7;}"
             "QListWidget::item:selected{background:#e0f2f1;color:#0f172a;}")
         self.files_results.itemDoubleClicked.connect(self._files_result_activated)
+        self.files_results.itemActivated.connect(self._files_result_activated)  # Enter = kholo
         self.files_results.itemClicked.connect(self._on_result_clicked)  # 1-click = preview
         self.files_results.hide()
         fp.addWidget(self.files_results, 1)
@@ -7555,6 +7568,7 @@ if the toggle is ticked).</p>
         self._state_timer.timeout.connect(self._tick_scanner_state)
         self._state_timer.start()
         QtCore.QTimer.singleShot(800, self._tick_scanner_state)
+        QtCore.QTimer.singleShot(1400, self._detect_device_name)   # Device me naam dikhao
         # Ctrl+O = koi folder kholo (sidebar me) · Ctrl+V = clipboard se paste
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+O"), self, self.open_existing_folder)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+V"), self, self._paste_from_clipboard)
@@ -7713,8 +7727,8 @@ if the toggle is ticked).</p>
         ip = self.ip_field.text().strip()
         self._config["scanner_ip"] = ip; save_config(self._config)
         if not ip:
-            self._set_conn_display(False, "Scanner IP daalein"); return
-        self._set_conn_display(None, "Check ho raha hai... (%s)" % ip)
+            self._set_conn_display(False, self.L("Scanner IP daalein", "Enter scanner IP")); return
+        self._set_conn_display(None, self.L("Check ho raha hai… (%s)", "Checking… (%s)") % ip)
         self.btn_check.setEnabled(False)
         self._checker = ConnectionChecker(ip)
         self._checker.result.connect(self._on_conn_result)
@@ -7726,9 +7740,9 @@ if the toggle is ticked).</p>
 
     def _set_busy_display(self, kind):
         if kind == "free":
-            txt, col = "Scanner FREE (taiyar)", "#16a34a"
+            txt, col = self.L("Scanner FREE (taiyar)", "Scanner FREE (ready)"), "#16a34a"
         elif kind == "busy":
-            txt, col = "Scanner BUSY (vyast)", "#dc2626"
+            txt, col = self.L("Scanner BUSY (vyast)", "Scanner BUSY"), "#dc2626"
         else:
             txt, col = "Scanner: --", "#9ca3af"
         self.lbl_busy.setText(
@@ -8273,6 +8287,53 @@ if the toggle is ticked).</p>
         dikhao aur chuna hua set kar do. on_done(name, kind, value) callback."""
         self._auto_detect_cb = on_done
         self.auto_detect_scanner()
+
+    def _detect_device_name(self):
+        """Startup par abhi JUDA scanner ka naam dhoondh kar 'Device' me dikhao
+        (WIA/USB — tez). Background me, taaki UI atke nahi. '(no device)' ki
+        jagah asli scanner ka naam dikhega."""
+        if self._opts.get("scanner_name"):
+            try:
+                self.dev_lbl.setText(self._opts["scanner_name"])
+            except Exception:
+                pass
+            return
+        if not HAS_W32:
+            return
+
+        def job():
+            try:
+                _pythoncom.CoInitialize()
+            except Exception:
+                pass
+            try:
+                return list_wia_sources() or []
+            except Exception:
+                return []
+            finally:
+                try:
+                    _pythoncom.CoUninitialize()
+                except Exception:
+                    pass
+
+        def done(devs):
+            if not isinstance(devs, list) or not devs:
+                return
+            wid = self._opts.get("wia_device_id")
+            name = None
+            for _id, nm in devs:
+                if wid and _id == wid:
+                    name = nm; break
+            if name is None:
+                name = devs[0][1]
+            if name:
+                self._opts["scanner_name"] = name
+                self._save_opts()
+                try:
+                    self.dev_lbl.setText(name)
+                except Exception:
+                    pass
+        self._run_bg_quiet(job, done)
 
     def _refresh_conn_and_method(self):
         try:
