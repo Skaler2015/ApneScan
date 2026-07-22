@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "108"
+VERSION = "109"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8821,18 +8821,20 @@ if the toggle is ticked).</p>
         pl = QtWidgets.QVBoxLayout(panel); pl.setContentsMargins(12, 10, 12, 10); pl.setSpacing(3)
 
         pl.addWidget(QtWidgets.QLabel(tr("profile", self._lang)))
-        prow = QtWidgets.QHBoxLayout(); prow.setSpacing(4)
+        # Profile ka poora naam ek full-width line me
         self.cmb_profile = QtWidgets.QComboBox(); self.cmb_profile.currentTextChanged.connect(self._on_profile_changed)
-        prow.addWidget(self.cmb_profile, 1)
-        bnew = QtWidgets.QPushButton("➕"); bnew.setFixedWidth(30); bnew.setToolTip(self.L("Naya profile", "New profile")); bnew.clicked.connect(self._quick_new_profile); prow.addWidget(bnew)
-        bedit = QtWidgets.QPushButton("✏️"); bedit.setFixedWidth(30); bedit.setToolTip(self.L("Profile badlo", "Edit profile")); bedit.clicked.connect(self._quick_edit_profile); prow.addWidget(bedit)
-        bdup = QtWidgets.QPushButton("📋"); bdup.setFixedWidth(30); bdup.setToolTip(self.L("Is profile ki nakal", "Duplicate this profile")); bdup.clicked.connect(self._duplicate_profile); prow.addWidget(bdup)
-        self.btn_lock = QtWidgets.QToolButton(); self.btn_lock.setCheckable(True); self.btn_lock.setFixedWidth(30)
+        pl.addWidget(self.cmb_profile)          # poori width — poora naam dikhe
+        # Buttons uske JUST neeche ek row me
+        prow = QtWidgets.QHBoxLayout(); prow.setSpacing(4)
+        bnew = QtWidgets.QPushButton("➕"); bnew.setFixedWidth(38); bnew.setToolTip(self.L("Naya profile", "New profile")); bnew.clicked.connect(self._quick_new_profile); prow.addWidget(bnew)
+        bedit = QtWidgets.QPushButton("✏️"); bedit.setFixedWidth(38); bedit.setToolTip(self.L("Profile badlo", "Edit profile")); bedit.clicked.connect(self._quick_edit_profile); prow.addWidget(bedit)
+        bdup = QtWidgets.QPushButton("📋"); bdup.setFixedWidth(38); bdup.setToolTip(self.L("Is profile ki nakal", "Duplicate this profile")); bdup.clicked.connect(self._duplicate_profile); prow.addWidget(bdup)
+        self.btn_lock = QtWidgets.QToolButton(); self.btn_lock.setCheckable(True); self.btn_lock.setFixedWidth(38)
         self.btn_lock.setText("🔓")
         self.btn_lock.setToolTip(self.L("Profile lock — galti se setting na badle",
                                         "Lock profile — prevent accidental changes"))
         self.btn_lock.toggled.connect(self._toggle_profile_lock)
-        prow.addWidget(self.btn_lock)
+        prow.addWidget(self.btn_lock); prow.addStretch(1)
         pw = QtWidgets.QWidget(); pw.setLayout(prow); pl.addWidget(pw)
 
         _devrow = QtWidgets.QHBoxLayout(); _devrow.setSpacing(4)
