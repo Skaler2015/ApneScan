@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "103"
+VERSION = "104"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3242,6 +3242,12 @@ class HelpDialog(QtWidgets.QDialog):
         self.setWindowTitle("Guide / Help"); self.resize(620, 520)
         lay = QtWidgets.QVBoxLayout(self)
         br = QtWidgets.QTextBrowser()
+        _f = QtGui.QFont("Nirmala UI" if lang == "hi" else "Segoe UI", 12)
+        _f.setStyleStrategy(QtGui.QFont.PreferAntialias); br.setFont(_f)
+        br.document().setDefaultStyleSheet(
+            "body{font-family:'Nirmala UI','Noto Sans Devanagari','Segoe UI',sans-serif;"
+            "font-size:15px;line-height:170%;color:#334155;}"
+            "h3{color:#0f766e;font-weight:700;} b{color:#0f172a;}")
         br.setHtml(HELP_TEXT_HI if lang == "hi" else HELP_TEXT_EN)
         lay.addWidget(br)
         b = QtWidgets.QPushButton("Close" if lang == "hi" else "Close")
@@ -8132,13 +8138,17 @@ class ScannerWindow(QtWidgets.QMainWindow):
         v.addWidget(search)
         view = QtWidgets.QTextBrowser()
         view.setOpenExternalLinks(True)
+        _vf = QtGui.QFont("Nirmala UI" if self._lang != "en" else "Segoe UI", 12)
+        _vf.setStyleStrategy(QtGui.QFont.PreferAntialias); view.setFont(_vf)
         v.addWidget(view, 1)
 
         def render(q=""):
             q = (q or "").strip().lower()
-            out = ["<style>h3{color:#0f766e;margin:16px 0 6px;font-size:15px;}"
-                   ".opt{margin:7px 0;padding:6px 10px;border-left:3px solid #99f6e4;background:#f8fafc;}"
-                   ".lbl{font-weight:700;color:#0f172a;}.loc{color:#94a3b8;font-size:11px;}"
+            out = ["<style>body{font-family:'Nirmala UI','Noto Sans Devanagari','Segoe UI',sans-serif;"
+                   "font-size:15px;line-height:168%;color:#334155;}"
+                   "h3{color:#0f766e;margin:18px 0 8px;font-size:17px;font-weight:700;}"
+                   ".opt{margin:9px 0;padding:9px 12px;border-left:3px solid #99f6e4;background:#f8fafc;line-height:165%;}"
+                   ".lbl{font-weight:700;color:#0f172a;}.loc{color:#94a3b8;font-size:12px;}"
                    ".hi{color:#334155;}.en{color:#475569;}</style>"]
             cur = None
             cnt = 0
@@ -8227,12 +8237,22 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "TWAIN + WIA scanners support.\nVersion " + VERSION)
 
     # ---- Panel guides ("?" buttons on Meri Files / Preview) ----
-    _GUIDE_CSS = ("<style>h2{color:#0f766e;font-size:17px;margin:2px 0 4px;}"
-                  "h3{color:#0f172a;font-size:14px;margin:14px 0 4px;}"
-                  "p{color:#334155;margin:4px 0;}"
-                  "b{color:#0f172a;} li{color:#334155;margin:3px 0;}"
-                  "ul{margin:4px 0 4px 4px;padding-left:18px;}"
-                  ".t{color:#64748b;font-size:12px;}</style>")
+    # Sundar Devanagari font (Windows: 'Nirmala UI') + bada size + khuli
+    # line-spacing — guide padhne me accha lage.
+    _GUIDE_FONT = "'Nirmala UI','Noto Sans Devanagari','Kohinoor Devanagari','Segoe UI',sans-serif"
+    _GUIDE_CSS = ("<style>"
+                  "body{font-family:%s;color:#334155;font-size:15px;line-height:172%%;}"
+                  "h2{font-family:%s;color:#0f766e;font-size:22px;font-weight:700;"
+                  "margin:6px 0 12px;}"
+                  "h3{font-family:%s;color:#0f172a;font-size:16px;font-weight:700;"
+                  "margin:20px 0 6px;}"
+                  "p{color:#334155;margin:7px 0;line-height:172%%;}"
+                  "b{color:#0f172a;font-weight:700;}"
+                  "li{color:#334155;margin:7px 0;line-height:165%%;}"
+                  "ul{margin:6px 0 12px 4px;padding-left:22px;}"
+                  "a{color:#0f766e;text-decoration:none;}"
+                  ".t{color:#64748b;font-size:13px;line-height:168%%;}"
+                  "</style>" % (_GUIDE_FONT, _GUIDE_FONT, _GUIDE_FONT))
 
     def _show_panel_guide(self, title, hi_html, en_html):
         """Ek panel ki poori guide — 2 tabs: हिंदी aur English."""
@@ -8244,6 +8264,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
         for lang, htmlc in (("हिंदी", hi_html), ("English", en_html)):
             br = QtWidgets.QTextBrowser()
             br.setOpenExternalLinks(True)
+            # sundar font: Hindi -> Nirmala UI, English -> Segoe UI
+            _fam = "Nirmala UI" if lang == "हिंदी" else "Segoe UI"
+            _f = QtGui.QFont(_fam, 12); _f.setStyleStrategy(QtGui.QFont.PreferAntialias)
+            br.setFont(_f)
+            br.setStyleSheet("QTextBrowser{background:#ffffff;border:1px solid #e2e8f0;"
+                             "border-radius:8px;padding:12px;}")
             br.setHtml(self._GUIDE_CSS + htmlc)
             tabs.addTab(br, lang)
         # user ki abhi ki bhasha wala tab pehle khol do
@@ -8761,22 +8787,9 @@ if the toggle is ticked).</p>
         self.method_lbl = QtWidgets.QLabel(""); self.method_lbl.setObjectName("dev")
         pl.addWidget(self.method_lbl)
 
-        pl.addSpacing(4); pl.addWidget(QtWidgets.QLabel("Claim No.:"))
-        self.claim_edit = QtWidgets.QLineEdit(); self.claim_edit.setPlaceholderText("optional"); pl.addWidget(self.claim_edit)
-
-        # ---- 🗂 Document-type quick presets: ek tap me profile (dpi/rang/size) ----
-        pl.addWidget(QtWidgets.QLabel(self.L("Document type (1 tap):", "Document type (1 tap):")))
-        _dtrow = QtWidgets.QHBoxLayout(); _dtrow.setSpacing(3)
-        for _ic, _lbl, _key in (("💊", "Presc", "presc"), ("🧪", "Lab", "lab"),
-                                ("🪪", "ID", "id"), ("🩻", "X-ray", "xray")):
-            _b = QtWidgets.QPushButton("%s\n%s" % (_ic, _lbl))
-            _b.setToolTip(self._doctype_tip(_key)); _b.setCursor(QtCore.Qt.PointingHandCursor)
-            _b.setStyleSheet("QPushButton{font-size:10px;padding:3px 1px;border:1px solid "
-                             "#cbd5e1;border-radius:7px;background:#fff;}"
-                             "QPushButton:hover{border-color:#0f766e;color:#0f766e;}")
-            _b.clicked.connect(lambda _c, k=_key: self._apply_doctype_preset(k))
-            _dtrow.addWidget(_b)
-        _dtw = QtWidgets.QWidget(); _dtw.setLayout(_dtrow); pl.addWidget(_dtw)
+        # Claim No. field panel se hata diya (user ki request). Object rehta hai
+        # taaki file-naam banane wala purana code na toote — par dikhta nahi.
+        self.claim_edit = QtWidgets.QLineEdit(); self.claim_edit.hide()
 
         # ---- ⚙ Advanced settings (Simple mode me chhup jate hain) ----
         self.btn_adv = QtWidgets.QToolButton(); self.btn_adv.setCheckable(True)
