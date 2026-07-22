@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "111"
+VERSION = "112"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2185,6 +2185,18 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
 # Role for storing a custom (document-name) label on a thumbnail item.
 TITLE_ROLE = int(QtCore.Qt.UserRole) + 1
 NAMEKEY_ROLE = int(QtCore.Qt.UserRole) + 2   # normalized key for remembering saved names
+# ---- Pages-panel per-thumbnail marks (Star / colour label / note / "NEW") ----
+STAR_ROLE = int(QtCore.Qt.UserRole) + 3      # bool: page starred (important)
+COLOR_ROLE = int(QtCore.Qt.UserRole) + 4     # str: "red"/"yellow"/"green"/"blue" or ""
+NOTE_ROLE = int(QtCore.Qt.UserRole) + 5      # str: sticky note text
+NEW_ROLE = int(QtCore.Qt.UserRole) + 6       # bool: freshly added, not looked at yet
+FLAG_ROLE = int(QtCore.Qt.UserRole) + 7      # str: "blank"/"blur"/"" (quality warning)
+STAMP_ROLE = int(QtCore.Qt.UserRole) + 8     # str: scan/added time text for the tooltip
+
+# Colour-label swatches (name -> paint colour)
+LABEL_COLORS = {
+    "red": "#ef4444", "yellow": "#f59e0b", "green": "#22c55e", "blue": "#3b82f6",
+}
 
 
 def underscore_name(s):
@@ -5395,6 +5407,66 @@ class PagesList(QtWidgets.QListWidget):
                 pass
 
 
+class ThumbDelegate(QtWidgets.QStyledItemDelegate):
+    """Pages-panel ke har thumbnail par chhote overlays banata hai —
+    Star (zaroori), rang wala label (Red/Yellow/Green/Blue), 'NEW' badge
+    (abhi-abhi scan hua), note ka nishaan (📝), aur khaali/dhundhla warning.
+    Base thumbnail + naam Qt khud banata hai; hum sirf upar overlays lagate hain."""
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        try:
+            r = option.rect
+            painter.save()
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            # thumbnail ka chitra area (text neeche ~46px hota hai)
+            pad = 6
+            top = r.top() + pad
+            # ---- rang wala label: upar ek patli baar ----
+            col = index.data(COLOR_ROLE)
+            if col and col in LABEL_COLORS:
+                painter.fillRect(r.left() + pad, top,
+                                 r.width() - 2 * pad, 5,
+                                 QtGui.QColor(LABEL_COLORS[col]))
+            # ---- Star: upar-daayen ----
+            if index.data(STAR_ROLE):
+                f = painter.font(); f.setPixelSize(16); painter.setFont(f)
+                painter.setPen(QtGui.QColor("#f59e0b"))
+                painter.drawText(QtCore.QRect(r.right() - 26, top, 22, 20),
+                                 QtCore.Qt.AlignCenter, "★")
+            # ---- 'NEW' badge: upar-baayen ----
+            if index.data(NEW_ROLE):
+                bw, bh = 34, 15
+                br = QtCore.QRect(r.left() + pad, top + 6, bw, bh)
+                painter.setPen(QtCore.Qt.NoPen)
+                painter.setBrush(QtGui.QColor("#16a34a"))
+                painter.drawRoundedRect(br, 4, 4)
+                f = painter.font(); f.setPixelSize(9); f.setBold(True); painter.setFont(f)
+                painter.setPen(QtGui.QColor("#ffffff"))
+                painter.drawText(br, QtCore.Qt.AlignCenter, "NEW")
+            # ---- note ka nishaan: neeche-baayen ----
+            note = index.data(NOTE_ROLE)
+            flag = index.data(FLAG_ROLE)
+            by = r.top() + max(20, r.height() - 66)
+            if note:
+                f = painter.font(); f.setPixelSize(13); painter.setFont(f)
+                painter.setPen(QtGui.QColor("#0369a1"))
+                painter.drawText(QtCore.QRect(r.left() + pad, by, 20, 18),
+                                 QtCore.Qt.AlignCenter, "\U0001F4DD")
+            # ---- khaali / dhundhla warning: neeche-daayen ----
+            if flag in ("blank", "blur"):
+                f = painter.font(); f.setPixelSize(13); painter.setFont(f)
+                painter.setPen(QtGui.QColor("#dc2626"))
+                painter.drawText(QtCore.QRect(r.right() - 26, by, 20, 18),
+                                 QtCore.Qt.AlignCenter, "⚠")
+            painter.restore()
+        except Exception:
+            try:
+                painter.restore()
+            except Exception:
+                pass
+
+
 class UrlListWidget(QtWidgets.QListWidget):
     """Search-results list — items ko FILE ki tarah kheencha ja sake, taaki
     search me mili file ko seedha doc-area me drag karke import kar sakein.
@@ -6926,18 +6998,334 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 except Exception:
                     pass
 
+    def _zoom_thumbs(self, factor):
+        self._apply_thumb_zoom(self._thumb_w * factor)
+
+    # ================= Pages Panel: control-bar + marks =================
+    def _build_pages_bar(self):
+        """Pages Panel ke upar ki chhoti control-patti: thumbnail size slider,
+        grid/list view, chunav (all/invert/clear), tick-mode, quick-rotate,
+        panel ka rang, aur live 'kitne chune' counter."""
+        bar = QtWidgets.QWidget(); bar.setObjectName("pagesbar")
+        h = QtWidgets.QHBoxLayout(bar)
+        h.setContentsMargins(8, 2, 8, 2); h.setSpacing(6)
+
+        def tb(txt, tip, slot, checkable=False):
+            b = QtWidgets.QToolButton()
+            b.setText(txt); b.setToolTip(tip); b.setAutoRaise(True)
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setCheckable(checkable)
+            if checkable:
+                b.toggled.connect(slot)
+            else:
+                b.clicked.connect(slot)
+            h.addWidget(b)
+            return b
+
+        # ---- thumbnail size slider ----
+        h.addWidget(QtWidgets.QLabel("🔍"))
+        self._thumb_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self._thumb_slider.setMinimum(90); self._thumb_slider.setMaximum(320)
+        self._thumb_slider.setFixedWidth(110)
+        self._thumb_slider.setValue(int(getattr(self, "_thumb_w", self.THUMB_W)))
+        self._thumb_slider.setToolTip(self.L(
+            "Thumbnail ka size — bada/chhota karo (Ctrl+scroll bhi chalta hai).",
+            "Thumbnail size — bigger / smaller (Ctrl+scroll also works)."))
+        self._thumb_slider.valueChanged.connect(self._on_thumb_slider)
+        h.addWidget(self._thumb_slider)
+
+        h.addWidget(self._vsep())
+        # ---- grid / list view ----
+        self._btn_viewmode = tb("☰", self.L("Grid / List view badlo", "Grid / List view"),
+                                 self._toggle_view_mode)
+        # ---- tick (checkbox) mode ----
+        self._btn_checkmode = tb("☑", self.L(
+            "Tick-mode: har page par tick-box — chunav aasan.",
+            "Tick-mode: a checkbox on each page for easy selecting."),
+            self._toggle_check_mode, checkable=True)
+
+        h.addWidget(self._vsep())
+        # ---- quick rotate (selected/current) ----
+        tb("↺", self.L("Chune page baayen ghumao", "Rotate selected left"), self.rotate_left)
+        tb("↻", self.L("Chune page dayen ghumao", "Rotate selected right"), self.rotate_right)
+
+        h.addWidget(self._vsep())
+        # ---- selection helpers ----
+        tb("✅", self.L("Sab chuno (Ctrl+A)", "Select all (Ctrl+A)"), self.list.selectAll)
+        tb("🔁", self.L("Ulta chunav (jo chune wo chhodo, baaki chuno)",
+                        "Invert selection"), self._invert_selection)
+        tb("✖", self.L("Chunav hatao", "Clear selection"), self._clear_selection)
+
+        h.addStretch(1)
+        # ---- panel background light/dark ----
+        tb("🌓", self.L("Panel ka rang halka/gehra", "Panel light / dark"),
+           self._toggle_panel_bg)
+        # ---- live count ----
+        self._pages_count_lbl = QtWidgets.QLabel("")
+        self._pages_count_lbl.setStyleSheet("color:#64748b;font-size:11px;")
+        h.addWidget(self._pages_count_lbl)
+
+        # restore saved prefs
+        try:
+            if self._opts.get("pages_view_mode", "grid") == "list":
+                self._set_view_mode("list")
+            if self._opts.get("pages_dark_bg"):
+                self._apply_panel_bg(True)
+        except Exception:
+            pass
+        QtCore.QTimer.singleShot(300, self._update_pages_bar)
+        return bar
+
+    def _on_thumb_slider(self, v):
+        self._apply_thumb_zoom(v)
+
     def _apply_thumb_zoom(self, w):
         w = max(80, min(340, int(w)))
         h = int(w * 4 / 3)
         self._thumb_w, self._thumb_h = w, h
         self.list.setIconSize(QtCore.QSize(w, h))
-        # naam ke liye neeche zyada jagah (2 line ka naam bhi poora dikhe)
         self.list.setGridSize(QtCore.QSize(w + 24, h + 52))
         for _i in range(self.list.count()):
             self.list.item(_i).setSizeHint(QtCore.QSize(w + 24, h + 52))
+        # slider ko bhi in-sync rakho (Ctrl+scroll se change hua ho to)
+        s = getattr(self, "_thumb_slider", None)
+        if s is not None and s.value() != w:
+            s.blockSignals(True); s.setValue(w); s.blockSignals(False)
 
-    def _zoom_thumbs(self, factor):
-        self._apply_thumb_zoom(self._thumb_w * factor)
+    def _set_view_mode(self, mode):
+        if mode == "list":
+            self.list.setViewMode(QtWidgets.QListView.ListMode)
+            self.list.setFlow(QtWidgets.QListView.TopToBottom)
+            self.list.setWrapping(False)
+            self.list.setGridSize(QtCore.QSize())
+            for _i in range(self.list.count()):
+                self.list.item(_i).setSizeHint(QtCore.QSize())
+            if hasattr(self, "_btn_viewmode"):
+                self._btn_viewmode.setText("▦")
+        else:
+            self.list.setViewMode(QtWidgets.QListView.IconMode)
+            self.list.setFlow(QtWidgets.QListView.LeftToRight)
+            self.list.setWrapping(True)
+            self._apply_thumb_zoom(getattr(self, "_thumb_w", self.THUMB_W))
+            if hasattr(self, "_btn_viewmode"):
+                self._btn_viewmode.setText("☰")
+        self._opts["pages_view_mode"] = mode
+
+    def _toggle_view_mode(self):
+        cur = self._opts.get("pages_view_mode", "grid")
+        self._set_view_mode("list" if cur != "list" else "grid")
+        self._save_opts()
+
+    def _toggle_check_mode(self, on):
+        self._opts["pages_check_mode"] = bool(on)
+        flags_on = QtCore.Qt.ItemIsUserCheckable
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            if on:
+                it.setFlags(it.flags() | flags_on)
+                if it.checkState() not in (QtCore.Qt.Checked, QtCore.Qt.Unchecked):
+                    it.setCheckState(QtCore.Qt.Unchecked)
+                it.setCheckState(QtCore.Qt.Checked if it.isSelected() else QtCore.Qt.Unchecked)
+            else:
+                it.setFlags(it.flags() & ~flags_on)
+                it.setData(QtCore.Qt.CheckStateRole, None)   # checkbox poori tarah hatao
+        self.list.viewport().update()
+        self._save_opts()
+
+    def _apply_panel_bg(self, dark):
+        vp = self.list.viewport()
+        vp.setStyleSheet("background:#0f172a;" if dark else "")
+        self._opts["pages_dark_bg"] = bool(dark)
+
+    def _toggle_panel_bg(self):
+        self._apply_panel_bg(not self._opts.get("pages_dark_bg", False))
+        self._save_opts()
+
+    def _invert_selection(self):
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            it.setSelected(not it.isSelected())
+
+    def _clear_selection(self):
+        self.list.clearSelection()
+
+    def _update_pages_bar(self):
+        try:
+            n = self.list.count()
+            s = len(self.list.selectedItems())
+            if s:
+                self._pages_count_lbl.setText(self.L(
+                    "%d chune · %d pages" % (s, n), "%d selected · %d pages" % (s, n)))
+            else:
+                self._pages_count_lbl.setText(self.L("%d pages" % n, "%d pages" % n))
+            # tick-mode on ho to selection ke saath tick sync rakho
+            if self._opts.get("pages_check_mode"):
+                self._syncing_checks = True
+                try:
+                    for i in range(n):
+                        it = self.list.item(i)
+                        it.setCheckState(QtCore.Qt.Checked if it.isSelected() else QtCore.Qt.Unchecked)
+                finally:
+                    self._syncing_checks = False
+        except Exception:
+            pass
+
+    def _on_item_checkstate(self, it):
+        """Tick-mode me: checkbox tick/untick karo to page chun/hatt jaaye."""
+        if getattr(self, "_syncing_checks", False):
+            return
+        if not self._opts.get("pages_check_mode"):
+            return
+        try:
+            want = (it.checkState() == QtCore.Qt.Checked)
+            if it.isSelected() != want:
+                it.setSelected(want)
+        except Exception:
+            pass
+
+    def _on_current_thumb_changed(self, cur, _prev):
+        # naya page dekhte hi uska 'NEW' nishaan hata do
+        try:
+            if cur is not None and cur.data(NEW_ROLE):
+                cur.setData(NEW_ROLE, False)
+                self.list.viewport().update()
+        except Exception:
+            pass
+
+    # ---- per-thumbnail marks (star / colour / note) ----
+    def _marked_items(self):
+        """Jin par nishaan lagana hai: agar kuch chune hain to wo, warna current."""
+        its = self.list.selectedItems()
+        if its:
+            return its
+        cur = self.list.currentItem()
+        return [cur] if cur is not None else []
+
+    def _toggle_star(self):
+        its = self._marked_items()
+        if not its:
+            return
+        # agar koi bhi bina-star hai to sabko star karo, warna sabka star hatao
+        make = any(not it.data(STAR_ROLE) for it in its)
+        for it in its:
+            it.setData(STAR_ROLE, bool(make))
+        self.list.viewport().update()
+        self.status.showMessage(
+            self.L("⭐ Star laga diya" if make else "Star hata diya",
+                   "⭐ Starred" if make else "Star removed"), 2500)
+
+    def _set_color_label(self, color):
+        for it in self._marked_items():
+            it.setData(COLOR_ROLE, color or "")
+        self.list.viewport().update()
+
+    def _add_note(self):
+        it = self.list.currentItem()
+        if it is None:
+            return
+        cur = it.data(NOTE_ROLE) or ""
+        txt, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Page par note", "Note on page"),
+            self.L("Chhota note likho (khaali = hatao):", "Short note (empty = remove):"),
+            text=cur)
+        if not ok:
+            return
+        it.setData(NOTE_ROLE, txt.strip())
+        it.setToolTip(self._thumb_tooltip(it.data(QtCore.Qt.UserRole), it))
+        self.list.viewport().update()
+
+    # ---- order helpers ----
+    def _reverse_pages(self):
+        n = self.list.count()
+        if n < 2:
+            return
+        items = [self.list.takeItem(0) for _ in range(n)]
+        for it in items:                      # reverse: har item ko aage lagao
+            self.list.insertItem(0, it)
+        self._renumber_pages(); self._dirty = True
+        self._on_pages_reordered()
+
+    def _sort_pages(self, by):
+        n = self.list.count()
+        if n < 2:
+            return
+        items = [self.list.item(i) for i in range(n)]
+        if by == "name":
+            keyf = lambda it: ((it.data(TITLE_ROLE) or it.text() or "").lower())
+        else:  # "time" — jab scan/add hua
+            keyf = lambda it: (it.data(STAMP_ROLE) or "")
+        order = sorted(range(n), key=lambda i: keyf(items[i]))
+        taken = [self.list.takeItem(0) for _ in range(n)]  # index 0 har baar
+        # takeItem(0) sequentially removes in original order -> taken == items order
+        for pos, i in enumerate(order):
+            self.list.insertItem(pos, taken[i])
+        self._renumber_pages(); self._dirty = True
+        self._on_pages_reordered()
+
+    def _insert_blank_page(self, at):
+        """Ek saaf safed A4 page (separator) is jagah jodo."""
+        try:
+            im = Image.new("RGB", (1240, 1754), "white")   # ~150dpi A4
+            fd, p = tempfile.mkstemp(suffix=".jpg", dir=self._tmpdir); os.close(fd)
+            im.save(p, "JPEG", quality=85)
+        except Exception as e:
+            self._warn(str(e)); return
+        at = max(0, min(int(at), self.list.count()))
+        it = self._add_item_for_path(p, at=at)
+        if it is not None:
+            it.setData(TITLE_ROLE, self.L("Khaali page", "Blank page"))
+        self._renumber_pages()
+
+    # ---- rich tooltip (size / dimensions / mode / time / note) ----
+    def _thumb_tooltip(self, path, item=None):
+        try:
+            kb = os.path.getsize(path) / 1024.0
+            szt = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024.0))
+        except Exception:
+            szt = "-"
+        w = hgt = 0; mode = "-"
+        try:
+            with Image.open(path) as im:
+                w, hgt = im.size
+                mode = {"1": "B&W", "L": "Grayscale", "RGB": "Colour",
+                        "RGBA": "Colour"}.get(im.mode, im.mode)
+        except Exception:
+            pass
+        name = (item.data(TITLE_ROLE) if item is not None else None) or os.path.basename(path)
+        stamp = (item.data(STAMP_ROLE) if item is not None else None) or ""
+        note = (item.data(NOTE_ROLE) if item is not None else None) or ""
+        # bada preview tooltip me dikhao (hover-preview)
+        pth = path.replace("\\", "/")
+        rows = ["<b>%s</b>" % name,
+                "📐 %d × %d px" % (w, hgt),
+                "🎨 %s&nbsp;&nbsp;💾 %s" % (mode, szt)]
+        if stamp:
+            rows.append("🕘 %s" % stamp)
+        if note:
+            rows.append("📝 %s" % note)
+        info = "<br>".join(rows)
+        return ("<div style='max-width:320px'>"
+                "<img src='%s' width='210'><br>%s</div>") % (pth, info)
+
+    def _quick_blank_flag(self, qimg):
+        """Chhote thumbnail se andaza: page lagbhag khaali (safed) hai kya?"""
+        try:
+            if qimg is None or qimg.isNull():
+                return ""
+            small = qimg.scaled(24, 24, QtCore.Qt.IgnoreAspectRatio,
+                                QtCore.Qt.SmoothTransformation)
+            dark = 0; tot = 0
+            for y in range(small.height()):
+                for x in range(small.width()):
+                    g = QtGui.qGray(small.pixel(x, y))
+                    tot += 1
+                    if g < 200:
+                        dark += 1
+            if tot and (dark / float(tot)) < 0.012:   # 1.2% se kam gehra -> khaali
+                return "blank"
+        except Exception:
+            pass
+        return ""
 
     def eventFilter(self, obj, ev):
         if obj is self.list.viewport():
@@ -9039,7 +9427,19 @@ if the toggle is ticked).</p>
         self.list.itemDoubleClicked.connect(self._on_thumb_dblclick)
         self.list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._list_context_menu)
-        body.addWidget(self.list, 1)
+        # har thumbnail par star / rang-label / NEW / note / warning overlays
+        self.list.setItemDelegate(ThumbDelegate(self.list))
+        # naya page dekhte hi uska 'NEW' nishaan hata do; live selection-count
+        self.list.currentItemChanged.connect(self._on_current_thumb_changed)
+        self.list.itemSelectionChanged.connect(self._update_pages_bar)
+        self.list.itemChanged.connect(self._on_item_checkstate)
+        # Pages Panel ke upar ek chhoti control-patti (size, view, chunav…)
+        pages_col = QtWidgets.QWidget()
+        _pc = QtWidgets.QVBoxLayout(pages_col)
+        _pc.setContentsMargins(0, 0, 0, 0); _pc.setSpacing(4)
+        _pc.addWidget(self._build_pages_bar())
+        _pc.addWidget(self.list, 1)
+        body.addWidget(pages_col, 1)
 
         # ---------- Right sidebar: "Meri Files" (folder list + save-here) ----------
         self.files_panel = QtWidgets.QWidget()
@@ -9714,9 +10114,28 @@ if the toggle is ticked).</p>
         _lbl = "Page %d" % (self.list.count() + 1)
         item = QtWidgets.QListWidgetItem(icon, _lbl)
         item.setData(QtCore.Qt.UserRole, path); item.setTextAlignment(QtCore.Qt.AlignHCenter)
+        # naya page: 'NEW' badge + kab jodalaga (tooltip me), + halka khaali-check
+        item.setData(NEW_ROLE, True)
+        try:
+            item.setData(STAMP_ROLE, datetime.datetime.now().strftime("%d %b, %I:%M %p"))
+        except Exception:
+            pass
+        try:
+            item.setData(FLAG_ROLE, self._quick_blank_flag(qimg))
+        except Exception:
+            pass
+        try:
+            item.setToolTip(self._thumb_tooltip(path, item))
+        except Exception:
+            pass
+        # tick-mode on ho to naye page par bhi checkbox
+        if self._opts.get("pages_check_mode"):
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Unchecked)
         # har cell ek jaisa (icon + naam ke liye poori jagah) — chhota doc aane
         # par baaki thumbnails chhote na ho, aur naam hamesha dikhe
-        item.setSizeHint(QtCore.QSize(self._thumb_w + 24, self._thumb_h + 52))
+        if self._opts.get("pages_view_mode", "grid") != "list":
+            item.setSizeHint(QtCore.QSize(self._thumb_w + 24, self._thumb_h + 52))
         if at is not None and 0 <= at <= self.list.count():
             self.list.insertItem(at, item)
         else:
@@ -9725,6 +10144,10 @@ if the toggle is ticked).</p>
         self.list.clearSelection()  # nothing "selected" by default; user picks with Ctrl/Shift
         self._dirty = True
         self._update_status(); self._update_empty_state()
+        try:
+            self._update_pages_bar()
+        except Exception:
+            pass
         try:
             self._pv_build_filmstrip()
         except Exception:
@@ -14377,9 +14800,26 @@ if the toggle is ticked).</p>
 
         # ---- Basic ----
         m.addAction("\u270f\ufe0f " + L("Naam badlo", "Rename"), self.rename_current_page)
+        m.addAction("\u270f\ufe0f " + L("Yahin naam badlo (inline)", "Rename here (inline)"),
+                    self._inline_rename_current)
         m.addAction("\ud83d\udccb " + L("Nakal (duplicate)", "Duplicate"), self.duplicate_current_page)
         m.addAction("\ud83d\uddd1 " + L("Hatao", "Delete"), self.delete_page)
         m.addAction("\u21a9 " + L("Delete wapas (undo)", "Undo delete"), self.undo_delete)
+        m.addSeparator()
+
+        # ---- Nishaan (Star / rang / note) ----
+        km = m.addMenu("\ud83c\udff7 " + L("Nishaan / Label", "Mark / Label"))
+        star_on = bool(item is not None and item.data(STAR_ROLE))
+        km.addAction(("\u2605 " if star_on else "\u2606 ") + L(
+            "Star hatao" if star_on else "Star lagao (zaroori)",
+            "Remove star" if star_on else "Star (important)"), self._toggle_star)
+        cm = km.addMenu("\ud83c\udfa8 " + L("Rang wala label", "Colour label"))
+        cm.addAction("\ud83d\udd34 " + L("Laal", "Red"), lambda: self._set_color_label("red"))
+        cm.addAction("\ud83d\udfe1 " + L("Peela", "Yellow"), lambda: self._set_color_label("yellow"))
+        cm.addAction("\ud83d\udfe2 " + L("Hara", "Green"), lambda: self._set_color_label("green"))
+        cm.addAction("\ud83d\udd35 " + L("Neela", "Blue"), lambda: self._set_color_label("blue"))
+        cm.addAction("\u2716 " + L("Label hatao", "No label"), lambda: self._set_color_label(""))
+        km.addAction("\ud83d\udcdd " + L("Note likho / badlo", "Add / edit note"), self._add_note)
         m.addSeparator()
 
         # ---- Edit / Fix ----
@@ -14404,7 +14844,14 @@ if the toggle is ticked).</p>
         mm.addAction("\u2b07 " + L("Neeche", "Down"), self.move_down)
         mm.addAction("\u2912 " + L("Sabse upar", "To top"), self._move_to_top)
         mm.addAction("\u2913 " + L("Sabse neeche", "To bottom"), self._move_to_bottom)
+        mm.addSeparator()
+        mm.addAction("\ud83d\udd04 " + L("Ulta kram (reverse)", "Reverse order"), self._reverse_pages)
+        mm.addAction("\ud83d\udd24 " + L("Naam se sajao", "Sort by name"), lambda: self._sort_pages("name"))
+        mm.addAction("\ud83d\udd58 " + L("Samay se sajao", "Sort by time"), lambda: self._sort_pages("time"))
+        mm.addSeparator()
         mm.addAction("\u2611 " + L("Sab chuno", "Select all"), self.list.selectAll)
+        mm.addAction("\ud83d\udd01 " + L("Ulta chunav (invert)", "Invert selection"), self._invert_selection)
+        mm.addAction("\u2716 " + L("Chunav hatao", "Clear selection"), self._clear_selection)
 
         # ---- Scan ----
         if row >= 0:
@@ -14415,6 +14862,11 @@ if the toggle is ticked).</p>
                          lambda r=row: self._insert_scan_after(r))
             sm.addAction("\u2795 " + L("Iske PEHLE scan jodo", "Scan & insert BEFORE"),
                          lambda r=row: self._insert_scan_after(r - 1))
+            sm.addSeparator()
+            sm.addAction("\u2b1c " + L("Khaali page iske BAAD", "Blank page AFTER"),
+                         lambda r=row: self._insert_blank_page(r + 1))
+            sm.addAction("\u2b1c " + L("Khaali page iske PEHLE", "Blank page BEFORE"),
+                         lambda r=row: self._insert_blank_page(r))
 
         # ---- Save / Print ----
         vm = m.addMenu("\ud83d\udcbe " + L("Save / Print", "Save / Print"))
@@ -14422,6 +14874,7 @@ if the toggle is ticked).</p>
         vm.addAction("\ud83d\uddbc " + L("Is page ki image (JPG/PNG)", "This page as image"), self._save_page_image)
         vm.addAction("\ud83d\udcc4 " + L("Chune pages ki PDF", "Selected pages as PDF"), self.save_pdf_selected)
         vm.addAction("\ud83d\udda8 " + L("Is page ko print", "Print this page"), self._print_current_page)
+        vm.addAction("\ud83d\udda8 " + L("Chune pages print", "Print selected pages"), self._print_selected_pages)
 
         # ---- Share ----
         shm = m.addMenu("\ud83d\udce4 " + L("Bhejo / Share", "Share"))
@@ -14520,6 +14973,50 @@ if the toggle is ticked).</p>
             self._do_print([item.data(QtCore.Qt.UserRole)], per_page=1)
         except Exception as e:
             self._warn(str(e))
+
+    def _print_selected_pages(self):
+        paths = self._selected_paths() or self._ordered_paths()
+        if not paths:
+            self._warn(self.L("Pehle koi page chuno.", "Select a page first.")); return
+        try:
+            self._do_print(paths, per_page=1)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _inline_rename_current(self):
+        """Thumbnail par hi (bina dialog) naam type karo — Enter se pakka."""
+        it = self.list.currentItem()
+        if it is None:
+            self._warn(self.L("Pehle koi page chuno.", "Select a page first.")); return
+        it.setFlags(it.flags() | QtCore.Qt.ItemIsEditable)
+        self._inline_item = it
+        try:
+            self.list.itemChanged.connect(self._on_inline_renamed)
+        except Exception:
+            pass
+        self.list.editItem(it)
+
+    def _on_inline_renamed(self, it):
+        if getattr(self, "_inline_item", None) is not it:
+            return
+        try:
+            self.list.itemChanged.disconnect(self._on_inline_renamed)
+        except Exception:
+            pass
+        self._inline_item = None
+        it.setFlags(it.flags() & ~QtCore.Qt.ItemIsEditable)
+        name = underscore_name((it.text() or "").strip())
+        if not name:
+            self._renumber_pages(); return
+        it.setData(TITLE_ROLE, name); it.setText(name)
+        path = it.data(QtCore.Qt.UserRole)
+        # rename dialog jaisa hi permanent memory (shakl + text)
+        try:
+            self._store_visual_name(path, name)
+            self._learn_name(path, name)
+        except Exception:
+            pass
+        it.setToolTip(self._thumb_tooltip(path, it))
 
     def _copy_page_image(self):
         item = self._current_item_or_warn()
