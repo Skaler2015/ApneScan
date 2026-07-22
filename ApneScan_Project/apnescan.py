@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "92"
+VERSION = "93"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -917,13 +917,12 @@ class ConnectionChecker(QtCore.QThread):
 
     def run(self):
         if not self.ip:
-            self.result.emit(False, "Scanner ka IP address set nahi hai")
+            self.result.emit(False, 'Scanner IP address is not set')
             return
         if tcp_reachable(self.ip):
-            self.result.emit(True, "Connected — scanner network par mil gaya (%s)" % self.ip)
+            self.result.emit(True, 'Connected — scanner found on the network (%s)' % self.ip)
         else:
-            self.result.emit(False, "Not connected — %s reachable nahi. Scanner ON hai? "
-                                    "Same WiFi/LAN par hai?" % self.ip)
+            self.result.emit(False, 'Not connected — %s is unreachable. Is the scanner ON and on the same WiFi/LAN?' % self.ip)
 
 
 class ScannerStateChecker(QtCore.QThread):
@@ -994,7 +993,7 @@ class EsclTestWorker(QtCore.QThread):
             if "Duplex" in body:
                 add("    Duplex: supported (eSCL)")
         except UE.HTTPError as e:
-            add("    HTTP ERROR %s (eSCL shayad support nahi)" % e.code)
+            add('    HTTP ERROR %s (eSCL may not be supported)' % e.code)
         except Exception as e:
             add("    ERROR: %s" % e)
 
@@ -1051,10 +1050,10 @@ class EsclTestWorker(QtCore.QThread):
             except Exception:
                 pass
             if e.code == 503:
-                add("    => 503 = scanner BUSY / ek purana job khula hai.")
-                add("       Fix: scanner off/on karein; koi aur scan app band karein.")
+                add('    => 503 = scanner BUSY / an old job is still open.')
+                add('       Fix: turn the scanner off/on; close any other scan app.')
             elif e.code in (400, 415, 409):
-                add("    => %s = scan settings/format ka problem (is scanner ke liye tweak chahiye)." % e.code)
+                add('    => %s = scan settings/format problem (needs a tweak for this scanner).' % e.code)
         except Exception as e:
             add("    ERROR: %s" % e)
 
@@ -1068,7 +1067,7 @@ class EsclTestWorker(QtCore.QThread):
                 d = r.read()
                 add("    HTTP %s, %d bytes  ->  PAGE RECEIVED (scan works!)" % (getattr(r, "status", 200), len(d)))
             except UE.HTTPError as e:
-                add("    HTTP %s (koi page nahi / done)" % e.code)
+                add('    HTTP %s (no page / done)' % e.code)
             except Exception as e:
                 add("    ERROR: %s" % e)
             add("")
@@ -1081,9 +1080,9 @@ class EsclTestWorker(QtCore.QThread):
 
         add("")
         add("===== RESULT =====")
-        add("Agar [4] me 'JOB CREATED' aaya -> scan theek hona chahiye.")
-        add("Agar [4] me 503 aaya -> scanner busy: off/on karein + doosri scan app band karein.")
-        add("Agar [1] FAIL -> scanner network par nahi mila (IP/WiFi check).")
+        add("If [4] shows 'JOB CREATED' -> scanning should work.")
+        add('If [4] shows 503 -> scanner busy: turn it off/on and close other scan apps.')
+        add('If [1] FAILs -> scanner not found on the network (check IP/WiFi).')
         add("==================")
         self.done.emit("\n".join(lines))
 
@@ -1261,7 +1260,7 @@ class ScannerError(Exception):
 
 def list_sources(hwnd):
     if not HAS_TWAIN:
-        raise ScannerError("TWAIN (pytwain) install nahi hai.")
+        raise ScannerError('TWAIN (pytwain) is not installed.')
     sm = twain.SourceManager(hwnd)
     try:
         try:
@@ -1423,7 +1422,7 @@ def scan_pages(hwnd, source_name, dpi, pixel_type, duplex, on_page=None, should_
 
 def _scan_native(hwnd, source_name, dpi, pixel_type, duplex, on_page=None, should_stop=None):
     if not HAS_TWAIN:
-        raise ScannerError("TWAIN (pytwain) install nahi hai.")
+        raise ScannerError('TWAIN (pytwain) is not installed.')
     count = 0
     sm = twain.SourceManager(hwnd)
     src = None
@@ -1445,7 +1444,7 @@ def _scan_native(hwnd, source_name, dpi, pixel_type, duplex, on_page=None, shoul
                 except Exception:
                     src = None
         if src is None:
-            raise ScannerError("Scanner open nahi hua. Profile me device chuno.")
+            raise ScannerError('Scanner did not open. Choose a device in the profile.')
 
         def _try(fn):
             try:
@@ -1512,7 +1511,7 @@ def _scan_native(hwnd, source_name, dpi, pixel_type, duplex, on_page=None, shoul
                 pass
 
     if count == 0:
-        raise ScannerError("Koi page scan nahi hua. Feeder me document rakha hai? Scanner ON hai?")
+        raise ScannerError('No page was scanned. Is a document in the feeder? Is the scanner ON?')
     return count
 
 
@@ -1525,7 +1524,7 @@ WIA_ERROR_PAPER_EMPTY = -2145320957   # 0x80210003
 
 def list_wia_sources():
     if not HAS_W32:
-        raise ScannerError("WIA (pywin32) install nahi hai.")
+        raise ScannerError('WIA (pywin32) is not installed.')
     dm = _w32.Dispatch("WIA.DeviceManager")
     out = []
     for i in range(1, dm.DeviceInfos.Count + 1):
@@ -1548,7 +1547,7 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
     """Scan via Windows WIA. Kept simple: no forced properties (some drivers
     throw otherwise). Runs inside a thread that has called CoInitialize."""
     if not HAS_W32:
-        raise ScannerError("WIA (pywin32) install nahi hai.")
+        raise ScannerError('WIA (pywin32) is not installed.')
     dm = _w32.Dispatch("WIA.DeviceManager")
     device = None
     for i in range(1, dm.DeviceInfos.Count + 1):
@@ -1557,7 +1556,7 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
             device = info.Connect()
             break
     if device is None:
-        raise ScannerError("WIA scanner nahi mila. Settings me scanner chuno.")
+        raise ScannerError('No WIA scanner found. Choose a scanner in Settings.')
 
     def _wia_set(props, pid, value):
         # Set one WIA property; True if it took, False if the driver rejected it.
@@ -1715,7 +1714,7 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
         if flatbed_only:
             break
     if count == 0:
-        raise ScannerError("Koi page scan nahi hua (WIA).")
+        raise ScannerError('No page was scanned (WIA).')
     return count
 
 
@@ -1917,7 +1916,7 @@ def scan_via_naps2(naps2_exe, profile, tmpdir, duplex, on_page=None, should_stop
     import glob as _glob
     import re as _re
     if not naps2_exe or not os.path.exists(naps2_exe):
-        raise ScannerError("NAPS2 nahi mila. Settings me NAPS2 ka path set karo.")
+        raise ScannerError('NAPS2 not found. Set the NAPS2 path in Settings.')
     # clean old temp scans
     for f in _glob.glob(os.path.join(tmpdir, "naps2_*.jpg")):
         try:
@@ -1934,7 +1933,7 @@ def scan_via_naps2(naps2_exe, profile, tmpdir, duplex, on_page=None, should_stop
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired:
-        raise ScannerError("NAPS2 scan me bahut time lag gaya (timeout).")
+        raise ScannerError('NAPS2 scan took too long (timeout).')
     except Exception as exc:
         raise ScannerError("NAPS2 chalane me dikkat: %s" % exc)
 
@@ -1947,7 +1946,7 @@ def scan_via_naps2(naps2_exe, profile, tmpdir, duplex, on_page=None, should_stop
 
     if not files:
         msg = (proc.stderr or proc.stdout or "").strip()
-        raise ScannerError("NAPS2 se koi page nahi aaya.\nProfile naam sahi hai? Scanner ON hai?\n\n%s"
+        raise ScannerError('No page came from NAPS2.\nIs the profile name correct? Is the scanner ON?\n\n%s'
                            % msg[:300])
     count = 0
     for f in files:
@@ -1966,7 +1965,7 @@ def scan_via_naps2(naps2_exe, profile, tmpdir, duplex, on_page=None, should_stop
         if on_page:
             on_page(img)
     if count == 0:
-        raise ScannerError("NAPS2 se koi page nahi aaya.")
+        raise ScannerError('No page came from NAPS2.')
     return count
 
 
@@ -1982,7 +1981,7 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
     import time as _t
 
     if not ip:
-        raise ScannerError("Scanner IP set nahi hai. Settings \u2192 Scanner IP me IP daalo (jaise 192.168.1.8).")
+        raise ScannerError('Scanner IP is not set. Enter it in Settings → Scanner IP (e.g. 192.168.1.8).')
     ip = ip.strip()
     base = "http://%s/eSCL" % ip
     # NOTE: "BlackAndWhite1" + image/jpeg ek saath kaam NAHI karta (JPEG 1-bit
@@ -2104,13 +2103,13 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
             continue
     if resp is None:
         raise ScannerError(
-            "Scanner kaafi der se busy bata raha hai (HTTP %s). Agar koi AUR scan app "
-            "(NAPS2 / HP Scan / purani ApneScan window) khuli hai to use band karein, "
-            "ya scanner ko ek baar off/on kar dein." % last_code)
+            "The scanner has been busy for a while (HTTP %s). If another scan app "
+            "(NAPS2 / HP Scan / an old ApneScan window) is open, close it, "
+            "or turn the scanner off/on once." % last_code)
 
     job = resp.headers.get("Location")
     if not job:
-        raise ScannerError("eSCL job location nahi mila (scanner ne job start nahi kiya).")
+        raise ScannerError('eSCL job location not found (the scanner did not start the job).')
     if job.startswith("/"):
         job = "http://%s%s" % (ip, job)
 
@@ -2172,13 +2171,11 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
             pass
         if "jam" in st:
             raise ScannerError(
-                "Paper jam: ek page scanner ke andar atka hai. Use aaram se nikaalein, "
-                "feeder me pages seedhe lagayein, phir dobara scan karein.")
+                'Paper jam: a page is stuck inside the scanner. Gently remove it, place the pages straight in the feeder, and scan again.')
         if "adfempty" in st.replace(" ", ""):
-            raise ScannerError("PAPER_EMPTY: feeder khaali hai.")
+            raise ScannerError('PAPER_EMPTY: the feeder is empty.')
         raise ScannerError(
-            "eSCL: scanner ne koi page taiyar nahi kiya. Scanner ko ek baar off/on "
-            "karke dobara try karein; problem rahe to Help > eSCL Test chalayein.")
+            'eSCL: the scanner produced no page. Turn it off/on and try again; if it persists, run Help > eSCL Test.')
     return count
 
 
@@ -2677,7 +2674,7 @@ class ScanWorker(QtCore.QThread):
             self.failed.emit(err)
             return
         if self.kept == 0 and self.skipped == 0:
-            self.failed.emit(err or "Koi page scan nahi hua.")
+            self.failed.emit(err or 'No page was scanned.')
             return
         self.done.emit(self.kept, self.skipped)
 
@@ -2719,7 +2716,7 @@ class EditProfileDialog(QtWidgets.QDialog):
         self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.setEditable(True)
         self.cmb_dpi.setValidator(QtGui.QIntValidator(50, 1200, self.cmb_dpi))
         self.cmb_dpi.addItems(RESOLUTIONS)
-        self.cmb_dpi.setToolTip("Aap yahan apni koi bhi DPI bhi type kar sakte ho (jaise 250).")
+        self.cmb_dpi.setToolTip('You can type any DPI here (e.g. 250).')
         self.cmb_dpi.setCurrentText(str(self.profile.get("dpi", 200)))
         form.addRow(qh("Resolution (DPI):", "हिन्दी: स्कैन की सफ़ाई (रेज़ॉल्यूशन)। 200 = तेज़ और टेक्स्ट के लिए ठीक; 300 = बेहतर (धीमा); 600 = फ़ोटो के लिए।\nEnglish: Scan sharpness. 200 = fast, fine for text; 300 = better (slower); 600 = for photos."), self.cmb_dpi)
         self.cmb_color = QtWidgets.QComboBox(); self.cmb_color.addItems(list(COLOUR_MODES.keys()))
@@ -2912,7 +2909,7 @@ class OptionsDialog(QtWidgets.QDialog):
         header("Image cleanup")
         self.chk_blank = QtWidgets.QCheckBox("Remove blank pages")
         self.chk_blank.setChecked(self.opts["remove_blank"]); form.addRow(chkrow(self.chk_blank, 'हिन्दी: चालू करने पर: खाली (blank) पेज अपने-आप हट जाएँगे — जैसे duplex में पीछे का खाली हिस्सा। (NAPS2 जैसा।)\nEnglish: ON: blank pages are removed automatically (e.g. blank back side in duplex).'))
-        self.cmb_blank_sens = QtWidgets.QComboBox(); self.cmb_blank_sens.addItems(["Kam (safe)", "Normal", "Zyada (aggressive)"])
+        self.cmb_blank_sens = QtWidgets.QComboBox(); self.cmb_blank_sens.addItems(["Kam (safe)", "Normal", 'High (aggressive)'])
         self.cmb_blank_sens.setCurrentIndex({"kam": 0, "normal": 1, "zyada": 2}.get(self.opts.get("blank_sensitivity", "normal"), 1))
         form.addRow(lblhelp("Blank hatane ki sensitivity:", 'हिन्दी: कितनी सख़्ती से खाली पेज हटाए। "ज़्यादा" = मोड़ की लकीर/हल्के स्टांप वाले पीछे के खाली पेज भी हट जाएँगे (पर कभी-कभी कम सामग्री वाला असली पेज भी हट सकता है)। "कम" = सिर्फ़ बिल्कुल खाली। Normal बीच का।\nEnglish: How aggressively to drop blanks. Zyada = also removes back sides with fold lines/faint marks; Kam = only truly empty; Normal = balanced.'), self.cmb_blank_sens)
         self.chk_crop = QtWidgets.QCheckBox("Border auto-crop")
@@ -3076,7 +3073,7 @@ class ScanProgressDialog(QtWidgets.QDialog):
         self.show()
 
     def _page_text(self, n):
-        return ("Scanning page %d..." % n) if self._lang == "en" else ("Page %d scan ho raha hai..." % n)
+        return ("Scanning page %d..." % n) if self._lang == "en" else ('Scanning page %d...' % n)
 
     def set_page(self, n):
         self.lbl.setText(self._page_text(n))
@@ -3102,7 +3099,7 @@ class SetupWizard(QtWidgets.QWizard):
         p = QtWidgets.QWizardPage()
         p.setTitle("Swagat hai" if self.lang == "hi" else "Welcome")
         lay = QtWidgets.QVBoxLayout(p)
-        txt = ("Ye chhota setup aapke scanner ko jodega.\nNext dabao."
+        txt = ('This short setup will connect your scanner.\nClick Next.'
                if self.lang == "hi"
                else "This quick setup will connect your scanner.\nClick Next.")
         lbl = QtWidgets.QLabel(txt); lbl.setWordWrap(True); lay.addWidget(lbl)
@@ -3110,7 +3107,7 @@ class SetupWizard(QtWidgets.QWizard):
 
     def _device_page(self):
         p = QtWidgets.QWizardPage()
-        p.setTitle("Scanner chuno" if self.lang == "hi" else "Choose scanner")
+        p.setTitle('Choose scanner' if self.lang == "hi" else "Choose scanner")
         lay = QtWidgets.QVBoxLayout(p)
         self.rb_twain = QtWidgets.QRadioButton("TWAIN (most scanners)")
         self.rb_wia = QtWidgets.QRadioButton("WIA (Windows built-in)")
@@ -3158,7 +3155,7 @@ class SetupWizard(QtWidgets.QWizard):
 
     def _finish(self):
         p = QtWidgets.QWizardPage()
-        p.setTitle("Ho gaya!" if self.lang == "hi" else "Done!")
+        p.setTitle('Done!' if self.lang == "hi" else "Done!")
         lay = QtWidgets.QVBoxLayout(p)
         lbl = QtWidgets.QLabel(
             "Click Finish, then press 'Scan'. That's it!"
@@ -3263,17 +3260,17 @@ class PreviewDialog(QtWidgets.QDialog):
         b("\u25b6", self.next, "Agla page (Right arrow)")
         tb.addSpacing(14)
         b("\u2796", self.zoom_out, "Zoom out ( - )")
-        b("Fit", self.fit_view, "Poora page dikhao")
+        b("Fit", self.fit_view, 'Fit whole page')
         b("\u2795", self.zoom_in, "Zoom in ( + )")
         b("100%", self.actual_size, "Asli size")
         tb.addSpacing(14)
-        b("\u21ba", lambda: self.rotate(-90), "Baayein ghumao")
-        b("\u21bb", lambda: self.rotate(90), "Dayein ghumao")
-        b("\u2712 Rename", self.rename, "Naam badlo (F2)")
-        b("\U0001f5d1 Delete", self.delete, "Is page ko hatao")
-        b("\U0001f4be Save", self.save_one, "Sirf is page ko PDF me save karo")
+        b("\u21ba", lambda: self.rotate(-90), 'Rotate left')
+        b("\u21bb", lambda: self.rotate(90), 'Rotate right')
+        b("\u2712 Rename", self.rename, 'Rename (F2)')
+        b("\U0001f5d1 Delete", self.delete, 'Delete this page')
+        b("\U0001f4be Save", self.save_one, 'Save only this page as PDF')
         tb.addStretch(1)
-        b("\u2715 Close", self.accept, "Band karo (Esc)")
+        b("\u2715 Close", self.accept, 'Close (Esc)')
         v.addLayout(tb)
 
         self.lbl = QtWidgets.QLabel(); self.lbl.setAlignment(QtCore.Qt.AlignCenter)
@@ -5291,7 +5288,22 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._barcode_tried = False
         self._dirty = False
         self._undo_stack = []
+        # Startup guard: app khulte hi (jaise app ko Enter dabakar launch karne par
+        # wahi Enter naye window me 'Enter = Scan' chala deta tha) galti se scan na
+        # ho — pehle ~900ms tak do_scan ignore hota hai.
+        self._start_timer = QtCore.QElapsedTimer(); self._start_timer.start()
         self._lang = self._opts.get("language", "en")
+        # One-time migration: the app now ships as an English UI. Older installs
+        # may still carry a saved Hindi/Hinglish setting — flip them to English
+        # once. Users can always switch back via Settings -> Language.
+        if not self._opts.get("_english_migrated"):
+            self._opts["_english_migrated"] = True
+            self._opts["language"] = "en"
+            self._lang = "en"
+            try:
+                self._save_opts()
+            except Exception:
+                pass
 
         self._build_menu()
         self._build_ui()
@@ -5363,7 +5375,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                  "हिन्दी: ID कार्ड को एक A4 पेज पर 2-2 करके प्रिंट करो (काग़ज़ बचेगा)।\nEnglish: Print ID cards two-per-A4-sheet to save paper.")
         self._ma(pmenu, "ID print - selected only", self.print_ids_selected,
                  "हिन्दी: सिर्फ़ चुने हुए ID को 2-per-page प्रिंट करो।\nEnglish: Print only selected IDs, two per sheet.")
-        shmenu = mf.addMenu("Share / Bhejo")
+        shmenu = mf.addMenu('Share')
         shmenu.setToolTipsVisible(True)
         self._ma(shmenu, "Send via WhatsApp…", self.share_whatsapp,
                  "हिन्दी: आख़िरी सेव की हुई PDF WhatsApp पर भेजो (फ़ाइल कॉपी हो जाती है, चैट में Ctrl+V या drag से attach)।\nEnglish: Send the last saved PDF via WhatsApp (file is copied; paste or drag into the chat).")
@@ -5899,8 +5911,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         dlg.setWindowTitle("Keyboard Shortcuts"); dlg.resize(560, 560)
         lay = QtWidgets.QVBoxLayout(dlg)
         lay.addWidget(QtWidgets.QLabel(
-            "Shortcut badalne ke liye: row chuno \u2192 'Naya' box me key dabao \u2192 Assign.\n"
-            "To change: pick a row, press the new key in 'New', then Assign."))
+            "To change a shortcut: pick a row → press the new key in the 'New' box → Assign."))
         tbl = QtWidgets.QTableWidget(len(SHORTCUTS), 2)
         tbl.setHorizontalHeaderLabels(["Action", "Shortcut"])
         tbl.verticalHeader().setVisible(False)
@@ -6309,7 +6320,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         cur = self._stats_url()
         url, ok = QtWidgets.QInputDialog.getText(
             self, "Stats server URL",
-            "Google Apps Script Web app URL (…/exec):\n(khaali karke stats band ho jayenge)",
+            'Google Apps Script web app URL (…/exec):\n(leave empty to turn stats off)',
             text=cur)
         if not ok:
             return
@@ -6615,15 +6626,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
             with open(tmp, "rb") as fh:
                 head = fh.read(2)
             if head != b"MZ":
-                raise RuntimeError("Download sahi exe nahi laga (shayad server ne "
-                                   "galat file bheji). Website se try karein.")
+                raise RuntimeError('The download was not a valid exe (the server may have sent the wrong file). Try from the website.')
             if expected and got < expected:
-                raise RuntimeError("Download adhoora reh gaya (%d me se sirf %d bytes "
-                                   "aaye). Internet check karke dobara koshish karein."
+                raise RuntimeError('The download was incomplete (only %d of %d bytes). Check your internet and try again.'
                                    % (expected, got))
             if got < 20_000_000:
-                raise RuntimeError("Download poora nahi aaya (sirf %d bytes). "
-                                   "Dobara koshish karein ya website se le lein." % got)
+                raise RuntimeError('The download did not complete (only %d bytes). Try again or get it from the website.' % got)
             return tmp
 
         def done(res):
@@ -6690,7 +6698,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def export_settings(self):
         """Saari settings ek file me — naye PC par le jaane ke liye."""
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Settings export karein",
+            self, 'Export settings',
             os.path.join(os.path.expanduser("~"), "apnescan_settings.json"),
             "Settings (*.json)")
         if not out:
@@ -6705,7 +6713,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     def import_settings(self):
         f, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Settings file chuno", os.path.expanduser("~"), "Settings (*.json)")
+            self, 'Choose a settings file', os.path.expanduser("~"), "Settings (*.json)")
         if not f:
             return
         try:
@@ -6740,7 +6748,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 return p
         start = self._opts.get("save_folder", os.path.expanduser("~"))
         f, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Kaunsi PDF bhejni hai?", start, "PDF (*.pdf)")
+            self, 'Which PDF to send?', start, "PDF (*.pdf)")
         return f or None
 
     def _reveal_in_explorer(self, path):
@@ -7063,11 +7071,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if src_pdf is None and not paths:
             start = self._opts.get("save_folder", os.path.expanduser("~"))
             src_pdf, _ = QtWidgets.QFileDialog.getOpenFileName(
-                self, "Kaunsi PDF chhoti karni hai?", start, "PDF (*.pdf)")
+                self, 'Which PDF to shrink?', start, "PDF (*.pdf)")
             if not src_pdf:
                 return
         targets = ["200 KB (portal upload)", "500 KB", "1 MB", "2 MB",
-                   "Sirf quality kam karo (size ki limit nahi)"]
+                   'Only reduce quality (no size limit)']
         choice, ok = QtWidgets.QInputDialog.getItem(
             self, "Compress PDF", "How small should the file be?", targets, 2, False)
         if not ok:
@@ -7085,7 +7093,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             base = self._build_filename(".pdf", paths=paths)
             default = (base[:-4] if base.lower().endswith(".pdf") else base) + "_small.pdf"
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Chhoti PDF save karein", default, "PDF (*.pdf)")
+            self, 'Save the smaller PDF', default, "PDF (*.pdf)")
         if not out:
             return
         if not out.lower().endswith(".pdf"):
@@ -7112,7 +7120,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pretty = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024.0))
             note = ""
             if limit and size > limit:
-                note = "\n\n(Itni chhoti nahi ho payi — pages bahut hain. Kam pages chunein ya badi limit lein.)"
+                note = '\n\n(Could not get this small — too many pages. Choose fewer pages or a larger limit.)'
             QtWidgets.QMessageBox.information(
                 self, "Done", "Smaller PDF saved (%s):\n%s%s" % (pretty, out, note))
         self._run_bg(job, done, "Shrinking PDF (compress)…")
@@ -7418,9 +7426,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
             lines.append("RESULT: DUPLEX WORKING \u2705  (scanner ne dono taraf diye)")
         elif got["pages"] == 1:
             lines.append("RESULT: SINGLE SIDE ONLY \u274c  (scanner ne sirf ek taraf diya)")
-            lines.append("Matlab: is method/driver par duplex nahi mil raha.")
+            lines.append('Meaning: duplex is not available on this method/driver.')
         else:
-            lines.append("RESULT: koi page nahi aaya (scanner/feeder check karo)")
+            lines.append('RESULT: no page came through (check the scanner/feeder)')
         lines.append("================================")
         report = "\n".join(lines)
 
@@ -7428,7 +7436,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         dlg.setWindowTitle("Duplex Test Result"); dlg.resize(560, 420)
         lay = QtWidgets.QVBoxLayout(dlg)
         lay.addWidget(QtWidgets.QLabel(
-            "Ye result copy karke share karein:" if self._lang == "hi" else "Copy & share this result:"))
+            'Copy and share this result:' if self._lang == "hi" else "Copy & share this result:"))
         box = QtWidgets.QPlainTextEdit(); box.setPlainText(report); box.setReadOnly(True)
         box.setStyleSheet("font-family: Consolas, monospace; font-size: 12px;")
         lay.addWidget(box, 1)
@@ -7554,11 +7562,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     for n in names:
                         add("  * %s" % n)
                 else:
-                    add("  (koi TWAIN source nahi mila)")
+                    add('  (no TWAIN source found)')
             except Exception as exc:
                 add("  TWAIN error: %s" % exc)
         else:
-            add("  TWAIN (pytwain) install nahi hai")
+            add('  TWAIN (pytwain) is not installed')
         add("")
 
         # ---- WIA probe + duplex capability ----
@@ -7571,7 +7579,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     pass
                 devs = list_wia_sources()
                 if not devs:
-                    add("  (koi WIA device nahi mila)")
+                    add('  (no WIA device found)')
                 for dev_id, dev_name in devs:
                     add("  * %s" % dev_name)
                     try:
@@ -7601,7 +7609,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 except Exception:
                     pass
         else:
-            add("  WIA (pywin32) install nahi hai")
+            add('  WIA (pywin32) is not installed')
         add("")
         add("Last scan error: %s" % getattr(self, "_last_error", "(none)"))
         add("================================")
@@ -7611,7 +7619,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         dlg.setWindowTitle("Test / Diagnostics"); dlg.resize(640, 560)
         lay = QtWidgets.QVBoxLayout(dlg)
         lay.addWidget(QtWidgets.QLabel(
-            "Ye report copy karke share karein (scanner + error info):"
+            'Copy and share this report (scanner + error info):'
             if self._lang == "hi" else "Copy and share this report:"))
         box = QtWidgets.QPlainTextEdit(); box.setPlainText(report); box.setReadOnly(True)
         box.setStyleSheet("font-family: Consolas, monospace; font-size: 12px;")
@@ -7707,12 +7715,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 if top != cur:
                     cur = top
                     out.append("<h3>📂 %s</h3>" % _html.escape(top))
+                desc = (en if self._lang == "en" else hi) or en or hi or "—"
                 out.append("<div class='opt'><span class='lbl'>%s</span> "
                            "<span class='loc'>— %s</span><br>"
-                           "<span class='hi'>🇮🇳 %s</span><br>"
-                           "<span class='en'>🇬🇧 %s</span></div>"
+                           "<span class='en'>%s</span></div>"
                            % (_html.escape(label), _html.escape(path),
-                              _html.escape(hi or "—"), _html.escape(en or "—")))
+                              _html.escape(desc)))
                 cnt += 1
             out.insert(1, "<p style='color:#64748b;'>%d options</p>" % cnt)
             if not cnt:
@@ -8102,13 +8110,13 @@ if the toggle is ticked).</p>
         self._adv_btns = []
 
         tips = {
-            "scan": "Scan shuru karo (F5)", "profiles": "Scan profiles banao/badlo",
-            "ocr": "OCR: searchable PDF (dabakar on karo)", "fast": "Fast: 200 dpi + B&W, sabse tez",
-            "import": "Computer se image daalo", "savepdf": "PDF save karo (tir se: sab/selected)",
-            "images": "Pages ko JPG/PNG me save karo", "print": "Print karo (Ctrl+P)",
-            "rotate": "Selected page ghumao", "up": "Page upar karo", "down": "Page neeche karo",
-            "delete": "Selected page hatao (Ctrl+Z se wapas)", "clear": "Sab pages hatao",
-            "language": "Bhasha badlo (Hindi/English)", "about": "App ke baare me",
+            "scan": 'Start scan (F5)', "profiles": 'Create/edit scan profiles',
+            "ocr": 'OCR: searchable PDF (click to turn on)', "fast": "Fast: 200 dpi + B&W, sabse tez",
+            "import": 'Import an image from the computer', "savepdf": 'Save PDF (arrow: all / selected)',
+            "images": 'Save pages as JPG/PNG', "print": 'Print (Ctrl+P)',
+            "rotate": 'Rotate the selected page', "up": 'Move page up', "down": 'Move page down',
+            "delete": 'Delete the selected page (Ctrl+Z to undo)', "clear": 'Remove all pages',
+            "language": 'Change language (Hindi/English)', "about": 'About the app',
             "guide": self.L("📖 Complete Guide — har option kya karta hai (F1)",
                             "📖 Complete Guide — what every option does (F1)"),
         }
@@ -8410,7 +8418,7 @@ if the toggle is ticked).</p>
         self._apply_thumb_zoom(self.THUMB_W)
         # empty-state hint (shown when no pages)
         self._empty_lbl = QtWidgets.QLabel(
-            "\u2b07  Scan dabao ya Import se image daalo\n\n(ya kisi image ko yahan drag karo)"
+            '⬇  Press Scan, or add an image via Import\n\n(or drag an image here)'
             if self._lang == "hi" else
             "\u2b07  Press Scan, or Import an image\n\n(or drag an image here)",
             self.list.viewport())
@@ -9187,6 +9195,13 @@ if the toggle is ticked).</p>
             "Scan settings: %s · %s" % (dpi, depth)), 4000)
 
     def do_scan(self):
+        # Startup guard: agar window abhi-abhi khuli hai to scan mat karo. Isse
+        # app ko Enter dabakar launch karne par startup par galat scan-box nahi aata.
+        try:
+            if self._start_timer.elapsed() < 900:
+                return
+        except Exception:
+            pass
         # Rescan/Insert ka pending placement — sirf tab lagega jab scan sach me
         # shuru ho (guards me return ho gaya to chhup-chaap chhoot jayega).
         _place = getattr(self, "_pending_place", None)
@@ -9216,7 +9231,7 @@ if the toggle is ticked).</p>
                 self._warn("No scanner is set in this profile. 'Profiles…' → Edit → Choose device."); return
         self._barcode_tried = False
         self._scan_count = 0
-        self._progress = ScanProgressDialog(self, prof.get("source_name") or APP_NAME, self._lang)
+        self._progress = ScanProgressDialog(self, prof.get("source_name") or self.L("Scan ho raha hai…", "Scanning…"), self._lang)
         self._progress.cancelled.connect(self._cancel_scan)
         dpi, color, duplex = self._panel_scan_params(prof or {})
         opts = self._opts
@@ -9309,7 +9324,7 @@ if the toggle is ticked).</p>
             self._conn_timer.start()
         except Exception:
             pass
-        msg = "%d page scan ho gaye." % kept
+        msg = '%d page(s) scanned.' % kept
         if skipped:
             msg += " (%d blank hataye)" % skipped
         self.status.showMessage(msg, 5000)
@@ -9375,7 +9390,7 @@ if the toggle is ticked).</p>
     def import_images(self):
         start = self._config.get("last_import_dir") or self._config.get("last_save_dir") or ""
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
-            self, "Images / PDF chuno", start,
+            self, 'Choose images / PDF', start,
             "Images & PDF (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.pdf);;PDF (*.pdf);;Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")
         if not files:
             return
@@ -9436,7 +9451,7 @@ if the toggle is ticked).</p>
         seedha karna, chhota karna) — background me, app nahi rukti."""
         start = self._config.get("last_import_dir") or ""
         files, _ = QtWidgets.QFileDialog.getOpenFileNames(
-            self, "Phone-photos chuno", start,
+            self, 'Choose phone photos', start,
             "Photos (*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.webp)")
         if not files:
             return
@@ -9780,7 +9795,7 @@ if the toggle is ticked).</p>
         if not cards:
             cards = [(0, 0, img.width, img.height)]
         folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Contacts kahan save karein?", self._opts.get("save_folder", ""))
+            self, 'Where to save contacts?', self._opts.get("save_folder", ""))
         if not folder:
             return
         os.makedirs(folder, exist_ok=True)
@@ -10135,7 +10150,7 @@ if the toggle is ticked).</p>
         ok, fail = t.get("scan_ok", 0), t.get("scan_fail", 0)
         rate = ("%.0f%%" % (100.0 * ok / (ok + fail))) if (ok + fail) else "—"
         types = sorted((st.get("types") or {}).items(), key=lambda kv: -kv[1])[:5]
-        tys = "<br>".join("&nbsp;&nbsp;%s: <b>%d</b>" % (k, n) for k, n in types) or "&nbsp;&nbsp;(abhi nahi)"
+        tys = "<br>".join("&nbsp;&nbsp;%s: <b>%d</b>" % (k, n) for k, n in types) or '&nbsp;&nbsp;(not yet)'
         hours = st.get("hours") or {}
         peak_h = max(hours.items(), key=lambda kv: kv[1])[0] + ":00 baje" if hours else "—"
         info = QtWidgets.QLabel(
@@ -10297,10 +10312,10 @@ if the toggle is ticked).</p>
     SORT_MODES = [
         ("name_asc",  "Naam: A → Z",        "Name: A → Z",        0, QtCore.Qt.AscendingOrder),
         ("name_desc", "Naam: Z → A",        "Name: Z → A",        0, QtCore.Qt.DescendingOrder),
-        ("date_desc", "Date: nayi pehle",   "Date: newest first", 3, QtCore.Qt.DescendingOrder),
-        ("date_asc",  "Date: purani pehle", "Date: oldest first", 3, QtCore.Qt.AscendingOrder),
-        ("size_desc", "Size: badi pehle",   "Size: largest first",1, QtCore.Qt.DescendingOrder),
-        ("size_asc",  "Size: chhoti pehle", "Size: smallest first",1, QtCore.Qt.AscendingOrder),
+        ("date_desc", 'Date: newest first',   "Date: newest first", 3, QtCore.Qt.DescendingOrder),
+        ("date_asc",  'Date: oldest first', "Date: oldest first", 3, QtCore.Qt.AscendingOrder),
+        ("size_desc", 'Size: largest first',   "Size: largest first",1, QtCore.Qt.DescendingOrder),
+        ("size_asc",  'Size: smallest first', "Size: smallest first",1, QtCore.Qt.AscendingOrder),
     ]
 
     def _build_sort_menu(self):
@@ -10480,7 +10495,7 @@ if the toggle is ticked).</p>
                 self.files_tree.setCurrentIndex(self.files_model.index(saved))
             except Exception:
                 pass
-            m = ("✔ Isi PDF me jud gaya: %s" if merge_into else "✔ Save ho gayi: %s") % saved
+            m = ('✔ Added to this PDF: %s' if merge_into else '✔ Saved: %s') % saved
             self.status.showMessage(m, 7000)
         self._run_bg(job, on_done, self.L("Save ho raha hai… (app chalti rahegi)",
                                           "Saving… (app stays usable)"))
@@ -11452,7 +11467,7 @@ if the toggle is ticked).</p>
             self._warn("This folder has fewer than 2 PDFs.")
             return
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Merged PDF save karein",
+            self, 'Save the merged PDF',
             os.path.join(folder, (os.path.basename(folder) or "sab") + "_sab.pdf"),
             "PDF (*.pdf)")
         if not out:
@@ -12765,7 +12780,7 @@ if the toggle is ticked).</p>
                 ("sharp", L("Seedhe (sharp)", "Sharp"))], "rounded")
         _slider(f, L("Window paardarshita:", "Window opacity:"),
                 "window_opacity", 60, 100, 100, "%")
-        _check(f, "high_contrast", "Hai-contrast (saaf gaadhe rang, kam nazar ke liye)",
+        _check(f, "high_contrast", 'High contrast (bold clear colours, for low vision)',
                "High-contrast (bold clear colours, low vision)", False)
         _check(f, "touch_mode", "Touch / buzurg mode (bada sab kuch)",
                "Touch / large mode (bigger everything)", False)
@@ -12784,7 +12799,7 @@ if the toggle is ticked).</p>
                 ("text_only", L("Sirf naam", "Text only"))], "icon_text")
         _check(f, "ui_header", "Status-patti (scanner/profile/aaj)",
                "Status header (scanner/profile/today)", True)
-        _check(f, "ui_dashboard", "Start dashboard (khaali screen par bade buttons)",
+        _check(f, "ui_dashboard", 'Start dashboard (big buttons on an empty screen)',
                "Start dashboard (big buttons on empty screen)", True)
         _check(f, "ui_jobs", "Job-chips patti (1 click me profile+folder)",
                "Job chips bar (1-click profile+folder)", False)
@@ -12796,7 +12811,7 @@ if the toggle is ticked).</p>
                [("compact", L("Compact (paas-paas)", "Compact")),
                 ("normal", L("Normal", "Normal")),
                 ("roomy", L("Khula (roomy)", "Roomy"))], "normal")
-        _check(f, "show_page_numbers", "Har page ke niche naam/number dikhao",
+        _check(f, "show_page_numbers", 'Show a name/number under each page',
                "Show name/number under each page", True)
         _combo(f, L("Double-click par:", "Double-click opens:"), "dbl_action",
                [("edit", L("Editor window (rotate/crop)", "Editor window (rotate/crop)")),
@@ -12830,7 +12845,7 @@ if the toggle is ticked).</p>
         _check(f, "footer_folder", "Folder", "Folder", True)
         _check(f, "footer_pages", "Pages / selection", "Pages / selection", True)
         _check(f, "footer_last", "Aakhri save ki file", "Last saved file", True)
-        _check(f, "footer_disk", "Khaali disk", "Free disk", True)
+        _check(f, "footer_disk", 'Free disk', "Free disk", True)
         _check(f, "footer_version", "Version", "Version", True)
         _check(f, "footer_scanner", "Scanner / busy", "Scanner / busy", True)
         _check(f, "footer_clock", "Ghadi / tareekh", "Clock / date", False)
@@ -12845,15 +12860,15 @@ if the toggle is ticked).</p>
                [("nothing", L("Kuch nahi", "Do nothing")),
                 ("folder", L("Folder kholo", "Open folder")),
                 ("open", L("File kholo", "Open file"))], "nothing")
-        _check(f, "ui_confirm_delete", "Delete se pehle pucho",
+        _check(f, "ui_confirm_delete", 'Ask before deleting',
                "Ask before delete", True)
-        _check(f, "confirm_exit", "Band karte samay pucho",
+        _check(f, "confirm_exit", 'Ask when closing',
                "Ask before closing the app", False)
         _check(f, "sound_on_done", "Scan poora hote hi 'ting' awaaz",
                "Beep when a scan finishes", False)
-        _check(f, "remember_window", "Window ka size/jagah yaad rakho",
+        _check(f, "remember_window", 'Remember the window size/position',
                "Remember window size/position", True)
-        _check(f, "auto_update_check", "Apne aap update jaancho",
+        _check(f, "auto_update_check", 'Check for updates automatically',
                "Auto-check for updates", True)
         _combo(f, L("Bhasha / Language:", "Language:"), "language",
                [("en", "English"), ("hi", "हिन्दी (Hindi)")], "en")
@@ -13108,7 +13123,7 @@ if the toggle is ticked).</p>
 
             def _tick():
                 self._busy_i = (self._busy_i + 1) % len(self._busy_spin)
-                base = getattr(self, "_busy_msg", "Kaam ho raha hai…")
+                base = getattr(self, "_busy_msg", 'Working…')
                 n = getattr(self, "_bg_count", 0)
                 extra = (" (%d)" % n) if n > 1 else ""
                 self._busy_lbl.setText("%s %s%s" %
@@ -13129,7 +13144,7 @@ if the toggle is ticked).</p>
         kharaab kiye (lossless, pypdf se)."""
         if not HAS_OCR_LIBS:
             self._warn("pypdf is not installed."); return
-        src = self._pick_pdf("Kaunsi PDF edit karni hai?")
+        src = self._pick_pdf('Which PDF to edit?')
         if not src:
             return
         try:
@@ -13172,8 +13187,8 @@ if the toggle is ticked).</p>
             r = lw.currentRow()
             if r >= 0:
                 lw.takeItem(r)
-        for t, s in [("⬆ Upar", lambda: _move(-1)), ("⬇ Neeche", lambda: _move(1)),
-                     ("↻ Ghumao", _rot), ("🗑 Hatao", _del)]:
+        for t, s in [('⬆ Up', lambda: _move(-1)), ('⬇ Down', lambda: _move(1)),
+                     ('↻ Rotate', _rot), ('🗑 Delete', _del)]:
             b = QtWidgets.QPushButton(t); b.clicked.connect(s); row.addWidget(b)
         v.addLayout(row)
         bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
@@ -13182,7 +13197,7 @@ if the toggle is ticked).</p>
         if dlg.exec_() != QtWidgets.QDialog.Accepted or lw.count() == 0:
             return
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Nayi PDF save karein", src[:-4] + "_edit.pdf", "PDF (*.pdf)")
+            self, 'Save the new PDF', src[:-4] + "_edit.pdf", "PDF (*.pdf)")
         if not out:
             return
         try:
@@ -13209,7 +13224,7 @@ if the toggle is ticked).</p>
         sp = self._opts.get("sign_image") or ""
         if not sp or not os.path.exists(sp):
             f, _ = QtWidgets.QFileDialog.getOpenFileName(
-                self, "Apne sign/stamp ki image chuno (white background wali)",
+                self, 'Choose your signature/stamp image (with a white background)',
                 "", "Images (*.png *.jpg *.jpeg *.bmp)")
             if not f:
                 return
@@ -13219,8 +13234,8 @@ if the toggle is ticked).</p>
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("Place Sign/Stamp")
         form = QtWidgets.QFormLayout(dlg)
-        POS = ["Neeche-daayein", "Neeche-beech", "Neeche-baayein",
-               "Upar-daayein", "Upar-beech", "Upar-baayein", "Beech me"]
+        POS = ['Bottom-right', 'Bottom-centre', 'Bottom-left',
+               'Top-right', 'Top-centre', 'Top-left', "Beech me"]
         cmb = QtWidgets.QComboBox(); cmb.addItems(POS)
         spn = QtWidgets.QSpinBox(); spn.setRange(8, 60); spn.setValue(22); spn.setSuffix(" % chaudai")
         btn = QtWidgets.QPushButton("Change sign image…")
@@ -13313,7 +13328,7 @@ if the toggle is ticked).</p>
         if not pages:
             self._warn("Could not extract pages from the PDF (install PyMuPDF)."); return
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save karein", src[:-4] + "_wm.pdf", "PDF (*.pdf)")
+            self, 'Save', src[:-4] + "_wm.pdf", "PDF (*.pdf)")
         if not out:
             return
         try:
@@ -13329,7 +13344,7 @@ if the toggle is ticked).</p>
         """Password pata ho to PDF ki bina-password copy banao."""
         if not HAS_OCR_LIBS:
             self._warn("pypdf is not installed."); return
-        src = self._pick_pdf("Password wali PDF chuno")
+        src = self._pick_pdf('Choose a password-protected PDF')
         if not src:
             return
         pw, ok = QtWidgets.QInputDialog.getText(
@@ -13352,11 +13367,11 @@ if the toggle is ticked).</p>
 
     def pdf_to_jpgs(self):
         """Kisi bhi PDF ke pages JPG images me nikaalo."""
-        src = self._pick_pdf("Kaunsi PDF ki images chahiye?")
+        src = self._pick_pdf('Which PDF to extract images from?')
         if not src:
             return
         folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Images kahan save karein?", os.path.dirname(src))
+            self, 'Where to save the images?', os.path.dirname(src))
         if not folder:
             return
         pages = pdf_to_images(src, self._tmpdir)
@@ -13377,7 +13392,7 @@ if the toggle is ticked).</p>
     def folder_to_pdf(self):
         """Ek folder ki SAARI images (naam ke kram me) ek PDF me."""
         folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Images wala folder chuno", self._opts.get("save_folder", ""))
+            self, 'Choose the images folder', self._opts.get("save_folder", ""))
         if not folder:
             return
         exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
@@ -13386,7 +13401,7 @@ if the toggle is ticked).</p>
         if not files:
             self._warn("No images found in this folder."); return
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "PDF save karein",
+            self, 'Save PDF',
             os.path.join(folder, os.path.basename(folder) + ".pdf"), "PDF (*.pdf)")
         if not out:
             return
@@ -13422,12 +13437,12 @@ if the toggle is ticked).</p>
             self._warn("This needs Tesseract OCR."); return
         src = None
         if not self._ordered_paths():
-            src = self._pick_pdf("Kaunsi PDF ko Word banana hai?")
+            src = self._pick_pdf('Which PDF to convert to Word?')
             if not src:
                 return
         default = (src[:-4] + ".docx") if src else self._build_filename(".docx")
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Word file save karein", default, "Word (*.docx)")
+            self, 'Save Word file', default, "Word (*.docx)")
         if not out:
             return
 
@@ -13460,12 +13475,12 @@ if the toggle is ticked).</p>
             self._warn("This needs Tesseract OCR + openpyxl."); return
         src = None
         if not self._ordered_paths():
-            src = self._pick_pdf("Kaunsi PDF ko Excel banana hai?")
+            src = self._pick_pdf('Which PDF to convert to Excel?')
             if not src:
                 return
         default = (src[:-4] + ".xlsx") if src else self._build_filename(".xlsx")
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Excel save karein", default, "Excel (*.xlsx)")
+            self, 'Save Excel', default, "Excel (*.xlsx)")
         if not out:
             return
 
@@ -13517,7 +13532,7 @@ if the toggle is ticked).</p>
         default = self._build_filename(".pdf")
         default = (default[:-4] if default.lower().endswith(".pdf") else default) + "_archive.pdf"
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Archival PDF save karein", default, "PDF (*.pdf)")
+            self, 'Save archival PDF', default, "PDF (*.pdf)")
         if not out:
             return
         try:
@@ -13586,7 +13601,7 @@ if the toggle is ticked).</p>
                 text = pytesseract.image_to_string(im, lang="eng+hin")
             text = (text or "").strip()[:4500]
             if not text:
-                raise RuntimeError("Page par padhne layak text nahi mila.")
+                raise RuntimeError('No readable text found on the page.')
             import urllib.parse as P
             import urllib.request as U
             import json as J
@@ -14221,7 +14236,7 @@ if the toggle is ticked).</p>
         if not self._validate_claim_ok() or not self._duplicate_ok():
             return
         default = self._build_filename(".pdf", paths=paths)
-        out, _ = QtWidgets.QFileDialog.getSaveFileName(self, "PDF save karein", default, "PDF (*.pdf)")
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(self, 'Save PDF', default, "PDF (*.pdf)")
         if not out:
             return
         if not out.lower().endswith(".pdf"):
@@ -14278,7 +14293,7 @@ if the toggle is ticked).</p>
         pw, ok = QtWidgets.QInputDialog.getText(self, "Password", "PDF password:", QtWidgets.QLineEdit.Password)
         if not ok or not pw:
             return
-        out, _ = QtWidgets.QFileDialog.getSaveFileName(self, "PDF save karein", self._build_filename(".pdf"), "PDF (*.pdf)")
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(self, 'Save PDF', self._build_filename(".pdf"), "PDF (*.pdf)")
         if not out:
             return
         if not out.lower().endswith(".pdf"):
@@ -14303,7 +14318,7 @@ if the toggle is ticked).</p>
         if not paths:
             self._warn("Scan or import a page first."); return
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Images save karein", self._build_filename(".jpg"),
+            self, 'Save images', self._build_filename(".jpg"),
             "JPEG (*.jpg);;PNG (*.png);;TIFF (*.tif)")
         if not out:
             return
@@ -14334,7 +14349,7 @@ if the toggle is ticked).</p>
         paths = self._ordered_paths()
         if not paths:
             self._warn("Scan or import a page first."); return
-        out, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Text save karein", self._build_filename(".txt"), "Text (*.txt)")
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save text", self._build_filename(".txt"), "Text (*.txt)")
         if not out:
             return
         def job():
@@ -14408,7 +14423,7 @@ if the toggle is ticked).</p>
     def merge_pdfs(self):
         if not HAS_OCR_LIBS:
             self._warn("pypdf is not installed."); return
-        files, _ = QtWidgets.QFileDialog.getOpenFileNames(self, "Merge ke liye PDF chuno", "", "PDF (*.pdf)")
+        files, _ = QtWidgets.QFileDialog.getOpenFileNames(self, 'Choose PDFs to merge', "", "PDF (*.pdf)")
         if not files:
             return
         out, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Merged PDF save", self._build_filename(".pdf"), "PDF (*.pdf)")
@@ -14479,7 +14494,7 @@ if the toggle is ticked).</p>
                 else:
                     todo.append(p)
             prog = QtWidgets.QProgressDialog(
-                "PDF ke andar dhoondh rahe hain… (%d files)" % len(todo), "Cancel", 0, len(todo), self)
+                'Searching inside PDFs… (%d files)' % len(todo), "Cancel", 0, len(todo), self)
             prog.setWindowModality(QtCore.Qt.WindowModal)
             prog.setMinimumDuration(400)
             for i, p in enumerate(todo):
@@ -14501,8 +14516,7 @@ if the toggle is ticked).</p>
         if not matches:
             QtWidgets.QMessageBox.information(
                 self, "Search",
-                "Kuch nahi mila.\n\nTip: PDF ke andar ke text me wahi PDF milti hai jo "
-                "'OCR (searchable)' tick karke save hui thi.")
+                "Nothing found.\n\nTip: text-inside-PDF search only finds PDFs that were saved with 'OCR (searchable)' ticked.")
             return
         item, ok = QtWidgets.QInputDialog.getItem(
             self, "Search results", "Found %d file(s) — choose one to open:" % len(matches),
@@ -14731,7 +14745,7 @@ if the toggle is ticked).</p>
         if self.list.count() > 0 and getattr(self, "_dirty", False):
             r = QtWidgets.QMessageBox.question(
                 self, APP_NAME,
-                "Bina save kiye pages hain. Band karein?" if self._lang == "hi"
+                'There are unsaved pages. Close anyway?' if self._lang == "hi"
                 else "You have unsaved pages. Close anyway?",
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
             if r != QtWidgets.QMessageBox.Yes:
@@ -14792,8 +14806,7 @@ def main():
         try:
             QtWidgets.QMessageBox.critical(
                 None, "ApneScan — error",
-                "App me ek error aa gayi. Report yahan save ho gayi:\n%s\n\n"
-                "Ye file feedback me bhej dein — agli update me fix ho jayega." % CRASH_PATH)
+                'An error occurred. A report was saved here:\n%s\n\nPlease send this file as feedback — it will be fixed in the next update.' % CRASH_PATH)
         except Exception:
             pass
     sys.excepthook = _crash_hook
