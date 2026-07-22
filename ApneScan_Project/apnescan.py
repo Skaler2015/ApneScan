@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "104"
+VERSION = "105"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2344,12 +2344,14 @@ def _vsig_sim(a, b):
     return (0.52 * lay + 0.28 * col + 0.20 * dsim) * asp
 
 
-def visual_name_for(sig, learned_visual, thr=0.80, margin=0.06):
-    """Sabse milta-julta naam do — PAR sirf tab jab match SAAF ho:
+def visual_name_for(sig, learned_visual, thr=0.86, margin=0.09):
+    """Sabse milta-julta naam do — PAR sirf tab jab match SAAF ho. Shakl-only
+    matching sirf tab bharosemand hai jab document bilkul alag ho (ID/X-ray)
+    ya wahi page dobara ho; ek jaise letterhead wale docs ke liye ye jaan-
+    boojhkar 'koi naam nahi' deta (unhe TEXT/OCR se naam milta hai):
       - best score >= thr, AUR
-      - ya to best >= 0.93 (yaani wahi document dobara), ya best se alag NAAM
-        wala doosra signature kaafi peeche ho (margin). Warna 'ambiguous' —
-        koi naam mat do (galat naam dene se accha koi naam nahi)."""
+      - ya to best >= 0.94 (yaani wahi document dobara), ya best se alag NAAM
+        wala doosra signature kaafi peeche ho (margin). Warna koi naam nahi."""
     if not sig:
         return None, 0.0
     scored = []
@@ -2361,7 +2363,7 @@ def visual_name_for(sig, learned_visual, thr=0.80, margin=0.06):
     best_sc, best_name = scored[0]
     if best_sc < thr:
         return None, best_sc
-    if best_sc >= 0.93:                    # लगभग वही page दोबारा — pakka
+    if best_sc >= 0.94:                    # लगभग वही page दोबारा — pakka
         return best_name, best_sc
     for sc, nm in scored[1:]:              # pehla ALAG-naam wala competitor
         if nm and nm != best_name:
@@ -6073,8 +6075,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 break
         else:
             lv.append({"vsig": sig, "name": name})
-            if len(lv) > 600:
-                del lv[0:len(lv) - 600]
+            if len(lv) > 8000:
+                del lv[0:len(lv) - 8000]
         try:
             save_config(self._config)
         except Exception:
@@ -8602,8 +8604,9 @@ if the toggle is ticked).</p>
         self.chk_ocr = tbtn("ocr", "OCR", None, checkable=True)
         if not HAS_OCR_LIBS:
             self.chk_ocr.setEnabled(False)
-        self.chk_fast = tbtn("fast", tr("fast", self._lang), None, checkable=True)
-        self.chk_fast.setToolTip("Fast: 200 dpi + Black & White, no extra processing")
+        # 'Fast' button toolbar se hata diya (user ki request). chk_fast object
+        # (chhupa) rehta hai taaki do_scan / fast-mode ka code na toote.
+        self.chk_fast = QtWidgets.QToolButton(); self.chk_fast.setCheckable(True); self.chk_fast.hide()
         self.chk_fast.setChecked(bool(self._opts.get("fast_mode")))
         self.chk_fast.toggled.connect(self._on_fast_toggled)
         tb.addWidget(self._vsep())
@@ -8747,7 +8750,7 @@ if the toggle is ticked).</p>
         self.left_panel = panel
         if not self._opts.get("show_left_panel", True):
             panel.hide()
-        pl = QtWidgets.QVBoxLayout(panel); pl.setContentsMargins(14, 14, 14, 14); pl.setSpacing(5)
+        pl = QtWidgets.QVBoxLayout(panel); pl.setContentsMargins(12, 10, 12, 10); pl.setSpacing(3)
 
         pl.addWidget(QtWidgets.QLabel(tr("profile", self._lang)))
         prow = QtWidgets.QHBoxLayout(); prow.setSpacing(4)
@@ -8893,38 +8896,9 @@ if the toggle is ticked).</p>
         pl.addWidget(self.an_box)
         self._an_world = {}
         self._an_update_box()
-        # ---- Speed presets: 1 click me poori scan-setting ----
-        _spd = QtWidgets.QHBoxLayout(); _spd.setSpacing(4)
-        for _sk, _st, _tip in (
-                ("fast", self.L("⚡ Jaldi", "⚡ Fast"),
-                 self.L("150 dpi · Black & White — sabse tez",
-                        "150 dpi · Black & White — fastest")),
-                ("normal", self.L("⚖ Normal", "⚖ Normal"),
-                 self.L("200 dpi · Grayscale — roz ke liye",
-                        "200 dpi · Grayscale — everyday")),
-                ("best", self.L("★ Badhiya", "★ Best"),
-                 self.L("300 dpi · Colour + saaf — sabse achhi quality",
-                        "300 dpi · Colour + clean — best quality"))):
-            _b = QtWidgets.QPushButton(_st); _b.setToolTip(_tip)
-            _b.setStyleSheet("QPushButton{font-size:11px;padding:5px 2px;border:1px solid "
-                             "#cbd5e1;border-radius:8px;background:#fff;}"
-                             "QPushButton:hover{border-color:#0f766e;color:#0f766e;}")
-            _b.clicked.connect(lambda _c, k=_sk: self._apply_speed_preset(k))
-            _spd.addWidget(_b)
-        _spdw = QtWidgets.QWidget(); _spdw.setLayout(_spd); pl.addWidget(_spdw)
         self.btn_scan = QtWidgets.QPushButton("▶  " + tr("scan", self._lang)); self.btn_scan.setObjectName("primary")
         self.btn_scan.setMinimumHeight(38); self.btn_scan.clicked.connect(self.do_scan); pl.addWidget(self.btn_scan)
         self.btn_scan.setToolTip("Start scan (Enter / F-keys)")
-        # ⚡ Scan → Save: scan hote hi seedha chune folder me PDF ban jaaye
-        self.btn_scan_save = QtWidgets.QPushButton(self.L("⚡ Scan → Save (folder me)", "⚡ Scan → Save (to folder)"))
-        self.btn_scan_save.setToolTip(self.L(
-            "Scan karo aur seedha 'Meri Files' me chune folder me PDF save kar do — ek click.",
-            "Scan and save a PDF straight into the selected 'My Files' folder — one click."))
-        self.btn_scan_save.setStyleSheet(
-            "QPushButton{font-size:11px;padding:6px;border-radius:8px;border:1px solid #0f766e;"
-            "background:#e6fffa;color:#0f766e;font-weight:600;}QPushButton:hover{background:#0f766e;color:#fff;}")
-        self.btn_scan_save.clicked.connect(self._scan_and_save)
-        pl.addWidget(self.btn_scan_save)
         self.claim_edit.setToolTip("Claim/Patient number (appears in the file name)")
         self.cmb_dpi.setToolTip("Resolution: lower dpi = faster scan")
         self.cmb_depth.setToolTip("Black & White is fastest, Colour is slower")
@@ -14383,8 +14357,8 @@ if the toggle is ticked).</p>
                 break
         else:
             learned.append({"words": words, "name": name})
-            if len(learned) > 400:
-                del learned[0:len(learned) - 400]
+            if len(learned) > 8000:
+                del learned[0:len(learned) - 8000]
         try:
             save_config(self._config)
         except Exception:
