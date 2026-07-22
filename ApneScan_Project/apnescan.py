@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "95"
+VERSION = "96"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -7993,7 +7993,7 @@ folder. From here you can save straight into a folder, search, and act on files.
 <li><b>◀ ▶</b> से पिछला/अगला पेज; ऊपर <b>Page x/N</b> दिखता है।</li>
 <li><b>Filmstrip:</b> नीचे सभी पेजों की छोटी झलक — किसी पर क्लिक = वही पेज।</li>
 <li><b>Zoom:</b> ➖ छोटा · 🔳 Fit · ➕ बड़ा · ⛶ पूरी स्क्रीन (या <b>Ctrl+scroll</b>)।</li>
-<li><b>टैब:</b> 👁 झलक · 🔤 Text (OCR) · ℹ Info (आकार, DPI, तारीख़)।</li>
+<li><b>टैब:</b> 👁 झलक · 🔤 Text (OCR)। पूरी जानकारी (आकार, DPI, तारीख़) सीधे preview के नीचे दिखती है।</li>
 </ul>
 
 <h3>🔧 एक-क्लिक सुधार</h3>
@@ -8044,7 +8044,7 @@ if the toggle is ticked).</p>
 <li><b>◀ ▶</b> previous/next page; <b>Page x/N</b> shows at the top.</li>
 <li><b>Filmstrip:</b> thumbnails of every page below — click one to jump.</li>
 <li><b>Zoom:</b> ➖ out · 🔳 Fit · ➕ in · ⛶ full screen (or <b>Ctrl+scroll</b>).</li>
-<li><b>Tabs:</b> 👁 Preview · 🔤 Text (OCR) · ℹ Info (size, DPI, date).</li>
+<li><b>Tabs:</b> 👁 Preview · 🔤 Text (OCR). Full info (size, DPI, date) shows right below the preview.</li>
 </ul>
 
 <h3>🔧 One-click fixes</h3>
@@ -8786,11 +8786,6 @@ if the toggle is ticked).</p>
         _tb.addWidget(_breadt); _tb.addWidget(_bcopyt); _tb.addWidget(_btr)
         _p2l.addLayout(_tb)
         self.pv_tabs.addTab(_p2, self.L("🔤 Text", "🔤 Text"))
-        # Info tab
-        self.pv_info2 = QtWidgets.QLabel("")
-        self.pv_info2.setWordWrap(True); self.pv_info2.setAlignment(QtCore.Qt.AlignTop)
-        self.pv_info2.setStyleSheet("color:#334155;font-size:11px;padding:6px;")
-        self.pv_tabs.addTab(self.pv_info2, self.L("ℹ Info", "ℹ Info"))
         pv.addWidget(self.pv_tabs, 1)
 
         # ---- Filmstrip: sabhi pages ki chhoti jhalak (click = wo page) ----
@@ -8820,10 +8815,21 @@ if the toggle is ticked).</p>
             "QPushButton:hover{background:#0d5f58;}")
         _edit_btn.clicked.connect(lambda: self._pv_open_image_editor())
         pv.addWidget(_edit_btn)
+        # ---- Complete info seedha preview ke NEECHE (alag 'Info' tab nahi) ----
+        _infhdr = QtWidgets.QLabel(self.L("ℹ <b>Poori jaankari</b>", "ℹ <b>File info</b>"))
+        _infhdr.setStyleSheet("color:#0f766e;font-size:11px;font-weight:700;margin-top:2px;")
+        pv.addWidget(_infhdr)
         self.pv_info = QtWidgets.QLabel("")
-        self.pv_info.setStyleSheet("color:#64748b;font-size:11px;")
+        self.pv_info.setTextFormat(QtCore.Qt.RichText)
         self.pv_info.setWordWrap(True)
+        self.pv_info.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        self.pv_info.setStyleSheet(
+            "color:#475569;font-size:11px;padding:6px 8px;background:#f8fafc;"
+            "border:1px solid #e2e8f0;border-radius:8px;")
         pv.addWidget(self.pv_info)
+        # 'Info' ab alag tab me nahi — saari jaankari isi label me (upar wale
+        # sabhi pv_info2.setText(...) ab seedha isi complete-info par jaate hain).
+        self.pv_info2 = self.pv_info
         self.preview_panel.setVisible(bool(self._opts.get("ui_preview", False)))
         body.addWidget(self.preview_panel)
         self.list.currentItemChanged.connect(lambda cur, prev: self._update_preview_panel())
@@ -11030,6 +11036,27 @@ if the toggle is ticked).</p>
         p.end()
         return canvas, total
 
+    def _pv_file_date(self, path):
+        """File ki modified date/time — complete info me dikhane ke liye."""
+        try:
+            return datetime.datetime.fromtimestamp(
+                os.path.getmtime(path)).strftime("%d %b %Y, %I:%M %p")
+        except Exception:
+            return "-"
+
+    def _pv_img_meta(self, path):
+        """Image ki (DPI, colour-mode) — complete info me dikhane ke liye."""
+        mode = "-"; dpi = None
+        try:
+            with Image.open(path) as im:
+                mode = {"1": "Black & White", "L": "Grayscale", "RGB": "Colour",
+                        "RGBA": "Colour"}.get(im.mode, im.mode)
+                dpi = im.info.get("dpi")
+        except Exception:
+            pass
+        dpitxt = ("%d dpi" % int(dpi[0])) if (dpi and dpi[0]) else "—"
+        return dpitxt, mode
+
     def _preview_file_in_panel(self, path):
         """Preview panel me is file ki jhalak dikhao (band ho to khol do).
         Multi-page PDF ke SAARE pages neeche-neeche dikhte hain (scroll)."""
@@ -11074,12 +11101,11 @@ if the toggle is ticked).</p>
                                       % (name, total, self.L("page", "pages"), capd))
                 self._pv_render()
                 QtCore.QTimer.singleShot(30, self._pv_render)
-                self.pv_info.setText("%s · %s · %d %s"
-                                     % (name, szt, total, self.L("page", "pages")))
-                self.pv_info2.setText(
-                    "<b>%s</b><br>📄 %d %s<br>💾 %s<br>"
+                self.pv_info.setText(
+                    "<b>%s</b><br>🗂 PDF · 📄 %d %s<br>💾 %s<br>📅 %s<br>"
                     "<span style='color:#94a3b8'>%s</span>"
-                    % (name, total, self.L("page", "pages"), szt, path))
+                    % (name, total, self.L("page", "pages"), szt,
+                       self._pv_file_date(path), path))
                 self.pv_text.setPlainText("")
             self._run_bg_quiet(job, done)
             return
@@ -11099,10 +11125,13 @@ if the toggle is ticked).</p>
         self.pv_title.setText(name)
         self._pv_render()
         QtCore.QTimer.singleShot(30, self._pv_render)
-        self.pv_info.setText("%s · %s · %d×%d" % (name, szt, pm.width(), pm.height()))
-        self.pv_info2.setText("<b>%s</b><br>📐 %d × %d px<br>💾 %s<br>"
-                              "<span style='color:#94a3b8'>%s</span>"
-                              % (name, pm.width(), pm.height(), szt, path))
+        ext = (os.path.splitext(path)[1].lstrip(".").upper() or "FILE")
+        dpitxt, mode = self._pv_img_meta(path)
+        self.pv_info.setText(
+            "<b>%s</b><br>🗂 %s · 📐 %d × %d px<br>🖨 %s · 🎨 %s<br>💾 %s<br>📅 %s<br>"
+            "<span style='color:#94a3b8'>%s</span>"
+            % (name, ext, pm.width(), pm.height(), dpitxt, mode, szt,
+               self._pv_file_date(path), path))
         self.pv_text.setPlainText("")
 
     # ---- Fast in-memory index (turant search) ----
