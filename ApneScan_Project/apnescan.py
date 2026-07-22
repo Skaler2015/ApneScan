@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "93"
+VERSION = "94"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -319,13 +319,13 @@ RESOLUTIONS = ["150", "200", "300", "600"]
 # (id, label, default key) — all reassignable via Settings -> Keyboard Shortcuts
 SHORTCUTS = [
     ("scan", "Scan", "Return"),
-    ("dpi_150", "Resolution 150 dpi", "F2"),
-    ("dpi_200", "Resolution 200 dpi", "F3"),
-    ("dpi_300", "Resolution 300 dpi", "F4"),
+    ("rename", "Rename page", "F2"),
+    ("dpi_150", "Resolution 150 dpi", "F3"),
+    ("dpi_200", "Resolution 200 dpi", "F4"),
+    ("dpi_300", "Resolution 300 dpi", "F5"),
     ("dpi_600", "Resolution 600 dpi", "F6"),
     ("dpi_custom", "Resolution custom dpi", "F7"),
     ("import", "Import images / PDF", "Ctrl+I"),
-    ("rename", "Rename page", "F8"),
     ("save_all", "Save all as PDF", "Ctrl+S"),
     ("save_sel", "Save selected as PDF", "Space"),
     ("save_pw", "Save PDF (password)", ""),
@@ -5304,6 +5304,19 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self._save_opts()
             except Exception:
                 pass
+        # v94: naye keyboard shortcuts (F2=Rename, F3=150, F4=200, F5=300,
+        # F6=600, F7=Custom). Purane saved keys hata do taaki naya default lage.
+        if not self._opts.get("_sc_reset_v94"):
+            self._opts["_sc_reset_v94"] = True
+            scm = dict(self._opts.get("shortcuts", {}) or {})
+            for _sid in ("scan", "rename", "dpi_150", "dpi_200", "dpi_300",
+                         "dpi_600", "dpi_custom", "save_all", "save_sel"):
+                scm.pop(_sid, None)
+            self._opts["shortcuts"] = scm
+            try:
+                self._save_opts()
+            except Exception:
+                pass
 
         self._build_menu()
         self._build_ui()
@@ -5830,8 +5843,6 @@ class ScannerWindow(QtWidgets.QMainWindow):
             if key:
                 scut.setKey(QtGui.QKeySequence(key))
             self._sc[sid] = scut
-        # F5 hamesha Scan (Enter ke alawa) — Meri Files me focus ho tab bhi kaam de
-        QtWidgets.QShortcut(QtGui.QKeySequence("F5"), self, self.do_scan)
         # Enter/Return se Scan — LEKIN 'Meri Files' panel me focus ho to nahi
         # (wahan Enter = folder kholo). Focus badalte hi scan-shortcut on/off.
         try:
@@ -5885,17 +5896,16 @@ class ScannerWindow(QtWidgets.QMainWindow):
         def k(sid, default):
             key = custom.get(sid, default)
             return "—" if not key else key.replace("Return", "Enter")
-        dpis = (("dpi_150", "F2", "150"), ("dpi_200", "F3", "200"),
-                ("dpi_300", "F4", "300"), ("dpi_600", "F6", "600"),
-                ("dpi_custom", "F7", "Custom"))
-        parts = ["<b>%s</b>→%s" % (k(sid, dflt), lbl) for sid, dflt, lbl in dpis]
-        scan_k = k("scan", "Return")
-        save_k = k("save_sel", "Space")
+        left = (("rename", "F2", "Rename"), ("dpi_150", "F3", "150 dpi"),
+                ("dpi_200", "F4", "200 dpi"), ("dpi_300", "F5", "300 dpi"),
+                ("dpi_600", "F6", "600 dpi"), ("dpi_custom", "F7", "Custom"))
+        right = (("scan", "Return", "Scan"), ("save_sel", "Space", "Selected save"),
+                 ("save_all", "Ctrl+S", "Save all"))
+        p1 = ["<b>%s</b> = %s" % (k(sid, dflt), lbl) for sid, dflt, lbl in left]
+        p2 = ["<b>%s</b> = %s" % (k(sid, dflt), lbl) for sid, dflt, lbl in right]
         self.lbl_shortcuts.setText(
-            self.L("⌨ DPI: ", "⌨ DPI: ") + "  ·  ".join(parts)
-            + "&nbsp;&nbsp;|&nbsp;&nbsp;"
-            + self.L("<b>%s</b> = Scan · <b>%s</b> = Selected save",
-                     "<b>%s</b> = Scan · <b>%s</b> = Save selected") % (scan_k, save_k))
+            "⌨&nbsp; " + "  ·  ".join(p1)
+            + "&nbsp;&nbsp;|&nbsp;&nbsp;" + "  ·  ".join(p2))
 
     def _apply_shortcut(self, sid, key):
         scut = self._sc.get(sid)
