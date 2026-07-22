@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "102"
+VERSION = "103"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6849,6 +6849,38 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
         self.status.showMessage(self.L("Kram badal gaya", "Order changed"), 2500)
+
+    def _kill_stray_windows(self):
+        """Startup par kabhi-kabhi koi panel (ribbon/header/preview/dashboard
+        wagairah) galti se ek alag khaali 'ApneScan' window ban kar aa jata tha.
+        Yahan hum aise SAB 'bina-kaam' top-level widgets ko dhoondh kar hide kar
+        dete hain — asli main-window aur asli dialogs (QDialog) ko chhedte NAHI."""
+        try:
+            app = QtWidgets.QApplication.instance()
+            if app is None:
+                return
+            for w in app.topLevelWidgets():
+                if w is self or not w.isVisible():
+                    continue
+                # asli dialogs / doosri main-windows mat chhedo
+                if isinstance(w, (QtWidgets.QDialog, QtWidgets.QMainWindow, QtWidgets.QMenu)):
+                    continue
+                # bacha koi bare top-level (QWidget/QTabWidget/QLabel…) = stray box -> hide
+                try:
+                    w.hide()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def showEvent(self, e):
+        try:
+            super().showEvent(e)
+        except Exception:
+            pass
+        # window dikhte hi (aur agle kuch second tak) koi stray box ho to hata do
+        for _ms in (0, 300, 800, 1600, 2600):
+            QtCore.QTimer.singleShot(_ms, self._kill_stray_windows)
 
     def _update_empty_state(self):
         empty = self.list.count() == 0
