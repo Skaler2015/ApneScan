@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "94"
+VERSION = "95"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -320,11 +320,11 @@ RESOLUTIONS = ["150", "200", "300", "600"]
 SHORTCUTS = [
     ("scan", "Scan", "Return"),
     ("rename", "Rename page", "F2"),
-    ("dpi_150", "Resolution 150 dpi", "F3"),
-    ("dpi_200", "Resolution 200 dpi", "F4"),
-    ("dpi_300", "Resolution 300 dpi", "F5"),
-    ("dpi_600", "Resolution 600 dpi", "F6"),
-    ("dpi_custom", "Resolution custom dpi", "F7"),
+    ("dpi_150", "Scan at 150 dpi", "F3"),
+    ("dpi_200", "Scan at 200 dpi", "F4"),
+    ("dpi_300", "Scan at 300 dpi", "F5"),
+    ("dpi_600", "Scan at 600 dpi", "F6"),
+    ("dpi_custom", "Scan at custom dpi", "F7"),
     ("import", "Import images / PDF", "Ctrl+I"),
     ("save_all", "Save all as PDF", "Ctrl+S"),
     ("save_sel", "Save selected as PDF", "Space"),
@@ -5142,7 +5142,20 @@ class LibraryModel(QtWidgets.QFileSystemModel):
                 try:
                     fi = self.fileInfo(index)
                     if fi.isFile():
-                        return "(%s) %s" % (self._fmt_size(fi.size()), fi.fileName())
+                        # QFileSystemModel ka cached size kabhi-kabhi 0/stale hota
+                        # hai (file abhi bani/likhi gayi ho). Isliye asli size
+                        # seedha disk se padho — taaki HAR file ka size sahi dikhe.
+                        sz = 0
+                        try:
+                            sz = os.path.getsize(self.filePath(index))
+                        except Exception:
+                            sz = 0
+                        if not sz:
+                            try:
+                                sz = int(fi.size())
+                            except Exception:
+                                sz = 0
+                        return "(%s) %s" % (self._fmt_size(sz), fi.fileName())
                 except Exception:
                     pass
             elif role == QtCore.Qt.ForegroundRole:
@@ -5796,11 +5809,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _build_shortcuts(self):
         methods = {
             "scan": self.do_scan,
-            "dpi_150": lambda: self._set_panel_dpi(150),
-            "dpi_200": lambda: self._set_panel_dpi(200),
-            "dpi_300": lambda: self._set_panel_dpi(300),
-            "dpi_600": lambda: self._set_panel_dpi(600),
-            "dpi_custom": self._set_panel_dpi_custom,
+            "dpi_150": lambda: self._scan_at_dpi(150),
+            "dpi_200": lambda: self._scan_at_dpi(200),
+            "dpi_300": lambda: self._scan_at_dpi(300),
+            "dpi_600": lambda: self._scan_at_dpi(600),
+            "dpi_custom": self._scan_at_dpi_custom,
             "import": self.import_images,
             "rename": self.rename_current_page,
             "save_all": self.save_pdf_all,
@@ -5887,6 +5900,21 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if ok:
             self._set_panel_dpi(n)
 
+    def _scan_at_dpi(self, n):
+        """DPI shortcut: resolution set karo AUR usi dpi par turant scan karo
+        (jo bhi device chuna hai usi se)."""
+        self._set_panel_dpi(n)
+        self.do_scan()
+
+    def _scan_at_dpi_custom(self):
+        """F7: apni DPI poochho, phir usi par scan karo."""
+        n, ok = QtWidgets.QInputDialog.getInt(
+            self, self.L("Apni DPI", "Custom DPI"),
+            self.L("DPI likho (50–1200):", "Enter DPI (50–1200):"), 300, 50, 1200, 50)
+        if ok:
+            self._set_panel_dpi(n)
+            self.do_scan()
+
     def _refresh_shortcut_line(self):
         """Toolbar ke neeche wali line — abhi ke (user ke) shortcuts dikhao."""
         if not hasattr(self, "lbl_shortcuts"):
@@ -5896,9 +5924,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         def k(sid, default):
             key = custom.get(sid, default)
             return "—" if not key else key.replace("Return", "Enter")
-        left = (("rename", "F2", "Rename"), ("dpi_150", "F3", "150 dpi"),
-                ("dpi_200", "F4", "200 dpi"), ("dpi_300", "F5", "300 dpi"),
-                ("dpi_600", "F6", "600 dpi"), ("dpi_custom", "F7", "Custom"))
+        left = (("rename", "F2", "Rename"), ("dpi_150", "F3", "Scan 150dpi"),
+                ("dpi_200", "F4", "Scan 200dpi"), ("dpi_300", "F5", "Scan 300dpi"),
+                ("dpi_600", "F6", "Scan 600dpi"), ("dpi_custom", "F7", "Scan Custom"))
         right = (("scan", "Return", "Scan"), ("save_sel", "Space", "Selected save"),
                  ("save_all", "Ctrl+S", "Save all"))
         p1 = ["<b>%s</b> = %s" % (k(sid, dflt), lbl) for sid, dflt, lbl in left]
