@@ -1,0 +1,104 @@
+name: Build MSIX (Microsoft Store)
+
+# Microsoft Store ke liye .msix package banata hai.
+# Chalane ke 2 tarike:
+#   1) GitHub → Actions → "Build MSIX (Microsoft Store)" → Run workflow
+#   2) koi version tag (jaise v78) push karne par apne aap
+#
+# ZAROORI (Store submission ke liye): Repo → Settings → Secrets and variables →
+# Actions → Variables me ye 3 set karein (Partner Center → apki app →
+# "Product identity" se milte hain):
+#   MSIX_IDENTITY_NAME      (jaise 12345ApneSoft.ApneScan)
+#   MSIX_PUBLISHER          (jaise CN=ABCD1234-....)
+#   MSIX_PUBLISHER_DISPLAY  (jaise ApneSoft)
+# Na set karein to bhi package banega (test ke liye), par Store use tabhi
+# accept karega jab identity Partner Center se exactly match kare.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  msix:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up 32-bit Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x86
+
+      - name: Install dependencies
+        working-directory: ApneScan_Project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build EXE with PyInstaller
+        working-directory: ApneScan_Project
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name "ApneScan" --icon apnescan.ico --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes --hidden-import PyQt5.QtMultimedia --hidden-import PyQt5.QtMultimediaWidgets --hidden-import PyQt5.QtNetwork --hidden-import qrcode --hidden-import qrcode.image.pil apnescan.py
+
+      - name: Assemble MSIX package folder
+        working-directory: ApneScan_Project
+        shell: pwsh
+        env:
+          MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          MSIX_PUBLISHER_DISPLAY: ${{ vars.MSIX_PUBLISHER_DISPLAY }}
+        run: |
+          $ver = (Select-String -Path apnescan.py -Pattern 'VERSION = "(\d+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $ver4 = "$ver.0.0.0"
+          Write-Host "App version: $ver4"
+
+          $pkg = "msix_build"
+          if (Test-Path $pkg) { Remove-Item -Recurse -Force $pkg }
+          New-Item -ItemType Directory -Force -Path "$pkg/Assets" | Out-Null
+
+          Copy-Item dist/ApneScan.exe "$pkg/ApneScan.exe"
+          python msix/make_msix_assets.py apnescan_icon.png apnescan_logo.png "$pkg/Assets"
+
+          $name = if ($env:MSIX_IDENTITY_NAME) { $env:MSIX_IDENTITY_NAME } else { "ApneSoft.ApneScan" }
+          $pub  = if ($env:MSIX_PUBLISHER) { $env:MSIX_PUBLISHER } else { "CN=ApneSoft" }
+          $disp = if ($env:MSIX_PUBLISHER_DISPLAY) { $env:MSIX_PUBLISHER_DISPLAY } else { "ApneSoft" }
+          if (-not $env:MSIX_IDENTITY_NAME) {
+            Write-Host "::warning::MSIX_IDENTITY_NAME/PUBLISHER not set — using test defaults. The Store will reject this identity; set repo Variables from Partner Center before submitting."
+          }
+
+          (Get-Content msix/AppxManifest.xml -Raw) `
+            -replace '__NAME__', $name `
+            -replace '__PUBLISHER__', $pub `
+            -replace '__PUBDISPLAY__', $disp `
+            -replace '__VERSION__', $ver4 `
+            | Set-Content "$pkg/AppxManifest.xml" -Encoding UTF8
+
+          Write-Host "----- AppxManifest.xml -----"
+          Get-Content "$pkg/AppxManifest.xml"
+
+      - name: Pack MSIX (makeappx)
+        working-directory: ApneScan_Project
+        shell: pwsh
+        run: |
+          $makeappx = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe" -ErrorAction SilentlyContinue |
+                       Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          if (-not $makeappx) {
+            $makeappx = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x86\makeappx.exe" -ErrorAction SilentlyContinue |
+                         Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          }
+          if (-not $makeappx) { throw "makeappx.exe (Windows SDK) not found on the runner." }
+          Write-Host "Using: $makeappx"
+          & $makeappx pack /d msix_build /p ApneScan.msix /o
+          if ($LASTEXITCODE -ne 0) { throw "makeappx failed ($LASTEXITCODE)" }
+          Get-ChildItem ApneScan.msix | Format-List Name, Length
+
+      - name: Upload MSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApneScan-msix
+          path: ApneScan_Project/ApneScan.msix
+          if-no-files-found: error
