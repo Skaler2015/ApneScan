@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "129"
+VERSION = "130"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6931,7 +6931,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         st = self._pstats()
         t = st.get("totals", {})
         day = (st.get("days") or {}).get(datetime.datetime.now().strftime("%Y-%m-%d"), {})
-        # SIRF meri (is PC ki) stats — worldwide sirf admin panel me dikhta hai.
+        # Meri (is PC ki) stats + SIRF do worldwide numbers (total + aaj).
+        # Baaki poora worldwide sirf admin panel me dikhta hai.
         lines = [
             '<b>📊 ApneScan</b> <span style="color:#94a3b8;font-size:10px;">(click = detail)</span>',
             self.L("📄 Aaj: <b>%d</b> pages · <b>%d</b> PDF", "📄 Today: <b>%d</b> pages · <b>%d</b> PDF")
@@ -6939,6 +6940,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.L("🗓 Is hafte: <b>%d</b> pages", "🗓 This week: <b>%d</b> pages") % self._pstats_sum(7),
             self.L("📚 Kul: <b>%s</b> pages", "📚 Total: <b>%s</b> pages") % "{:,}".format(t.get("pages", 0)),
             self.L("🔥 Streak: <b>%d din</b>", "🔥 Streak: <b>%d days</b>") % self._pstats_streak(),
+            self.L("🌍 Duniya total scans: <b>%s</b>", "🌍 World total scans: <b>%s</b>")
+            % self._an_wv("total"),
+            self.L("🌍 Duniya aaj ke scans: <b>%s</b>", "🌍 World scans today: <b>%s</b>")
+            % self._an_wv("today"),
         ]
         try:
             self.an_box.setText("<br>".join(lines))
