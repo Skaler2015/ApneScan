@@ -28,6 +28,14 @@
 // yahi daalna hoga. Khaali chhod sakte ho (tab koi secret nahi lagega).
 var SECRET = "";
 
+// IMPORTANT: "Aaj (today)" ki ginti ISI timezone ke hisaab se hoti hai. Pehle
+// ye script ke apne timezone par thi — agar wo India (IST) nahi hota to subah
+// IST me kiye scan server ke hisaab se "kal" me chale
+// jaate the aur "Aaj (duniya)" 0 dikhta tha. Ab poora din/hafta/ghanta India
+// (Asia/Kolkata = UTC+5:30) me gina jaata hai. Doosre desh ke liye yahi badal
+// dena (jaise "America/New_York").
+var TZ = "Asia/Kolkata";
+
 function _ss() {
   return SpreadsheetApp.getActiveSpreadsheet();
 }
@@ -44,7 +52,7 @@ function _sheet(name, headers) {
 
 function _today() {
   // Server date, YYYY-MM-DD
-  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+  return Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd");
 }
 
 function _getTotal() {
@@ -65,7 +73,7 @@ function _setTotal(n) {
 // yyyy-MM-dd me laakar sahi compare karta hai.
 function _cellDay(v) {
   if (v instanceof Date) {
-    return Utilities.formatDate(v, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    return Utilities.formatDate(v, TZ, "yyyy-MM-dd");
   }
   return String(v);
 }
@@ -183,7 +191,7 @@ function _week() {
     byDay[d] = (byDay[d] || 0) + (Number(data[i][1]) || 0);
   }
   var out = [];
-  var tz = Session.getScriptTimeZone();
+  var tz = TZ;
   for (var j = 6; j >= 0; j--) {
     var dt = new Date(new Date().getTime() - j * 86400000);
     var key = Utilities.formatDate(dt, tz, "yyyy-MM-dd");
@@ -194,7 +202,7 @@ function _week() {
 
 function _bumpHour(n) {
   var sh = _sheet("hourly", ["hour", "count"]);
-  var key = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd-HH");
+  var key = Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd-HH");
   var data = sh.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][0]) === key) {
@@ -208,7 +216,7 @@ function _bumpHour(n) {
 
 function _hourCount() {
   var sh = _sheet("hourly", ["hour", "count"]);
-  var key = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd-HH");
+  var key = Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd-HH");
   var data = sh.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][0]) === key) return Number(data[i][1]) || 0;
