@@ -589,6 +589,71 @@ if (isset($_GET['admin'])) {
     $S['impactMinutes']=round(($S['total']+intval($d['imports']))*0.5 + $shr*2);
     $S['impactHours']=round($S['impactMinutes']/60);
 
+    // ================= SMART SUGGESTIONS (aage kya banayein) =================
+    $sug=array();
+    $addsug=function($p,$ic,$t,$dd) use (&$sug){ $sug[]=array('p'=>$p,'ic'=>$ic,'t'=>$t,'d'=>$dd); };
+    $ncrash=count(isset($d['crashes'])?$d['crashes']:array());
+    if ($ncrash>0){
+        $cv=array(); foreach($d['crashes'] as $c){ $vv=trim(isset($c['v'])?$c['v']:''); if($vv!=='')bump($cv,$vv,1); }
+        arsort($cv); $topcv=$cv?key($cv):'';
+        $addsug(1,'💥','App crashes theek karein (sabse zaroori)', $ncrash.' crash report aaye hain'.($topcv?' — sabse zyada v'.$topcv.' me':'').'. "Feedback & System" tab me detail dekhein aur agli update me fix karein.');
+    }
+    if ($S['oldVersionPct']>=30){
+        $addsug(1,'🔔','Purane version wale users ko update karayein', $S['oldVersionPct'].'% users purane version par hain. "Overview → Broadcast" se sabhi ya sirf purane-version users ko update ka message bhejein.');
+    }
+    if (isset($S['ratingCount']) && $S['ratingCount']>0 && $S['avgRating']>0 && $S['avgRating']<4){
+        $addsug(1,'⭐','Rating kam hai — feedback par kaam karein', 'Average rating '.$S['avgRating'].'⭐ hai. Users ke feedback padhkar sabse common shikayat sabse pehle theek karein.');
+    }
+    $nfb=count(isset($d['feedback'])?$d['feedback']:array());
+    if ($nfb>0){
+        $addsug(2,'💬','Users ke '.$nfb.' feedback padhein', 'Feedback me aksar nayi feature ki demand chhipi hoti hai. "Feedback & System" tab me padhkar sabse zyada maangi cheez banayein.');
+    }
+    if (!empty($S['featAdoption'])){
+        $la=array(); foreach($S['featAdoption'] as $f=>$p){ if($p>0 && $p<15) $la[$f]=$p; }
+        asort($la); $i=0; foreach($la as $f=>$p){ if($i++>=2)break;
+            $addsug(2,'🧰','‘'.ucfirst($f).'’ feature kam use hota', 'Sirf '.$p.'% users ‘'.$f.'’ use karte hain. Ise aur aasan banayein, button saamne layein, ya ek chhota tutorial dein.'); }
+    }
+    if ($S['churnRate']>=30 && $S['users']>=5){
+        $addsug(2,'😴','Chhute hue users wapas laayein', $S['churnRate'].'% users 14+ din se gayab hain. Reminder/notification ya koi nayi feature se wapas laane ka socho.');
+    }
+    if (isset($S['ret7']) && $S['ret7']<30 && $S['users']>=5){
+        $addsug(2,'🔁','Pehle-hafte ka retention kam', 'Week-1 me sirf '.$S['ret7'].'% users wapas aate. Pehli scan ko aur aasan/tez banayein aur ek welcome-guide dein.');
+    }
+    if ($S['oneTime']>0 && $S['oneTime']>($S['powerUsers']*2) && $S['users']>=6){
+        $addsug(2,'1️⃣','Bahut se ek-baar aane wale users', $S['oneTime'].' log sirf ek baar aaye. Pehli baar ka experience (setup + pehli scan) aur simple/aasan banayein.');
+    }
+    if (isset($S['userGrowthPct'])){
+        if ($S['userGrowthPct']<0) $addsug(2,'📉','Naye users ghat rahe', 'Is mahine naye users '.$S['userGrowthPct'].'% (pichhle mahine se kam). Share/referral feature ya thoda marketing push karein.');
+        elseif ($S['userGrowthPct']>=50) $addsug(3,'🚀','Users tezi se badh rahe 🎉', '+'.$S['userGrowthPct'].'% growth! Server/scale aur support ka dhyaan rakhein, momentum banaye rakhein.');
+    }
+    if (!empty($S['features'])){
+        $ff=$S['features']; arsort($ff); $tf=key($ff);
+        if ($tf && $ff[$tf]>0) $addsug(3,'🌟','Sabse popular feature: ‘'.ucfirst($tf).'’', 'Log ‘'.$tf.'’ sabse zyada use karte. Isme aur options/power add karein — yahi aapki taakat hai.');
+    }
+    if (!empty($S['scanners'])){
+        $scn=$S['scanners']; arsort($scn); $ts=key($scn);
+        if ($ts!=='') $addsug(3,'🖨','‘'.$ts.'’ scanner sabse zyada', 'Zyadatar log ‘'.$ts.'’ use karte. Uske liye khaas test/optimize karein taaki us par sab kuch perfect chale.');
+    }
+    if (isset($S['topDpi'][0]) && $S['topDpi'][0]!=='—'){
+        $addsug(3,'🎚','Sabse common setting: '.$S['topDpi'][0].' DPI · '.(isset($S['topColor'][0])?$S['topColor'][0]:'—'), 'Default aur scan-speed isi setting ke liye optimize karein (zyadatar log yahi use karte).');
+    }
+    if (!empty($S['langDist'])){
+        $ld=$S['langDist']; $tot=array_sum($ld);
+        if ($tot>0 && isset($ld['hi']) && $ld['hi']*2>=$tot) $addsug(3,'🇮🇳','Zyadatar users Hindi me', 'Hindi tutorial/help video aur Hindi-friendly features banayein — yahi aapke asli users hain.');
+    }
+    if (!empty($S['modeDist'])){
+        $md=$S['modeDist']; $tot=array_sum($md);
+        if ($tot>0 && isset($md['simple']) && $md['simple']*2>=$tot) $addsug(3,'🟢','Log Simple mode pasand karte', 'Simple mode ko aur polish karein aur naye users ke liye ise default rakhein.');
+    }
+    if (!empty($S['nextMilestone']) && $S['milestoneLeft']<=($S['nextMilestone']*0.1)){
+        $addsug(3,'🎯','Milestone kareeb: '.number_format($S['nextMilestone']), 'Bas '.number_format($S['milestoneLeft']).' scans aur! Paar hote hi app me celebrate/announce karein (Broadcast).');
+    }
+    if (empty($sug)){
+        $addsug(3,'📊','Abhi data thoda kam hai', 'Jaise-jaise zyada users naye version (v136+) par aayenge, yahan aapko "aage kya banayein" ke smart suggestions milne lagenge.');
+    }
+    usort($sug, function($a,$b){ return $a['p']-$b['p']; });
+    $S['suggestions']=$sug;
+
     // health
     $S['fileKB']=file_exists($DATA_FILE)?round(filesize($DATA_FILE)/1024,1):0;
     $S['lastBackup']=intval(isset($d['lastBackup'])?$d['lastBackup']:0);
@@ -708,6 +773,7 @@ if (isset($_GET['admin'])) {
 </header>
 <nav class="tabs no-print" id="tabs">
   <button class="tab" data-p="overview">📊 Overview</button>
+  <button class="tab" data-p="ideas">💡 Suggestions</button>
   <button class="tab" data-p="trends">📈 Trends</button>
   <button class="tab" data-p="growth">🔁 Growth &amp; Analytics</button>
   <button class="tab" data-p="tools">🧰 Tools &amp; Impact</button>
@@ -760,6 +826,14 @@ if (isset($_GET['admin'])) {
   </div>
 
   </div><!-- /overview -->
+
+  <div class="page" data-p="ideas">
+  <div class="sec"><span class="em">💡</span> Suggestions — aage kya banayein / sudhaarein</div>
+  <div class="card" style="background:linear-gradient(120deg,rgba(42,120,214,.06),transparent)"><h3><span class="em">🤖</span> Aapke worldwide data se apne-aap bane sujhav</h3>
+    <div style="color:var(--mut);font-size:11px">Ye suggestions aapke asli users ke istemaal, crashes, feedback aur version ke hisaab se banaye gaye hain — priority ke saath (🔴 zaroori → 🔵 sujhav).</div>
+  </div>
+  <div id="ideas"></div>
+  </div><!-- /ideas -->
 
   <div class="page" data-p="trends">
   <div class="sec"><span class="em">📈</span> Trends</div>
@@ -1225,6 +1299,22 @@ if(window.Chart){
   var mfo=D.multiFeature||{}; var mk=['1','2','3','4+'];
   mkChart(document.getElementById('mfc'),{type:'bar',data:{labels:mk.map(function(k){return k+' tool';}),datasets:[{data:mk.map(function(k){return mfo[k]||0;}),backgroundColor:PAL.violet}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false}},y:{beginAtZero:true,ticks:{precision:0},grid:{color:Chart.defaults.borderColor}}}}});
 }
+
+// ===== SMART SUGGESTIONS (render) =====
+(function(){ var el=document.getElementById('ideas'); if(!el) return; var s=D.suggestions||[];
+  if(!s.length){ el.innerHTML='<div class="card" style="color:var(--mut)">—</div>'; return; }
+  var col={1:{b:'#e34948',bg:'rgba(227,73,72,.07)',l:'🔴 ZAROORI'},2:{b:'#e06a38',bg:'rgba(235,104,52,.07)',l:'🟠 MADHYAM'},3:{b:'#2a78d6',bg:'rgba(42,120,214,.06)',l:'🔵 SUJHAV'}};
+  el.innerHTML=s.map(function(x){ var c=col[x.p]||col[3];
+    return '<div class="card" style="border-left:4px solid '+c.b+';background:'+c.bg+'">'+
+      '<div style="display:flex;align-items:flex-start;gap:11px">'+
+        '<div style="font-size:23px;line-height:1">'+x.ic+'</div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:9px;font-weight:800;letter-spacing:.08em;color:'+c.b+';margin-bottom:2px">'+c.l+'</div>'+
+          '<div style="font-weight:700;font-size:13px">'+esc(x.t)+'</div>'+
+          '<div style="margin-top:6px;color:var(--fg2);font-size:11.5px;line-height:1.55">'+esc(x.d)+'</div>'+
+        '</div>'+
+      '</div></div>';
+  }).join(''); })();
 
 // ===== TABS — alag-alag pages (ek hi scroll nahi) =====
 (function(){
