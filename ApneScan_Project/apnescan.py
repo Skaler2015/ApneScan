@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "128"
+VERSION = "129"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6931,12 +6931,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
         st = self._pstats()
         t = st.get("totals", {})
         day = (st.get("days") or {}).get(datetime.datetime.now().strftime("%Y-%m-%d"), {})
+        # SIRF meri (is PC ki) stats — worldwide sirf admin panel me dikhta hai.
         lines = [
             '<b>📊 ApneScan</b> <span style="color:#94a3b8;font-size:10px;">(click = detail)</span>',
-            self.L("🌍 Duniya bhar ke scans: <b>%s</b>", "🌍 World scans: <b>%s</b>") % self._an_wv("total"),
-            self.L("📅 Aaj (duniya): <b>%s</b>", "📅 Today (world): <b>%s</b>") % self._an_wv("today"),
-            self.L("🟢 Abhi online: <b>%s</b>", "🟢 Online now: <b>%s</b>") % self._an_wv("online"),
-            self.L("📄 Mere aaj: <b>%d</b> pages", "📄 My today: <b>%d</b> pages") % day.get("pages", 0),
+            self.L("📄 Aaj: <b>%d</b> pages · <b>%d</b> PDF", "📄 Today: <b>%d</b> pages · <b>%d</b> PDF")
+            % (day.get("pages", 0), day.get("pdfs", 0)),
+            self.L("🗓 Is hafte: <b>%d</b> pages", "🗓 This week: <b>%d</b> pages") % self._pstats_sum(7),
+            self.L("📚 Kul: <b>%s</b> pages", "📚 Total: <b>%s</b> pages") % "{:,}".format(t.get("pages", 0)),
             self.L("🔥 Streak: <b>%d din</b>", "🔥 Streak: <b>%d days</b>") % self._pstats_streak(),
         ]
         try:
@@ -7223,39 +7224,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         bdup.clicked.connect(lambda: (dlg.accept(), self._find_duplicates()))
         stg.addWidget(bdup); stg.addStretch(1)
 
-        # ================= TAB 5: World =================
-        wl = tab(L("🌍 Duniya", "🌍 World"))
-        wg = grp(wl, L("🌍 Worldwide", "🌍 Worldwide"), rows=["…"])
-        self._an_world_widgets.append(("main", wg._lbl))
-        # aap vs duniya + records
-        yg = grp(wl, L("🏅 Aap aur record", "🏅 You & records"), rows=["…"])
-        self._an_world_widgets.append(("you", yg._lbl))
-        # duniya ka 7-din chart
-        w7w = SparkBars([0] * 7)
-        grp(wl, L("📊 Duniya — 7 din", "📊 World — 7 days"), widget=w7w)
-        self._an_world_widgets.append(("week", w7w))
-        # duniya ka 30-din trend
-        m30 = LineSpark([0] * 30)
-        grp(wl, L("📈 Duniya — 30 din", "📈 World — 30 days"), widget=m30)
-        self._an_world_widgets.append(("month", m30))
-        w24 = SparkBars((self._an_world or {}).get("todayHours") or [0] * 24,
-                        [str(h) if h % 3 == 0 else "" for h in range(24)])
-        grp(wl, L("🌍 Aaj (duniya) — 24 ghante", "🌍 Today (world) — 24 hours"), widget=w24)
-        self._an_world_widgets.append(("hours24", w24))
-        # leaderboard (anonymous — sirf ginti)
-        lbw = HBars([])
-        grp(wl, L("🏆 Top users (naam ke saath)", "🏆 Top users (by name)"), widget=lbw)
-        self._an_world_widgets.append(("top", lbw))
-        cbox = grp(wl, L("🗺 Desh", "🗺 Countries"), widget=HBars([]))
-        vbox = grp(wl, L("🔢 App version", "🔢 App versions"), widget=HBars([]))
-        mbox = grp(wl, L("🖨 Scan-tareeka", "🖨 Scan method"), widget=HBars([]))
-        self._an_world_widgets.append(("countries", cbox.findChild(HBars)))
-        self._an_world_widgets.append(("versions", vbox.findChild(HBars)))
-        self._an_world_widgets.append(("methods", mbox.findChild(HBars)))
-        # version-alert + server-health
-        sg = grp(wl, L("ℹ Jaankari", "ℹ Info"), rows=["…"])
-        self._an_world_widgets.append(("info", sg._lbl))
-        wl.addStretch(1)
+        # (Worldwide/World tab hata diya — wo data sirf admin panel me,
+        #  status.apnesoft.com/admin par login karke dikhta hai. App me sirf
+        #  aapki apni stats.)
 
         # ================= TAB 6: Goals =================
         gl6 = tab(L("🏆 Lakshya", "🏆 Goals"))
@@ -7328,135 +7299,20 @@ class ScannerWindow(QtWidgets.QMainWindow):
         rp.addWidget(drow); _drange()
         rp.addStretch(1)
 
-        # ---- worldwide refresh + banner filler ----
-        def _wfill():
-            w2 = self._an_world or {}
-            for kind, wid in self._an_world_widgets:
-                try:
-                    if kind == "main":
-                        rank = w2.get("rank"); rline = ""
-                        if rank:
-                            rline = L("<br>🏅 Aapki rank: <b>#%s</b> / %s",
-                                      "<br>🏅 Your rank: <b>#%s</b> / %s") % (rank, self._an_wv("users"))
-                        wid.setText(
-                            "🌍 Total: <b>%s</b><br>📅 Aaj: <b>%s</b> · 🟢 Online: <b>%s</b><br>"
-                            "👥 Users: <b>%s</b><br>📥 Import: <b>%s</b> · 🖨 Print: <b>%s</b>%s"
-                            % (self._an_wv("total"), self._an_wv("today"), self._an_wv("online"),
-                               self._an_wv("users"), self._an_wv("imports"), self._an_wv("prints"), rline))
-                    elif kind == "hours24" and wid is not None:
-                        th = w2.get("todayHours") or [0] * 24
-                        wid.set_values(th)
-                    elif kind == "countries" and wid is not None:
-                        wid.set_rows(sorted((w2.get("countries") or {}).items(),
-                                            key=lambda kv: -kv[1])[:8])
-                    elif kind == "versions" and wid is not None:
-                        wid.set_rows(sorted((w2.get("versions") or {}).items(),
-                                            key=lambda kv: -kv[1])[:8])
-                    elif kind == "methods" and wid is not None:
-                        mp = {"escl": "Network", "wia": "USB", "twain": "TWAIN",
-                              "naps2": "NAPS2", "": "—"}
-                        rows = [(mp.get(k, k), v) for k, v in
-                                sorted((w2.get("methods") or {}).items(), key=lambda kv: -kv[1])]
-                        wid.set_rows(rows[:8])
-                    elif kind == "week" and wid is not None:
-                        wid.set_values([int(c) for _d, c in (w2.get("week") or [])])
-                    elif kind == "month" and wid is not None:
-                        wid.set_values([int(c) for _d, c in (w2.get("month") or [])])
-                    elif kind == "top" and wid is not None:
-                        tn = w2.get("topNamed") or []
-                        if tn:
-                            rows = []
-                            for i, t in enumerate(tn[:10]):
-                                nm = (t.get("name") or "").strip()
-                                rows.append((nm if nm and nm != "—" else L("User %d" % (i + 1),
-                                             "User %d" % (i + 1)), int(t.get("scans", 0))))
-                            wid.set_rows(rows)
-                        else:
-                            top = w2.get("top") or []
-                            wid.set_rows([(L("User %d" % (i + 1), "User %d" % (i + 1)), s)
-                                          for i, s in enumerate(top[:10])])
-                    elif kind == "you":
-                        total = int(w2.get("total", 0) or 0)
-                        mine = int(w2.get("myscans", 0) or 0)
-                        tops = int(w2.get("topscans", 0) or 0)
-                        contrib = (100.0 * mine / total) if total else 0
-                        gap = max(0, tops - mine)
-                        wk = [int(c) for _d, c in (w2.get("week") or [])]
-                        wavg = (sum(wk) / len(wk)) if wk else 0
-                        th = w2.get("todayHours") or [0] * 24
-                        bhr = ("%02d:00" % th.index(max(th))) if any(th) else "—"
-                        rows = [
-                            L("🎯 Aapka yogdaan: <b>%.2f%%</b> (%s / %s scans)",
-                              "🎯 Your contribution: <b>%.2f%%</b> (%s / %s scans)")
-                            % (contrib, "{:,}".format(mine), "{:,}".format(total)),
-                            L("🥇 #1 banne ke liye aur: <b>%s</b> scans",
-                              "🥇 To reach #1: <b>%s</b> more scans") % "{:,}".format(gap)
-                            if gap else L("🥇 Aap #1 hain! 🎉", "🥇 You are #1! 🎉"),
-                            L("📊 Duniya ka roz avg (7d): <b>%.0f</b>",
-                              "📊 World daily avg (7d): <b>%.0f</b>") % wavg,
-                            L("🕐 Aaj duniya ka busy ghanta: <b>%s</b>",
-                              "🕐 World's busiest hour today: <b>%s</b>") % bhr,
-                            L("🏔 Sabse bada online (all-time): <b>%s</b> · 📅 best din: <b>%s</b>",
-                              "🏔 Peak online (all-time): <b>%s</b> · 📅 best day: <b>%s</b>")
-                            % (self._an_wv("peakAll"), self._an_wv("bestDay")),
-                            L("🌱 Aaj naye users: <b>%s</b>", "🌱 New users today: <b>%s</b>")
-                            % self._an_wv("newToday"),
-                            L("🌳 Ab tak <b>%s</b> scans = ~<b>%s</b> kagaz ki filing bachi",
-                              "🌳 <b>%s</b> scans so far = ~<b>%s</b> paper filings saved")
-                            % (self._an_wv("total"), self._an_wv("total")),
-                        ]
-                        wid.setText("<br>".join(rows))
-                    elif kind == "info":
-                        vers = w2.get("versions") or {}
-                        tv = sum(vers.values()) or 1
-                        try:
-                            latest = str(max(int(k) for k in vers.keys() if str(k).isdigit()))
-                            oldpct = 100.0 * sum(v for k, v in vers.items() if str(k) != latest) / tv
-                        except Exception:
-                            oldpct = 0
-                        rows = [
-                            L("🔔 <b>%.0f%%</b> log purane version par hain (update sujhao)",
-                              "🔔 <b>%.0f%%</b> on older versions (suggest update)") % oldpct
-                            if oldpct >= 20 else
-                            L("✅ Zyaadatar log latest version par", "✅ Most users on the latest version"),
-                            L("🖥 Server: <b>v%s</b> · aakhri update: %s",
-                              "🖥 Server: <b>v%s</b> · last update: %s")
-                            % (w2.get("srv", "?"), w2.get("time", "—")),
-                            L("🔒 Privacy: sirf ginti — koi document/naam nahi.",
-                              "🔒 Privacy: counts only — no document/name."),
-                        ]
-                        wid.setText("<br>".join(rows))
-                except Exception:
-                    pass
-            self._an_update_banner()
-        _wfill()
+        # (Worldwide data app me nahi dikhta — wo sirf admin panel me.)
+        self._an_update_banner()
 
-        # ---- footer: auto-refresh + refresh + OK ----
+        # ---- footer: sirf OK (worldwide/refresh hata diya) ----
         foot = QtWidgets.QHBoxLayout()
-        chk = QtWidgets.QCheckBox(L("Auto-refresh", "Auto-refresh"))
-        chk.setChecked(bool(self._opts.get("analytics_autorefresh", False)))
-        def _pull():
-            self._an_fetch({"action": "stats", "client": self._get_client_id(),
-                            "v": VERSION, "c": self._an_country(),
-                            "m": self._opts.get("scanner_method", "")},
-                           lambda d: (self._an_apply(d), _wfill()))
-        _timer = QtCore.QTimer(dlg); _timer.setInterval(15000)
-        _timer.timeout.connect(_pull)
-        if chk.isChecked():
-            _timer.start()
-        chk.toggled.connect(lambda on: (self._opts.__setitem__("analytics_autorefresh", bool(on)),
-                                        self._save_opts(), _timer.start() if on else _timer.stop()))
-        bref = QtWidgets.QPushButton(L("🔄 Refresh", "🔄 Refresh"))
-        bref.clicked.connect(_pull)
         bok = QtWidgets.QPushButton("OK"); bok.clicked.connect(dlg.accept)
-        foot.addWidget(chk); foot.addStretch(1); foot.addWidget(bref); foot.addWidget(bok)
+        foot.addStretch(1); foot.addWidget(bok)
         top.addLayout(foot)
         note = QtWidgets.QLabel(L(
-            "<span style='color:#94a3b8;font-size:11px;'>Privacy: server par sirf GINTI — koi document/naam nahi.</span>",
-            "<span style='color:#94a3b8;font-size:11px;'>Privacy: only counts are sent — no document/name.</span>"))
-        note.setTextFormat(QtCore.Qt.RichText); top.addWidget(note)
-        for ms in (1500, 3500):
-            QtCore.QTimer.singleShot(ms, _wfill)
+            "<span style='color:#94a3b8;font-size:11px;'>Ye stats sirf is PC ki hain. "
+            "Worldwide ginti sirf admin panel me (status.apnesoft.com/admin).</span>",
+            "<span style='color:#94a3b8;font-size:11px;'>These stats are for this PC only. "
+            "Worldwide counts are in the admin panel (status.apnesoft.com/admin).</span>"))
+        note.setTextFormat(QtCore.Qt.RichText); note.setWordWrap(True); top.addWidget(note)
         dlg.exec_()
 
     def _an_update_banner(self):
@@ -7476,14 +7332,6 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 msg = L("🎉 Badhai! Aapne <b>%s</b> pages ka aankda paar kar liya!",
                         "🎉 Congrats! You just crossed <b>%s</b> pages!") % "{:,}".format(m)
                 break
-        # worldwide milestone
-        wt = int((self._an_world or {}).get("total", 0) or 0)
-        if not msg and wt:
-            for m in (1000000, 500000, 100000, 50000, 10000):
-                if wt >= m and wt - m < 50:
-                    msg = L("🌍 Duniya bhar me <b>%s</b> scan pure!",
-                            "🌍 <b>%s</b> worldwide scans reached!") % "{:,}".format(m)
-                    break
         # unusual (aaj normal se bahut zyada)
         if not msg and avg >= 3 and today >= 3 * avg:
             msg = L("🚀 Aaj normal se <b>~%.0f×</b> zyada kaam ho raha hai!",
@@ -11506,6 +11354,7 @@ if the toggle is ticked).</p>
         self.foot_online = _foot(None, self.L("Abhi kitne log online (poori duniya)",
                                               "People online now (worldwide)"))
         self.status.addWidget(self.foot_online)
+        self.foot_online.hide()   # worldwide app me nahi — sirf admin panel me
         self.foot_msg = _foot(None, self.L("Aapka apna sandesh", "Your custom message"))
         self.status.addWidget(self.foot_msg)
 
@@ -15295,14 +15144,18 @@ if the toggle is ticked).</p>
         for attr, key in (("foot_folder", "footer_folder"), ("foot_pages", "footer_pages"),
                           ("foot_last", "footer_last"), ("foot_disk", "footer_disk"),
                           ("foot_ver", "footer_version"), ("lbl_busy", "footer_scanner"),
-                          ("foot_clock", "footer_clock"), ("foot_today", "footer_today"),
-                          ("foot_online", "footer_online")):
+                          ("foot_clock", "footer_clock"), ("foot_today", "footer_today")):
             try:
                 getattr(self, attr).setVisible(bool(o.get(key, True) if key in
                         ("footer_folder", "footer_pages", "footer_last", "footer_disk",
                          "footer_version", "footer_scanner") else o.get(key, False)))
             except Exception:
                 pass
+        # worldwide-online footer hamesha chhupa (app me worldwide nahi dikhta)
+        try:
+            self.foot_online.hide()
+        except Exception:
+            pass
         try:
             self.foot_msg.setVisible(bool(str(o.get("footer_msg", "")).strip()))
         except Exception:
