@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "131"
+VERSION = "132"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -4277,6 +4277,10 @@ class ImageEditor(QtWidgets.QDialog):
         x, y = self._d2i(pos); self.base = self.base.convert("RGBA")
         self.base.alpha_composite(sig, (max(0, x - sig.width // 2), max(0, y - sig.height // 2)))
         self.base = self.base.convert("RGB"); self._render()
+        try:
+            self.win._an_event("sign")
+        except Exception:
+            pass
 
     def _add_page_number(self):
         self._bake()
@@ -4817,6 +4821,10 @@ class ImageEditor(QtWidgets.QDialog):
                 pass
             return Image.alpha_composite(im, lay).convert("RGB")
         self._op(fn)
+        try:
+            self.win._an_event("watermark")
+        except Exception:
+            pass
 
     # ================= CROP / LAYOUT =================
     def _split_page(self):
@@ -4843,6 +4851,10 @@ class ImageEditor(QtWidgets.QDialog):
             self.win._add_item_for_path(out, at=self.row + 1)
             self._dirty_any = False
             self._load_current(); self._build_film()
+            try:
+                self.win._an_event("split", pg=1)
+            except Exception:
+                pass
             if callable(self.on_saved):
                 self.on_saved()
         except Exception as e:
@@ -4982,6 +4994,10 @@ class ImageEditor(QtWidgets.QDialog):
             col = (22, 160, 80) if g == "✔" else ((200, 20, 20) if g == "✘" else (240, 170, 20))
             d.text((x, y), g, fill=col, font=self._font(max(30, int(self.text_size * 1.6))))
         self._render()
+        try:
+            self.win._an_event("stamp")
+        except Exception:
+            pass
 
     # ================= MORE menu (reorder / preset / share / password) =================
     def _more_menu(self):
@@ -5052,6 +5068,10 @@ class ImageEditor(QtWidgets.QDialog):
             self.path = self.win.list.item(self.row).data(QtCore.Qt.UserRole)
             self._dirty_any = False
             self._load_current(); self._build_film()
+            try:
+                self.win._an_event("merge", pg=1)
+            except Exception:
+                pass
             if callable(self.on_saved):
                 self.on_saved()
         except Exception as e:
@@ -5099,6 +5119,10 @@ class ImageEditor(QtWidgets.QDialog):
         try:
             paths = [self.win.list.item(i).data(QtCore.Qt.UserRole) for i in range(self.win.list.count())]
             self.win._pages_as_pdf(paths, out, password=pw)
+            try:
+                self.win._an_event("password")
+            except Exception:
+                pass
             self.win.status.showMessage(self.L("🔒 Password PDF ban gaya: ", "🔒 Password PDF saved: ")
                                         + os.path.basename(out), 7000)
         except Exception as e:
@@ -6897,10 +6921,16 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
 
-    def _an_event(self, feat):
-        """Feature usage worldwide bhejo (OCR/compress/share/print/import…)."""
+    def _an_event(self, feat, kb=0, pg=0):
+        """Feature usage worldwide bhejo (OCR/compress/merge/sign/print…).
+        kb = kitne KB bache (compress), pg = kitne pages (merge/print)."""
         try:
-            self._an_report("event", feat=feat)
+            meta = {}
+            if kb:
+                meta["kb"] = int(kb)
+            if pg:
+                meta["pg"] = int(pg)
+            self._an_report("event", feat=feat, meta=(meta or None))
         except Exception:
             pass
 
@@ -7017,13 +7047,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._an_fetch({"action": "stats", "client": self._get_client_id(),
                         "v": VERSION, "c": self._an_country(),
                         "m": self._opts.get("scanner_method", ""),
-                        "u": self._user_name()}, self._an_apply)
+                        "u": self._user_name(),
+                        "lang": self._opts.get("language", ""),
+                        "mode": ("simple" if self._opts.get("simple_mode") else "full")},
+                       self._an_apply)
 
     def _an_report(self, action, n=0, imp=0, prt=0, feat="", meta=None):
         """scan / ping / event (import-print-feature) server ko bhejo + display taaza."""
         p = {"action": action, "client": self._get_client_id(), "v": VERSION,
              "c": self._an_country(), "m": self._opts.get("scanner_method", ""),
-             "u": self._user_name()}
+             "u": self._user_name(),
+             "lang": self._opts.get("language", ""),
+             "mode": ("simple" if self._opts.get("simple_mode") else "full")}
         if n:
             p["n"] = str(n)
         if imp:
@@ -9573,7 +9608,6 @@ class ScannerWindow(QtWidgets.QMainWindow):
             L("%d files compress" % len(pdfs), "Compress %d files" % len(pdfs)))
         if limit is False:
             return
-        self._an_event("compress")
 
         def job():
             results = []
@@ -9601,6 +9635,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
             totsaved = sum(r[3] for r in ok if r[3] > 0)
             if totsaved > 0:
                 self._pstats_bump(saved_bytes=totsaved)
+            # worldwide: compress ki ginti + kitne KB bache
+            self._an_event("compress", kb=max(0, totsaved // 1024))
             try:
                 self._refresh_files_root()     # panel taaza (naye _small.pdf dikhein)
             except Exception:
@@ -12150,6 +12186,7 @@ if the toggle is ticked).</p>
             save_config(self._config)
         except Exception:
             pass
+        self._an_event("phoneimport")
         self._start_import(files, "photo")
 
     def split_id_cards(self):
@@ -12191,6 +12228,7 @@ if the toggle is ticked).</p>
                 pass
         if added:
             self._dirty = True
+            self._an_event("idcard")
             QtWidgets.QMessageBox.information(
                 self, "Done",
                 "Separated %d card(s)/piece(s) and added them.\n(The original page is unchanged — "

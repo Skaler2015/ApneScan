@@ -40,7 +40,7 @@ function default_data() {
         'colors'=>array(),'sizes'=>array(),'crashes'=>array(),'feedback'=>array(),
         'broadcast'=>array('msg'=>'','target'=>'all','id'=>0),'rconfig'=>array(),
         'adminLogins'=>array(),'failLog'=>array(),'lastBackup'=>0,
-        'scanEvents'=>0,'recentScans'=>array()
+        'scanEvents'=>0,'recentScans'=>array(),'metrics'=>array(),'featUsers'=>array()
     );
 }
 // ek file se saaf JSON padho (khaali/tuti -> null)
@@ -159,6 +159,8 @@ function touch_client(&$d, $client, $req, $n, $now, $today) {
     if (!empty($req['m']))  $c['method']  = substr($req['m'], 0, 10);
     if (!empty($req['u']))  $c['name']    = substr($req['u'], 0, 40);
     if (!empty($req['sm'])) $c['model']   = substr($req['sm'], 0, 40);   // scanner model
+    if (!empty($req['lang'])) $c['lang']  = substr($req['lang'], 0, 4);  // hi / en
+    if (!empty($req['mode'])) $c['mode']  = substr($req['mode'], 0, 8);  // simple / full
     if (!isset($c['active'])) $c['active']=array();
     if (!in_array($today, $c['active'])) { $c['active'][]=$today; $c['active']=array_slice($c['active'],-90); }
     if ($n) {
@@ -556,6 +558,37 @@ if (isset($_GET['admin'])) {
     $S['lastHour']=intval(isset($d['hours'][hour_key()])?$d['hours'][hour_key()]:0);
     $l24=0; for($i=0;$i<24;$i++){ $hk=date('Y-m-d-H',$now-$i*3600); $l24+=intval(isset($d['hours'][$hk])?$d['hours'][$hk]:0); } $S['last24h']=$l24;
 
+    // ================= TOOLS & IMPACT =================
+    $totU=max(1,count($d['clients']));
+    $feats=isset($d['features'])?$d['features']:array();
+    // feature adoption %
+    $adopt=array(); foreach((isset($d['featUsers'])?$d['featUsers']:array()) as $f=>$us){ $adopt[$f]=round(100*count($us)/$totU); }
+    $S['featAdoption']=$adopt;
+    // share pie
+    $S['sharePie']=array('whatsapp'=>intval(isset($feats['whatsapp'])?$feats['whatsapp']:0),'email'=>intval(isset($feats['email'])?$feats['email']:0),'print'=>intval($d['prints']));
+    // metrics
+    $met=isset($d['metrics'])?$d['metrics']:array();
+    $S['mbSaved']=round(intval(isset($met['kbSaved'])?$met['kbSaved']:0)/1024,1);
+    $S['mergePages']=intval(isset($met['pg_merge'])?$met['pg_merge']:0);
+    // multi-feature users
+    $mf=array('0'=>0,'1'=>0,'2'=>0,'3'=>0,'4+'=>0);
+    foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $nn=count(isset($c['feats'])?$c['feats']:array()); if($nn<=0)$mf['0']++; elseif($nn==1)$mf['1']++; elseif($nn==2)$mf['2']++; elseif($nn==3)$mf['3']++; else $mf['4+']++; }
+    $S['multiFeature']=$mf;
+    // preferences
+    $langD=array(); $modeD=array();
+    foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $l=trim(isset($c['lang'])?$c['lang']:''); if($l!=='')bump($langD,$l,1); $mo=trim(isset($c['mode'])?$c['mode']:''); if($mo!=='')bump($modeD,$mo,1); }
+    $S['langDist']=$langD; $S['modeDist']=$modeD;
+    // IMPACT
+    $paperSheets=$S['total']+intval($d['imports']);
+    $S['impactDocs']=$S['scanEvents']+intval($d['imports']);
+    $S['impactPaper']=$paperSheets;
+    $S['impactDataMB']=$S['mbSaved'];
+    $S['impactTrees']=round($paperSheets/8333,2);
+    $shr=intval(isset($feats['whatsapp'])?$feats['whatsapp']:0)+intval(isset($feats['email'])?$feats['email']:0);
+    $S['impactShares']=$shr;
+    $S['impactMinutes']=round(($S['total']+intval($d['imports']))*0.5 + $shr*2);
+    $S['impactHours']=round($S['impactMinutes']/60);
+
     // health
     $S['fileKB']=file_exists($DATA_FILE)?round(filesize($DATA_FILE)/1024,1):0;
     $S['lastBackup']=intval(isset($d['lastBackup'])?$d['lastBackup']:0);
@@ -766,6 +799,19 @@ if (isset($_GET['admin'])) {
       <span id="cmpAB"></span>
     </div>
     <div id="cmpOut"></div>
+  </div>
+
+  <div class="sec"><span class="em">🧰</span> Tools &amp; Impact (scan ke alawa)</div>
+  <div class="card"><h3><span class="em">🌍</span> Impact — ApneScan ne duniya me kya kiya</h3>
+    <div class="kpis" id="impact"></div>
+  </div>
+  <div class="grid">
+    <div class="card"><h3><span class="em">🧰</span> Feature usage (kitni baar)</h3><div id="featC"></div></div>
+    <div class="card"><h3><span class="em">📥</span> Feature adoption (% users)</h3><div id="featA"></div></div>
+    <div class="card"><h3><span class="em">📤</span> Share method (WhatsApp / Email / Print)</h3><canvas id="sharePie" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">🧩</span> Multi-feature users (kitne tools use karte)</h3><canvas id="mfc" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">🌐</span> Bhasha pasand (Hindi / English)</h3><div id="langP"></div></div>
+    <div class="card"><h3><span class="em">🎛</span> Mode pasand (Simple / Full)</h3><div id="modeP"></div></div>
   </div>
 
   <div class="sec"><span class="em">👤</span> Users</div>
@@ -1115,6 +1161,33 @@ if(window.Chart){
   typeEl.addEventListener('change',build); build();
 })();
 
+// ================= TOOLS & IMPACT (render) =================
+var FEATLBL={ocr:'OCR (text)',compress:'Compress',merge:'Merge',split:'Split page',sign:'Signature',stamp:'Stamp',password:'Password',watermark:'Watermark',whatsapp:'WhatsApp share',email:'Email share',print:'Print',import:'Import',phoneimport:'Phone photo',idcard:'ID-card crop'};
+function flbl(k){ return FEATLBL[k]||k; }
+// impact tiles
+document.getElementById('impact').innerHTML=
+  kpi('📑',fmt(D.impactDocs),'Documents bane')+
+  kpi('📄',fmt(D.impactPaper),'Paper digitize','g')+
+  kpi('💾',(D.impactDataMB>=1024?(D.impactDataMB/1024).toFixed(1)+' GB':D.impactDataMB+' MB'),'Data bachaya','p')+
+  kpi('🌳',D.impactTrees,'Ped bachaye (~)','g')+
+  kpi('⏱',fmt(D.impactHours)+'h','Samay bachaya','o')+
+  kpi('🖨',fmt(D.impactShares),'Print bachaye (digital)','o');
+// feature counts + adoption
+bars('featC',obj2rows(D.features),false,flbl);
+(function(){ var a=D.featAdoption||{}; var rows=Object.keys(a).map(function(k){return [k,a[k]];}).sort(function(x,y){return y[1]-x[1];});
+  var el=document.getElementById('featA'); if(!rows.length){el.innerHTML='<div style="color:var(--mut);font-size:12px">— naye app version (v132) se aayega —</div>';return;}
+  el.innerHTML='<table>'+rows.map(function(r){return '<tr><td style="width:120px">'+flbl(r[0])+'</td><td><div class="bar" style="width:'+Math.max(3,r[1])+'%;background:'+PAL.aqua+'"></div></td><td style="width:44px;text-align:right">'+r[1]+'%</td></tr>';}).join('')+'</table>'; })();
+// language + mode prefs
+function prefBars(id,obj,map){ var el=document.getElementById(id); var rows=obj2rows(obj); if(!rows.length){el.innerHTML='<div style="color:var(--mut);font-size:12px">— v132 se aayega —</div>';return;} var t=0; rows.forEach(function(r){t+=r[1];}); el.innerHTML='<table>'+rows.map(function(r){var l=map[r[0]]||r[0]; return '<tr><td style="width:110px">'+l+'</td><td><div class="bar" style="width:'+Math.max(3,100*r[1]/t)+'%"></div></td><td style="width:70px;text-align:right"><b>'+r[1]+'</b> ('+Math.round(100*r[1]/t)+'%)</td></tr>';}).join('')+'</table>'; }
+prefBars('langP',D.langDist,{hi:'🇮🇳 Hindi',en:'🇬🇧 English'});
+prefBars('modeP',D.modeDist,{simple:'🟢 Simple mode',full:'🔵 Full mode'});
+if(window.Chart){
+  var sp=D.sharePie||{};
+  mkChart(document.getElementById('sharePie'),{type:'doughnut',data:{labels:['WhatsApp','Email','Print'],datasets:[{data:[sp.whatsapp,sp.email,sp.print],backgroundColor:[PAL.green,PAL.blue,PAL.orange],borderWidth:2,borderColor:'var(--card)'}]},options:{plugins:{legend:{position:'right',labels:{boxWidth:12}}}}});
+  var mfo=D.multiFeature||{}; var mk=['1','2','3','4+'];
+  mkChart(document.getElementById('mfc'),{type:'bar',data:{labels:mk.map(function(k){return k+' tool';}),datasets:[{data:mk.map(function(k){return mfo[k]||0;}),backgroundColor:PAL.violet}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false}},y:{beginAtZero:true,ticks:{precision:0},grid:{color:Chart.defaults.borderColor}}}}});
+}
+
 // auto-refresh 30s (agar koi modal/form khula nahi)
 setInterval(function(){ if(document.getElementById('umodal').style.display==='flex')return; if(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))return; location.reload(); },30000);
 </script>
@@ -1155,7 +1228,28 @@ if ($action === 'scan') {
     update_peak($d, $now, $today);
 } else if ($action === 'event') {
     touch_client($d, $client, $_REQUEST, 0, $now, $today);
-    if (!empty($_REQUEST['feat'])) bump($d['features'], substr($_REQUEST['feat'],0,20), 1);
+    if (!empty($_REQUEST['feat'])) {
+        $feat = substr($_REQUEST['feat'], 0, 20);
+        bump($d['features'], $feat, 1);
+        // per-feature UNIQUE users (adoption ke liye)
+        if (!isset($d['featUsers'])) $d['featUsers'] = array();
+        if (!isset($d['featUsers'][$feat])) $d['featUsers'][$feat] = array();
+        if ($client !== '' && !in_array($client, $d['featUsers'][$feat])) {
+            $d['featUsers'][$feat][] = $client;
+            $d['featUsers'][$feat] = array_slice($d['featUsers'][$feat], -5000);
+        }
+        // per-client feature set (multi-feature analysis)
+        if ($client !== '' && isset($d['clients'][$client])) {
+            if (!isset($d['clients'][$client]['feats'])) $d['clients'][$client]['feats'] = array();
+            $d['clients'][$client]['feats'][$feat] = intval(isset($d['clients'][$client]['feats'][$feat])?$d['clients'][$client]['feats'][$feat]:0) + 1;
+        }
+    }
+    // numeric metrics
+    if (!isset($d['metrics'])) $d['metrics'] = array();
+    $kb = max(0, min(50000000, intval(isset($_REQUEST['kb'])?$_REQUEST['kb']:0)));
+    $pg = max(0, min(5000, intval(isset($_REQUEST['pg'])?$_REQUEST['pg']:0)));
+    if ($kb) $d['metrics']['kbSaved'] = intval(isset($d['metrics']['kbSaved'])?$d['metrics']['kbSaved']:0) + $kb;
+    if ($pg && !empty($_REQUEST['feat'])) { $fk = 'pg_'.substr($_REQUEST['feat'],0,16); $d['metrics'][$fk] = intval(isset($d['metrics'][$fk])?$d['metrics'][$fk]:0) + $pg; }
 } else if ($action === 'crash') {
     $d['crashes'][] = array('t'=>$now,'v'=>substr(isset($_REQUEST['v'])?$_REQUEST['v']:'',0,10),
         'err'=>substr(isset($_REQUEST['err'])?$_REQUEST['err']:'',0,200),'client'=>substr($client,0,40));
