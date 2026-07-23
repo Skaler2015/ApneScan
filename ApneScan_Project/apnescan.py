@@ -172,13 +172,33 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "114"
+VERSION = "115"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
 WEBSITE_URL = "https://apnescan.apnesoft.com"
 # ApneSoftware — banane wale ki doosri website (footer ad me dikhti hai)
 APNESOFT_URL = "https://apnesoftware.com"
+# ApneSoftware.com ke free online tools (browser me hi chalte hain, no signup).
+# Ye built-in list hamesha chalti hai; internet ho to nayi list bhi aa sakti hai.
+APNESOFT_TOOLS = [
+    {"id": "pdf-info", "icon": "📄", "name": "PDF Info",
+     "hi": "PDF ki poori jaankari — pages, size, version, encryption",
+     "en": "Full PDF metadata & properties analyzer",
+     "url": APNESOFT_URL + "/tools/pdf-info.html"},
+    {"id": "pdf-metadata", "icon": "🏷", "name": "PDF Metadata Editor",
+     "hi": "PDF ka title / author / keywords dekho, badlo ya hatao",
+     "en": "View, edit & remove PDF properties",
+     "url": APNESOFT_URL + "/tools/pdf-metadata-editor.html"},
+    {"id": "pdf-links", "icon": "🔗", "name": "PDF Hyperlink Extractor",
+     "hi": "PDF ke saare links ek list me nikaalo",
+     "en": "Extract all links from a PDF",
+     "url": APNESOFT_URL + "/tools/pdf-hyperlink-extractor.html"},
+    {"id": "more", "icon": "🧰", "name": "More tools",
+     "hi": "ApneSoftware.com par aur bhi free online tools",
+     "en": "More free online tools at ApneSoftware.com",
+     "url": APNESOFT_URL},
+]
 GITHUB_URL = "https://github.com/Skaler2015/ApneScan"
 SHARE_TEXT = ("ApneScan — bilkul FREE document scanner software (Windows). "
               "Scan to PDF, Hindi+English OCR, PDF compress (200KB), WhatsApp share. "
@@ -7126,6 +7146,349 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if hasattr(self, "ad_footer"):
             self.ad_footer.setVisible(bool(on))
 
+    # ================= ApneSoftware.com online tools =================
+    def _tools_list(self):
+        """Built-in tools + (agar mila ho to) site se laayi nayi list."""
+        extra = self._config.get("apnesoft_tools_cache") or []
+        seen = set(); out = []
+        for t in (list(extra) + list(APNESOFT_TOOLS)):
+            tid = t.get("id") or t.get("url")
+            if not tid or tid in seen:
+                continue
+            if not t.get("url"):
+                continue
+            seen.add(tid); out.append(t)
+        return out
+
+    def _tool_desc(self, t):
+        return t.get(self._lang) or t.get("en") or t.get("hi") or ""
+
+    def _tool_favs(self):
+        return self._opts.get("tool_favs", []) or []
+
+    def _toggle_tool_fav(self, tid):
+        favs = list(self._tool_favs())
+        if tid in favs:
+            favs.remove(tid)
+        else:
+            favs.append(tid)
+        self._opts["tool_favs"] = favs
+        self._save_opts()
+
+    def _show_tools_menu(self):
+        """Toolbar '🧰 Tools' button ka menu — favourites, saare online tools,
+        aur App ke andar wale PDF tools (Info / Metadata / Anonymize)."""
+        L = self.L
+        m = QtWidgets.QMenu(self)
+        m.setToolTipsVisible(True)
+        m.addAction("🧰 " + L("Saare tools (catalog)…", "All tools (catalog)…"),
+                    self._tools_catalog_dialog)
+        m.addSeparator()
+        favs = self._tool_favs()
+        tools = self._tools_list()
+        if favs:
+            fav_tools = [t for t in tools if t.get("id") in favs]
+            if fav_tools:
+                hdr = m.addAction("⭐ " + L("Pasandeeda", "Favourites")); hdr.setEnabled(False)
+                for t in fav_tools:
+                    a = m.addAction("%s %s" % (t.get("icon", "•"), t["name"]),
+                                    lambda u=t["url"]: self._open_web(u))
+                    a.setToolTip(self._tool_desc(t))
+                m.addSeparator()
+        hdr2 = m.addAction("🌐 " + L("Online tools (browser me)", "Online tools (in browser)"))
+        hdr2.setEnabled(False)
+        for t in tools:
+            a = m.addAction("%s %s" % (t.get("icon", "•"), t["name"]),
+                            lambda u=t["url"]: self._open_web(u))
+            a.setToolTip(self._tool_desc(t))
+        m.addSeparator()
+        hdr3 = m.addAction("💻 " + L("Is App me hi (offline)", "Inside this app (offline)"))
+        hdr3.setEnabled(False)
+        m.addAction("📄 " + L("PDF Info (jaankari)", "PDF Info"), self._pdf_info_dialog)
+        m.addAction("🏷 " + L("PDF Metadata badlo", "Edit PDF metadata"), self._pdf_edit_metadata)
+        m.addAction("🧽 " + L("Metadata hatao (anonymize)", "Remove metadata (anonymize)"),
+                    self._pdf_anonymize)
+        m.addSeparator()
+        m.addAction("🔗 " + L("ApneSoftware.com kholo", "Open ApneSoftware.com"),
+                    lambda: self._open_web(APNESOFT_URL))
+        btn = self._tb_buttons.get("tools")
+        if btn is not None:
+            m.exec_(btn.mapToGlobal(QtCore.QPoint(0, btn.height())))
+        else:
+            m.exec_(QtGui.QCursor.pos())
+
+    def _tools_catalog_dialog(self):
+        """Sundar catalog — har tool ka card: naam, description, Open, Copy link,
+        QR aur ⭐ favourite."""
+        L = self.L
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(L("🧰 ApneSoftware — Free Online Tools",
+                             "🧰 ApneSoftware — Free Online Tools"))
+        dlg.resize(560, 560)
+        v = QtWidgets.QVBoxLayout(dlg)
+        top = QtWidgets.QLabel(L(
+            "<b>ApneSoftware.com</b> ke free online tools — sab browser me hi, "
+            "bina upload, bina signup. Tool par click karke apni PDF wahan daal dein.",
+            "<b>ApneSoftware.com</b> free online tools — all in your browser, no "
+            "upload, no signup. Open a tool, then drop your PDF there."))
+        top.setWordWrap(True); top.setStyleSheet("color:#475569;font-size:12px;")
+        v.addWidget(top)
+        scroll = QtWidgets.QScrollArea(); scroll.setWidgetResizable(True)
+        inner = QtWidgets.QWidget(); iv = QtWidgets.QVBoxLayout(inner)
+        iv.setSpacing(8)
+
+        def make_card(t):
+            card = QtWidgets.QFrame(); card.setObjectName("toolcard")
+            card.setStyleSheet(
+                "#toolcard{border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;}"
+                "#toolcard:hover{border-color:#0f766e;}")
+            cl = QtWidgets.QHBoxLayout(card); cl.setContentsMargins(12, 10, 12, 10)
+            ic = QtWidgets.QLabel(t.get("icon", "•")); ic.setStyleSheet("font-size:22px;")
+            cl.addWidget(ic)
+            txt = QtWidgets.QVBoxLayout(); txt.setSpacing(1)
+            nm = QtWidgets.QLabel("<b>%s</b>" % t["name"]); nm.setStyleSheet("font-size:13px;")
+            ds = QtWidgets.QLabel(self._tool_desc(t)); ds.setWordWrap(True)
+            ds.setStyleSheet("color:#64748b;font-size:11px;")
+            txt.addWidget(nm); txt.addWidget(ds)
+            cl.addLayout(txt, 1)
+            fav = QtWidgets.QToolButton(); fav.setAutoRaise(True)
+            fav.setCursor(QtCore.Qt.PointingHandCursor)
+            fav.setToolTip(L("Pasandeeda banao/hatao", "Add/remove favourite"))
+            fav.setText("⭐" if t.get("id") in self._tool_favs() else "☆")
+            def _tf(_c=False, tid=t.get("id"), b=fav):
+                self._toggle_tool_fav(tid)
+                b.setText("⭐" if tid in self._tool_favs() else "☆")
+            fav.clicked.connect(_tf)
+            cl.addWidget(fav)
+            cp = QtWidgets.QToolButton(); cp.setText("🔗"); cp.setAutoRaise(True)
+            cp.setCursor(QtCore.Qt.PointingHandCursor)
+            cp.setToolTip(L("Link copy karo", "Copy link"))
+            cp.clicked.connect(lambda _c=False, u=t["url"]: (
+                QtWidgets.QApplication.clipboard().setText(u),
+                self.status.showMessage(L("📋 Link copy ho gaya", "📋 Link copied"), 3000)))
+            cl.addWidget(cp)
+            qr = QtWidgets.QToolButton(); qr.setText("🔳"); qr.setAutoRaise(True)
+            qr.setCursor(QtCore.Qt.PointingHandCursor)
+            qr.setToolTip(L("QR code (mobile me kholo)", "QR code (open on mobile)"))
+            qr.clicked.connect(lambda _c=False, u=t["url"], n=t["name"]: self._show_tool_qr(u, n))
+            cl.addWidget(qr)
+            op = QtWidgets.QPushButton(L("Open  →", "Open  →")); op.setObjectName("primary")
+            op.setCursor(QtCore.Qt.PointingHandCursor)
+            op.clicked.connect(lambda _c=False, u=t["url"]: self._open_web(u))
+            cl.addWidget(op)
+            return card
+
+        for t in self._tools_list():
+            iv.addWidget(make_card(t))
+        iv.addStretch(1)
+        scroll.setWidget(inner); v.addWidget(scroll, 1)
+        foot = QtWidgets.QHBoxLayout()
+        foot.addWidget(QtWidgets.QLabel(L(
+            "<span style='color:#94a3b8;font-size:11px'>Tip: yahi kaam App me bhi ho "
+            "sakta hai → 🧰 Tools → 'Is App me hi'.</span>",
+            "<span style='color:#94a3b8;font-size:11px'>Tip: you can also do this in the "
+            "app → 🧰 Tools → 'Inside this app'.</span>")))
+        foot.addStretch(1)
+        bx = QtWidgets.QPushButton(L("Band karo", "Close")); bx.clicked.connect(dlg.accept)
+        foot.addWidget(bx); v.addLayout(foot)
+        dlg.exec_()
+
+    def _show_tool_qr(self, url, name=""):
+        try:
+            import qrcode
+            img = qrcode.make(url)
+            fd, p = tempfile.mkstemp(suffix=".png", dir=self._tmpdir); os.close(fd)
+            img.save(p)
+        except Exception as e:
+            self._warn(self.L("QR nahi ban paya: ", "Could not make QR: ") + str(e)); return
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle((name or "QR") + " — QR")
+        v = QtWidgets.QVBoxLayout(dlg)
+        lab = QtWidgets.QLabel(); lab.setPixmap(QtGui.QPixmap(p).scaled(
+            300, 300, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+        lab.setAlignment(QtCore.Qt.AlignCenter); v.addWidget(lab)
+        cap = QtWidgets.QLabel(self.L("Mobile ke camera se scan karke kholo",
+                                      "Scan with your phone camera to open"))
+        cap.setAlignment(QtCore.Qt.AlignCenter); cap.setStyleSheet("color:#64748b;")
+        v.addWidget(cap)
+        bx = QtWidgets.QPushButton(self.L("Band karo", "Close")); bx.clicked.connect(dlg.accept)
+        v.addWidget(bx)
+        dlg.exec_()
+
+    # ---- App ke andar wale PDF tools (ApneSoftware tools jaise, offline) ----
+    def _choose_pdf(self, title=None):
+        """PDF chuno — pehle Meri Files me chuni PDF, warna file dialog."""
+        try:
+            sel = self._selected_library_files()
+            for s in sel:
+                if s and s.lower().endswith(".pdf"):
+                    return s
+        except Exception:
+            pass
+        try:
+            start = self._files_root()
+        except Exception:
+            start = os.path.expanduser("~")
+        p, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, title or self.L("PDF chuno", "Choose a PDF"), start, "PDF (*.pdf)")
+        return p or None
+
+    def _pdf_info_dialog(self):
+        path = self._choose_pdf(self.L("Jiski jaankari chahiye wo PDF chuno",
+                                       "Choose a PDF to inspect"))
+        if path:
+            self._pdf_info_for(path)
+
+    def _pdf_info_for(self, path):
+        try:
+            reader = PdfReader(path)
+            enc = reader.is_encrypted
+            npages = len(reader.pages)
+            md = reader.metadata or {}
+            def g(k):
+                try:
+                    return (md.get(k) or "") if hasattr(md, "get") else ""
+                except Exception:
+                    return ""
+            try:
+                sz = os.path.getsize(path) / 1024.0
+                szt = ("%.0f KB" % sz) if sz < 1024 else ("%.1f MB" % (sz / 1024.0))
+            except Exception:
+                szt = "-"
+            dim = ""
+            try:
+                b = reader.pages[0].mediabox
+                dim = "%.0f × %.0f pt" % (float(b.width), float(b.height))
+            except Exception:
+                pass
+            L = self.L
+            lines = [
+                "<b>%s</b>" % os.path.basename(path),
+                "📄 %s: %d" % (L("Pages", "Pages"), npages),
+                "💾 %s: %s" % (L("Size", "Size"), szt),
+                "📐 %s: %s" % (L("Pehla page", "First page"), dim or "-"),
+                "🔒 %s: %s" % (L("Encrypted", "Encrypted"),
+                               (L("Haan", "Yes") if enc else L("Nahi", "No"))),
+                "──────────",
+                "🏷 Title: %s" % (g("/Title") or "—"),
+                "✍ Author: %s" % (g("/Author") or "—"),
+                "📝 Subject: %s" % (g("/Subject") or "—"),
+                "🔑 Keywords: %s" % (g("/Keywords") or "—"),
+                "🛠 Creator: %s" % (g("/Creator") or "—"),
+                "⚙ Producer: %s" % (g("/Producer") or "—"),
+            ]
+            box = QtWidgets.QMessageBox(self)
+            box.setWindowTitle(L("PDF Info", "PDF Info"))
+            box.setTextFormat(QtCore.Qt.RichText)
+            box.setText("<br>".join(lines))
+            box.setStandardButtons(QtWidgets.QMessageBox.Ok)
+            box.exec_()
+        except Exception as e:
+            self._warn(self.L("PDF padhne me dikkat: ", "Could not read PDF: ") + str(e))
+
+    def _pdf_edit_metadata(self):
+        path = self._choose_pdf(self.L("Jiski metadata badalni hai wo PDF chuno",
+                                       "Choose a PDF to edit metadata"))
+        if path:
+            self._pdf_edit_metadata_for(path)
+
+    def _pdf_edit_metadata_for(self, path):
+        try:
+            reader = PdfReader(path)
+            md = reader.metadata or {}
+            def g(k):
+                try:
+                    return str(md.get(k) or "") if hasattr(md, "get") else ""
+                except Exception:
+                    return ""
+        except Exception as e:
+            self._warn(self.L("PDF padhne me dikkat: ", "Could not read PDF: ") + str(e)); return
+        L = self.L
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(L("PDF Metadata badlo", "Edit PDF metadata"))
+        dlg.resize(460, 300)
+        form = QtWidgets.QFormLayout(dlg)
+        e_title = QtWidgets.QLineEdit(g("/Title"))
+        e_author = QtWidgets.QLineEdit(g("/Author"))
+        e_subject = QtWidgets.QLineEdit(g("/Subject"))
+        e_keywords = QtWidgets.QLineEdit(g("/Keywords"))
+        form.addRow("🏷 Title", e_title)
+        form.addRow("✍ Author", e_author)
+        form.addRow("📝 Subject", e_subject)
+        form.addRow("🔑 Keywords", e_keywords)
+        bb = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        form.addRow(bb)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        meta = {"/Title": e_title.text(), "/Author": e_author.text(),
+                "/Subject": e_subject.text(), "/Keywords": e_keywords.text()}
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, L("Kahan save karein", "Save as"),
+            os.path.splitext(path)[0] + "_meta.pdf", "PDF (*.pdf)")
+        if not out:
+            return
+        try:
+            writer = PdfWriter()
+            for pg in reader.pages:
+                writer.add_page(pg)
+            writer.add_metadata(meta)
+            with open(out, "wb") as f:
+                writer.write(f)
+            self.status.showMessage(L("🏷 Metadata save ho gayi: ", "🏷 Metadata saved: ")
+                                    + os.path.basename(out), 6000)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _pdf_anonymize(self):
+        path = self._choose_pdf(self.L("Jiski metadata hatani hai wo PDF chuno",
+                                       "Choose a PDF to anonymize"))
+        if path:
+            self._pdf_anonymize_for(path)
+
+    def _pdf_anonymize_for(self, path):
+        L = self.L
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, L("Saaf PDF kahan save karein", "Save clean PDF as"),
+            os.path.splitext(path)[0] + "_clean.pdf", "PDF (*.pdf)")
+        if not out:
+            return
+        try:
+            reader = PdfReader(path)
+            writer = PdfWriter()
+            for pg in reader.pages:      # naya writer -> purani /Info metadata copy NAHI hoti
+                writer.add_page(pg)
+            writer.add_metadata({"/Producer": "ApneScan"})
+            with open(out, "wb") as f:
+                writer.write(f)
+            self.status.showMessage(L("🧽 Metadata hata di — saaf PDF: ",
+                                      "🧽 Metadata removed — clean PDF: ")
+                                    + os.path.basename(out), 6000)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _fetch_apnesoft_tools(self):
+        """Best-effort: site se nayi tools-list laao (agar ho to). Fail ho to
+        chhoti si baat — built-in list waise hi chalti rahegi."""
+        try:
+            import urllib.request as _u, json as _j
+            req = _u.Request(APNESOFT_URL + "/tools/tools.json",
+                             headers={"User-Agent": "ApneScan/%s" % VERSION})
+            data = _u.urlopen(req, timeout=6).read().decode("utf-8", "ignore")
+            arr = _j.loads(data)
+            clean = []
+            for t in arr if isinstance(arr, list) else []:
+                if isinstance(t, dict) and t.get("url") and t.get("name"):
+                    clean.append({"id": t.get("id") or t["url"], "icon": t.get("icon", "🧰"),
+                                  "name": t["name"], "en": t.get("en", ""), "hi": t.get("hi", ""),
+                                  "url": t["url"]})
+            if clean:
+                self._config["apnesoft_tools_cache"] = clean[:40]
+                save_config(self._config)
+        except Exception:
+            pass
+
     # ================= Pages Panel: control-bar + marks =================
     def _build_pages_bar(self):
         """Pages Panel ke upar ki chhoti control-patti: thumbnail size slider,
@@ -9179,6 +9542,9 @@ if the toggle is ticked).</p>
         tbtn("delete", tr("delete", self._lang), self.delete_page, advanced=True, key="delete")
         tbtn("clear", tr("clear", self._lang), self.clear_all, advanced=True, key="clear")
         tb.addStretch(1)
+        tbtn_e("🧰", "Tools", self._show_tools_menu, "tools",
+               tip=self.L("ApneSoftware.com ke free online tools + PDF Info / Metadata",
+                          "ApneSoftware.com free online tools + PDF Info / Metadata"))
         tbtn("guide", self.L("Guide", "Guide"), self.show_guide, key="guide")
         tbtn("language", "Language", self.choose_language, key="language")
         tbtn("about", tr("about", self._lang), self.show_about, key="about")
@@ -9540,6 +9906,7 @@ if the toggle is ticked).</p>
         _dbtn("📥", "Import", self.import_images)
         _dbtn("📷", "Photo→PDF", self.import_photos)
         _dbtn("🕘", "History", self.show_history)
+        _dbtn("🧰", "Tools", self._tools_catalog_dialog)
         _dr.addStretch(1)
         _dv.addLayout(_dr)
         self._dash_recent = QtWidgets.QLabel("")
@@ -10029,6 +10396,9 @@ if the toggle is ticked).</p>
         # NAYA analytics: startup par + har 2 min me worldwide numbers laao,
         # aur online-ping bhejo
         QtCore.QTimer.singleShot(1500, self._an_refresh)
+        # ApneSoftware ke tools ki nayi list (agar ho) background me le aao
+        QtCore.QTimer.singleShot(5000, lambda: self._run_bg_quiet(
+            self._fetch_apnesoft_tools, lambda _r: None))
         QtCore.QTimer.singleShot(2500, lambda: self._an_report("ping"))
         self._an_timer = QtCore.QTimer(self)
         self._an_timer.setInterval(120000)
@@ -11808,6 +12178,24 @@ if the toggle is ticked).</p>
                     menu.addAction("🗜 Compress…",
                                    lambda: self.compress_pdf_tool(path))
                     menu.addAction("🏷 Add tag…", lambda: self.tag_pdf(path))
+                    # ---- ApneSoftware online tools + App ke andar PDF tools ----
+                    tm = menu.addMenu("🧰 " + self.L("Tools (ApneSoftware)", "Tools (ApneSoftware)"))
+                    tm.addAction("📄 " + self.L("PDF Info (App me)", "PDF Info (in app)"),
+                                 lambda p=path: self._pdf_info_for(p))
+                    tm.addAction("🏷 " + self.L("Metadata badlo (App me)", "Edit metadata (in app)"),
+                                 lambda p=path: self._pdf_edit_metadata_for(p))
+                    tm.addAction("🧽 " + self.L("Metadata hatao (App me)", "Anonymize (in app)"),
+                                 lambda p=path: self._pdf_anonymize_for(p))
+                    tm.addSeparator()
+                    _hh = tm.addAction("🌐 " + self.L("Online (browser me)", "Online (in browser)"))
+                    _hh.setEnabled(False)
+                    for _t in self._tools_list():
+                        tm.addAction("%s %s" % (_t.get("icon", "•"), _t["name"]),
+                                     lambda u=_t["url"]: self._open_web(u))
+                    tm.addSeparator()
+                    tm.addAction("📂 " + self.L("Folder kholo (file drag karne ke liye)",
+                                                "Open folder (to drag the file)"),
+                                 lambda p=path: self._open_path(os.path.dirname(p)))
                 menu.addAction(self.L("🖨 Print", "🖨 Print"), lambda: self._print_library_file(path))
                 menu.addSeparator()
                 menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
