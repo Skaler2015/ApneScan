@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "139"
+VERSION = "140"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5777,6 +5777,118 @@ class UrlListWidget(QtWidgets.QListWidget):
         return md
 
 
+# ===================== PHONE COMPANION (feature 9) =====================
+# PC par ek chhota local web-server chalta hai. Phone (same WiFi) QR scan
+# karke ek page kholta hai, camera se photo kheenchta hai — photo seedhe PC
+# par aa jaati hai (koi internet/cloud nahi, sab local WiFi par).
+_PHONE_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ApneScan — Phone Scan</title><style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;background:#0f172a;color:#e2e8f0;text-align:center;padding:22px}
+h2{margin:6px 0}.s{color:#94a3b8;font-size:14px;margin-bottom:22px}
+.btn{display:inline-block;background:linear-gradient(135deg,#2a78d6,#178a8a);color:#fff;font-size:20px;font-weight:800;padding:22px 30px;border-radius:18px;box-shadow:0 10px 26px rgba(42,120,214,.4);cursor:pointer}
+.btn:active{transform:scale(.98)}#log{margin-top:22px;text-align:left;max-width:420px;margin-left:auto;margin-right:auto}
+#log div{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:9px 12px;margin-bottom:7px;font-size:14px}
+.t{color:#64748b;font-size:12px;margin-top:26px}
+</style></head><body>
+<h2>\U0001F4F7 ApneScan — Phone Scan</h2>
+<div class="s">Photo kheencho — PC par apne aap aa jaayegi</div>
+<label class="btn">\U0001F4F7 Photo lo / chuno
+<input type="file" accept="image/*" capture="environment" id="f" multiple style="display:none"></label>
+<div id="log"></div>
+<div class="t">Tip: ek se zyada photo bhi bhej sakte ho. PC aur phone ek hi WiFi par hone chahiye.</div>
+<script>
+var TOKEN="__TOKEN__";
+document.getElementById('f').addEventListener('change',function(e){
+ var fs=e.target.files; for(var i=0;i<fs.length;i++){send(fs[i]);} e.target.value='';});
+function send(file){var d=document.createElement('div');d.textContent='⏳ Bhej rahe... '+(file.name||'photo');
+ document.getElementById('log').insertBefore(d,document.getElementById('log').firstChild);
+ fetch('/up?t='+TOKEN,{method:'POST',body:file}).then(function(r){d.textContent=(r.ok?'✅ ':'❌ ')+(file.name||'photo');})
+ .catch(function(){d.textContent='❌ '+(file.name||'photo');});}
+</script></body></html>"""
+
+
+class PhoneServer(QtCore.QObject):
+    """Local web-server (background thread) — phone se photo PC par laata hai."""
+    photo = QtCore.pyqtSignal(str)          # aayi hui photo ka temp path
+
+    def __init__(self, tmpdir, parent=None):
+        super().__init__(parent)
+        self._tmpdir = tmpdir
+        self._httpd = None
+        self._thread = None
+        import secrets
+        self.token = secrets.token_urlsafe(8)
+
+    def lan_ip(self):
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        ip = "127.0.0.1"
+        try:
+            s.connect(("8.8.8.8", 80)); ip = s.getsockname()[0]
+        except Exception:
+            pass
+        finally:
+            try: s.close()
+            except Exception: pass
+        return ip
+
+    def start(self):
+        import http.server, socketserver, threading, tempfile, os
+        from urllib.parse import urlparse, parse_qs
+        outer = self
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                q = parse_qs(urlparse(self.path).query)
+                if q.get("t", [""])[0] != outer.token:
+                    self.send_response(403); self.end_headers()
+                    self.wfile.write(b"bad token"); return
+                html = _PHONE_PAGE.replace("__TOKEN__", outer.token).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(html)))
+                self.end_headers(); self.wfile.write(html)
+
+            def do_POST(self):
+                q = parse_qs(urlparse(self.path).query)
+                if q.get("t", [""])[0] != outer.token:
+                    self.send_response(403); self.end_headers(); return
+                length = int(self.headers.get("Content-Length") or 0)
+                if length <= 0 or length > 40 * 1024 * 1024:
+                    self.send_response(400); self.end_headers(); return
+                data = self.rfile.read(length)
+                try:
+                    fd, tmp = tempfile.mkstemp(suffix=".jpg", dir=outer._tmpdir); os.close(fd)
+                    with open(tmp, "wb") as fh:
+                        fh.write(data)
+                    outer.photo.emit(tmp)          # main thread me queued
+                    self.send_response(200)
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.end_headers(); self.wfile.write(b"ok")
+                except Exception:
+                    self.send_response(500); self.end_headers()
+
+        httpd = socketserver.ThreadingTCPServer(("0.0.0.0", 0), H)
+        httpd.daemon_threads = True
+        self._httpd = httpd
+        port = httpd.server_address[1]
+        self._thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        self._thread.start()
+        return self.lan_ip(), port
+
+    def stop(self):
+        try:
+            if self._httpd:
+                self._httpd.shutdown(); self._httpd.server_close()
+        except Exception:
+            pass
+        self._httpd = None
+
+
 class ScannerWindow(QtWidgets.QMainWindow):
     THUMB_W = 150
     THUMB_H = 200
@@ -5951,6 +6063,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "Restore old photo", self.restore_photo_current, "हिन्दी: फीकी/धुँधली पुरानी फ़ोटो का रंग-रूप सुधारो।\nEnglish: Restore faded/dull old photos.")
         self._ma(mt, "Scan History…", self.show_history, "हिन्दी: अब तक की सारी सेव की हुई PDF — नई से पुरानी, filter के साथ।\nEnglish: All saved PDFs, newest first, with quick filter.")
         self._ma(mt, "📊 Analytics…", self.show_analytics, "हिन्दी: आपकी + दुनिया भर की गिनती — कितने स्कैन, import, print (सिर्फ़ गिनती, कोई document नहीं)।\nEnglish: Your + worldwide counts — scans, imports, prints (counts only, no documents).")
+        self._ma(mt, "📱 Phone se scan (WiFi — QR)…", self.phone_scan, "हिन्दी: फ़ोन के कैमरे से document की photo खींचो और वो सीधे PC पर आ जाए — QR scan करो, बस। (फ़ोन और PC एक ही WiFi पर हों; कोई internet/cloud नहीं, सब local।)\nEnglish: Snap a document photo with your phone camera and it lands straight on the PC — just scan the QR. (Phone & PC on the same WiFi; all local, no cloud.)")
         self._ma(mt, "📷 Scan from camera (webcam)…", self.scan_from_camera, "हिन्दी: स्कैनर न हो तो भी — webcam/USB कैमरा से document capture करके PDF बनाओ (फ़ोटो अपने-आप साफ़ होती है)।\nEnglish: No scanner? Capture documents with a webcam/USB camera (auto-cleaned).")
         self._ma(mt, "Phone photo to PDF (photo import)…", self.import_photos, "हिन्दी: फ़ोन से खींची document-फ़ोटो को साफ़ करके पेज बनाओ (परछाई हटाना, सीधा करना) — फिर PDF सेव करो।\nEnglish: Clean up phone photos of documents (remove shadows, straighten) and add them as pages.")
         self._ma(mt, "Split ID cards (from this page)…", self.split_id_cards, "हिन्दी: एक पेज पर 2-3 ID कार्ड स्कैन किए हैं? यह उन्हें अलग-अलग पेजों में काट देगा।\nEnglish: Scanned 2-3 ID cards on one page? This splits them into separate pages.")
@@ -7114,6 +7227,79 @@ class ScannerWindow(QtWidgets.QMainWindow):
         tb = QtWidgets.QTextBrowser(); tb.setHtml(html); tb.setOpenExternalLinks(True); v.addWidget(tb)
         b = QtWidgets.QPushButton(self.L("Band karo", "Close")); b.clicked.connect(dlg.accept); v.addWidget(b)
         dlg.exec_()
+
+    # ===================== PHONE COMPANION (feature 9) =====================
+    def phone_scan(self):
+        """Phone se scan: QR dikhao, phone camera se photo seedhe PC par."""
+        L = self.L
+        self._an_event("phonescan")
+        srv = PhoneServer(self._tmpdir, self)
+        try:
+            ip, port = srv.start()
+        except Exception as e:
+            self._warn(L("Phone-server chalu nahi hua: ", "Could not start phone server: ") + str(e))
+            return
+        if ip == "127.0.0.1":
+            self._warn(L("WiFi/network nahi mila. PC ko WiFi/LAN se jodo aur dobara koshish karo.",
+                         "No WiFi/network found. Connect the PC to WiFi/LAN and try again."))
+            srv.stop(); return
+        url = "http://%s:%d/?t=%s" % (ip, port, srv.token)
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(L("📱 Phone se scan", "📱 Scan from phone"))
+        dlg.setMinimumWidth(380)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel(L(
+            "<b>1.</b> Phone aur PC ek hi WiFi par ho.<br>"
+            "<b>2.</b> Phone ke camera se ye QR scan karo:",
+            "<b>1.</b> Put phone &amp; PC on the same WiFi.<br>"
+            "<b>2.</b> Scan this QR with your phone camera:")))
+        # QR (PIL image -> QPixmap, jaise show_app_qr me)
+        try:
+            qimg = self._app_qr_image(url=url, box=8)
+        except Exception:
+            qimg = None
+        if qimg is not None:
+            try:
+                data = qimg.tobytes("raw", "RGB")
+                qim = QtGui.QImage(data, qimg.width, qimg.height, 3 * qimg.width, QtGui.QImage.Format_RGB888)
+                lab = QtWidgets.QLabel(); lab.setAlignment(QtCore.Qt.AlignCenter)
+                lab.setPixmap(QtGui.QPixmap.fromImage(qim.copy()).scaled(
+                    240, 240, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+                v.addWidget(lab)
+            except Exception:
+                pass
+        link = QtWidgets.QLabel(L("Ya phone browser me kholo:<br><b>%s</b>", "Or open in phone browser:<br><b>%s</b>") % url)
+        link.setWordWrap(True); link.setStyleSheet("color:#475569;font-size:11px"); v.addWidget(link)
+        count_lbl = QtWidgets.QLabel(L("Abhi tak 0 photo aayi — intezaar…", "0 photos received — waiting…"))
+        count_lbl.setStyleSheet("font-weight:700;color:#0f766e;margin-top:6px"); v.addWidget(count_lbl)
+
+        self._phone_n = 0
+
+        def on_photo(path):
+            try:
+                self._add_item_for_path(path)
+            except Exception:
+                return
+            self._phone_n += 1
+            count_lbl.setText(L("✅ %d photo aa gayi — phone se aur bhej sakte ho",
+                                "✅ %d photo(s) received — send more from the phone") % self._phone_n)
+            try:
+                QtWidgets.QApplication.beep()
+            except Exception:
+                pass
+        srv.photo.connect(on_photo)          # cross-thread -> queued (main thread me chalta)
+
+        note = QtWidgets.QLabel(L(
+            "Pehli baar Windows 'Firewall' puche to <b>Allow</b> dabao.",
+            "If Windows Firewall asks the first time, click <b>Allow</b>."))
+        note.setStyleSheet("color:#94a3b8;font-size:11px"); note.setWordWrap(True); v.addWidget(note)
+        b = QtWidgets.QPushButton(L("Ho gaya (band karo)", "Done (close)"))
+        b.clicked.connect(dlg.accept); v.addWidget(b)
+        dlg.exec_()
+        srv.stop()
+        if self._phone_n:
+            self.status.showMessage(L("📱 %d photo phone se aayi.", "📱 %d photo(s) from phone.") % self._phone_n, 6000)
 
     def _an_country(self):
         """System se desh-code (jaise 'IN') — sirf ginti/desh-breakdown ke liye."""
