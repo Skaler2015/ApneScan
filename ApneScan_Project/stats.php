@@ -437,17 +437,25 @@ if (isset($_GET['admin'])) {
   .sec::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent)}
   .sec:first-of-type{margin-top:6px}
   /* KPI */
-  .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:13px}
-  .kpi{display:flex;align-items:center;gap:13px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:15px 16px;box-shadow:var(--sh);transition:transform .16s ease,box-shadow .16s ease}
-  .kpi:hover{transform:translateY(-3px);box-shadow:var(--sh2)}
-  .kpi .ic{width:44px;height:44px;flex:none;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:21px;background:rgba(42,120,214,.12);color:var(--accent)}
-  .kpi .n{font-size:23px;font-weight:800;line-height:1.05;letter-spacing:-.02em}
-  .kpi .l{color:var(--mut);font-size:11px;margin-top:4px;font-weight:600;letter-spacing:.01em}
-  .kpi.g .ic{background:rgba(27,175,122,.14);color:var(--accent2)} .kpi.g .n{color:var(--accent2)}
-  .kpi.r .ic{background:rgba(227,73,72,.13);color:#e34948} .kpi.r .n{color:#e34948}
-  .kpi.p .ic{background:rgba(74,58,167,.14);color:#6b5cf0} .kpi.p .n{color:#6b5cf0}
-  .kpi.o .ic{background:rgba(235,104,52,.13);color:#eb6834}
-  .kpi.y .ic{background:rgba(237,161,0,.15);color:#c98500}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(166px,1fr));gap:14px}
+  .kpi{position:relative;overflow:hidden;display:flex;align-items:center;gap:14px;background:var(--card);
+    border:1px solid var(--line);border-radius:18px;padding:16px 17px;box-shadow:var(--sh);
+    transition:transform .18s ease,box-shadow .18s ease;--kc:rgba(42,120,214,.13);--ig:linear-gradient(135deg,#dcebfe,#c2ddfb)}
+  .kpi::before{content:"";position:absolute;top:-40%;right:-25%;width:130px;height:130px;border-radius:50%;
+    background:radial-gradient(circle,var(--kc),transparent 68%);pointer-events:none}
+  .kpi:hover{transform:translateY(-4px);box-shadow:var(--sh2)}
+  .kpi .ic{position:relative;z-index:1;width:50px;height:50px;flex:none;border-radius:15px;display:flex;
+    align-items:center;justify-content:center;font-size:23px;background:var(--ig);
+    box-shadow:0 5px 14px var(--kc),inset 0 1px 0 rgba(255,255,255,.5)}
+  .kpi .tx{position:relative;z-index:1;min-width:0}
+  .kpi .n{font-size:26px;font-weight:800;line-height:1;letter-spacing:-.025em}
+  .kpi .l{color:var(--mut);font-size:11.5px;margin-top:6px;font-weight:600;line-height:1.25;letter-spacing:.01em}
+  .kpi.g{--kc:rgba(27,175,122,.16);--ig:linear-gradient(135deg,#d2f6e6,#a7ecca)} .kpi.g .n{color:#0f9d6b}
+  .kpi.r{--kc:rgba(227,73,72,.16);--ig:linear-gradient(135deg,#fde0e0,#f9c3c3)} .kpi.r .n{color:#e34948}
+  .kpi.p{--kc:rgba(108,92,240,.18);--ig:linear-gradient(135deg,#e7e2ff,#d3cbff)} .kpi.p .n{color:#6b5cf0}
+  .kpi.o{--kc:rgba(235,104,52,.16);--ig:linear-gradient(135deg,#ffe4d6,#ffccb3)} .kpi.o .n{color:#e06a38}
+  .kpi.y{--kc:rgba(237,161,0,.18);--ig:linear-gradient(135deg,#fdefc0,#fbe08a)} .kpi.y .n{color:#c98500}
+  html[data-th=dark] .kpi .ic{background:var(--kc);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
   /* layout */
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
@@ -635,15 +643,15 @@ if(window.Chart){
 function grad(ctx,hex){try{var c=ctx.chart.ctx,g=c.createLinearGradient(0,0,0,ctx.chart.height||160);g.addColorStop(0,hex+'55');g.addColorStop(1,hex+'05');return g;}catch(e){return hex+'22';}}
 
 // KPIs (icon + number + label)
-function kpi(ic,n,l,cls){return '<div class="kpi '+(cls||'')+'"><div class="ic">'+ic+'</div><div><div class="n">'+n+'</div><div class="l">'+l+'</div></div></div>';}
+function kpi(ic,n,l,cls){return '<div class="kpi '+(cls||'')+'"><div class="ic">'+ic+'</div><div class="tx"><div class="n">'+n+'</div><div class="l">'+l+'</div></div></div>';}
 document.getElementById('kpis').innerHTML=
   kpi('📄',fmt(D.total),'Total scans')+kpi('📅',fmt(D.today),'Today')+kpi('🕐',fmt(D.yesterday),'Yesterday')+
-  kpi('🗓',fmt(D.weekTotal),'This week')+kpi('📆',fmt(D.monthTotal),'This month')+kpi('📊',D.dailyAvg,'Daily avg')+
+  kpi('🗓️',fmt(D.weekTotal),'This week')+kpi('📆',fmt(D.monthTotal),'This month')+kpi('📊',D.dailyAvg,'Daily avg','y')+
   kpi(D.momPct>=0?'📈':'📉',(D.momPct>=0?'+':'')+D.momPct+'%','vs last month',D.momPct>=0?'g':'r')+
-  kpi('🟢',fmt(D.online),'Online now','g')+kpi('👥',fmt(D.users),'Total users')+kpi('✨',fmt(D.newToday),'New today','o')+
-  kpi('☀️',fmt(D.dau),'Active today')+kpi('📅',fmt(D.wau),'Active 7d')+kpi('🗓',fmt(D.mau),'Active 30d')+
-  kpi('🔥',fmt(D.powerUsers),'Power users','p')+kpi('1️⃣',fmt(D.oneTime),'One-time','r')+
-  kpi('📥',fmt(D.imports),'Imports')+kpi('🖨',fmt(D.prints),'Prints')+kpi('🌿',fmt(D.total),'Paper saved','g');
+  kpi('🟢',fmt(D.online),'Online now','g')+kpi('👥',fmt(D.users),'Total users','p')+kpi('✨',fmt(D.newToday),'New today','o')+
+  kpi('⚡',fmt(D.dau),'Active today')+kpi('📶',fmt(D.wau),'Active 7d')+kpi('🔆',fmt(D.mau),'Active 30d')+
+  kpi('🔥',fmt(D.powerUsers),'Power users','p')+kpi('🔸',fmt(D.oneTime),'One-time','r')+
+  kpi('📥',fmt(D.imports),'Imports','o')+kpi('🖨️',fmt(D.prints),'Prints')+kpi('🌿',fmt(D.total),'Paper saved','g');
 
 // banner
 var bmsg='';
