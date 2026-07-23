@@ -224,18 +224,37 @@ if (isset($_GET['admin'])) {
         header('Content-Type: text/html; charset=utf-8'); ?><!doctype html>
 <html lang="hi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ApneScan Admin — Login</title><style>
-  body{margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;background:#0f172a;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#e2e8f0}
-  .box{background:#fff;color:#1e293b;width:320px;max-width:90%;padding:26px;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.35);text-align:center}
-  .box .logo{font-size:34px} h1{font-size:19px;margin:6px 0 2px} .sub{color:#64748b;font-size:12px;margin-bottom:16px}
-  input{width:100%;padding:11px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:15px;margin-bottom:10px}
-  button{width:100%;padding:11px;border:none;border-radius:10px;background:#0f766e;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
-  button:hover{background:#0b5c55} .err{color:#dc2626;font-size:12px;margin-bottom:8px}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,'Segoe UI',Roboto,Arial;background:#0a0f1c;color:#e2e8f0;
+    display:flex;align-items:center;justify-content:center;min-height:100vh;position:relative;overflow:hidden}
+  body::before{content:"";position:absolute;width:520px;height:520px;border-radius:50%;
+    background:radial-gradient(circle,rgba(42,120,214,.45),transparent 62%);top:-140px;left:-120px;filter:blur(20px)}
+  body::after{content:"";position:absolute;width:520px;height:520px;border-radius:50%;
+    background:radial-gradient(circle,rgba(23,138,138,.42),transparent 62%);bottom:-160px;right:-120px;filter:blur(20px)}
+  .box{position:relative;z-index:2;background:rgba(255,255,255,.07);backdrop-filter:blur(16px);
+    border:1px solid rgba(255,255,255,.14);color:#fff;width:340px;max-width:90%;padding:34px 30px;
+    border-radius:22px;box-shadow:0 24px 70px rgba(0,0,0,.5);text-align:center}
+  .box .logo{width:66px;height:66px;margin:0 auto 14px;border-radius:19px;font-size:32px;
+    background:linear-gradient(135deg,#2a78d6,#178a8a);display:flex;align-items:center;justify-content:center;
+    box-shadow:0 10px 26px rgba(42,120,214,.45)}
+  h1{font-size:21px;margin:4px 0 3px;font-weight:800;letter-spacing:-.01em}
+  .sub{color:#a9b6ce;font-size:12.5px;margin-bottom:22px}
+  input{width:100%;padding:13px 14px;border:1px solid rgba(255,255,255,.18);border-radius:12px;font-size:15px;
+    margin-bottom:12px;background:rgba(255,255,255,.08);color:#fff;outline:none;transition:border-color .15s,box-shadow .15s}
+  input::placeholder{color:#8ea0bd}
+  input:focus{border-color:#3987e5;box-shadow:0 0 0 3px rgba(57,135,229,.28)}
+  button{width:100%;padding:13px;border:none;border-radius:12px;background:linear-gradient(135deg,#2a78d6,#1f6fb0);
+    color:#fff;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 8px 22px rgba(42,120,214,.4);transition:filter .15s,transform .1s}
+  button:hover{filter:brightness(1.08)} button:active{transform:scale(.98)}
+  .err{color:#fca5a5;font-size:12.5px;margin-bottom:10px;background:rgba(227,73,72,.15);padding:8px;border-radius:9px}
+  .pv{color:#7f8fab;font-size:11px;margin-top:16px}
 </style></head><body>
   <form class="box" method="post" action="">
-    <div class="logo">📊🔒</div><h1>ApneScan Admin</h1><div class="sub">Worldwide stats dashboard</div>
+    <div class="logo">📊</div><h1>ApneScan Admin</h1><div class="sub">Worldwide Analytics Dashboard</div>
     <?php if($login_err) echo '<div class="err">'.htmlspecialchars($login_err).'</div>'; ?>
-    <input type="password" name="pass" placeholder="Password" autofocus required>
+    <input type="password" name="pass" placeholder="🔒  Password" autofocus required>
     <button type="submit">Login →</button>
+    <div class="pv">🔐 Sirf ginti — koi document/patient data nahi</div>
   </form>
 </body></html><?php exit;
     }
@@ -381,60 +400,113 @@ if (isset($_GET['admin'])) {
 <title>ApneScan — Admin Stats</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
-  :root{--te:#0f766e;--te2:#0891b2;--bg:#f6f8fa;--card:#fff;--fg:#1e293b;--mut:#64748b;--line:#e2e8f0;--head1:#0f766e;--head2:#0891b2}
-  html[data-th=dark]{--bg:#0b1220;--card:#131c2e;--fg:#e2e8f0;--mut:#94a3b8;--line:#243049;--head1:#134e4a;--head2:#155e75}
-  *{box-sizing:border-box} body{margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--fg)}
-  header{background:linear-gradient(90deg,var(--head1),var(--head2));color:#fff;padding:14px 20px;position:sticky;top:0;z-index:5}
-  header h1{margin:0;font-size:19px} header .t{opacity:.9;font-size:12px;margin-top:2px}
-  .wrap{max-width:1180px;margin:16px auto;padding:0 14px}
-  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px}
-  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
-  .kpi .n{font-size:22px;font-weight:800;color:var(--te)} .kpi .l{color:var(--mut);font-size:11px;margin-top:2px}
-  .kpi.g .n{color:#16a34a}.kpi.r .n{color:#dc2626}.kpi.p .n{color:#7c3aed}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
-  @media(max-width:820px){.grid,.grid3{grid-template-columns:1fr}.toolbar{float:none;margin-top:8px}}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
-  .card h3{margin:0 0 10px;font-size:14px}
-  table{width:100%;border-collapse:collapse;font-size:13px} td,th{padding:5px 6px;border-bottom:1px solid var(--line);text-align:left}
-  th{cursor:pointer;color:var(--mut);font-size:12px}
-  .bar{height:10px;background:var(--te);border-radius:5px}
-  .rbtn{background:rgba(255,255,255,.18);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:700;margin-left:6px;text-decoration:none;display:inline-block;font-size:13px}
-  .rbtn.d{background:#fff;color:#0f766e}
-  .toolbar{float:right}
-  input,select,textarea{padding:7px 9px;border:1px solid var(--line);border-radius:8px;font-size:13px;background:var(--card);color:var(--fg)}
-  .btn{background:var(--te);color:#fff;border:none;border-radius:8px;padding:7px 12px;cursor:pointer;font-weight:700;font-size:13px}
-  .btn.gray{background:#64748b}.btn.red{background:#dc2626}
-  .banner{background:#fef9c3;border:1px solid #fde68a;color:#713f12;border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:13px;display:none}
-  .btns{margin-bottom:12px} .foot{color:var(--mut);font-size:12px;text-align:center;margin:16px 0}
-  .tag{display:inline-block;background:#e0e7ff;color:#3730a3;border-radius:20px;padding:1px 8px;font-size:10px;margin-right:3px}
-  .heat{display:grid;grid-template-columns:repeat(24,1fr);gap:2px}
-  .heat div{height:26px;border-radius:3px;font-size:8px;color:#fff;text-align:center;line-height:26px}
-  @media print{.toolbar,.btns,.no-print{display:none}}
+  :root{
+    --bg:#eef1f6;--card:#ffffff;--card2:#f7f9fc;--fg:#0b1220;--fg2:#334155;--mut:#64748b;--line:#e6eaf0;
+    --accent:#2a78d6;--accent2:#1baf7a;
+    --sh:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.05);
+    --sh2:0 10px 24px rgba(16,24,40,.10),0 2px 6px rgba(16,24,40,.06);
+    --hd:linear-gradient(120deg,#12325f 0%,#1f5fb0 55%,#178a8a 100%);
+    --radius:16px;
+  }
+  html[data-th=dark]{
+    --bg:#0c0f16;--card:#151a24;--card2:#10141c;--fg:#f1f5f9;--fg2:#cbd5e1;--mut:#8a97ad;--line:#232b3a;
+    --accent:#3987e5;--accent2:#199e70;
+    --sh:0 1px 2px rgba(0,0,0,.5);
+    --sh2:0 12px 28px rgba(0,0,0,.55);
+    --hd:linear-gradient(120deg,#0b1a33 0%,#123a6b 55%,#0e4b4b 100%);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--fg);-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  /* app bar */
+  header{background:var(--hd);color:#fff;padding:16px 22px;position:sticky;top:0;z-index:20;box-shadow:0 4px 20px rgba(9,20,45,.25);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header .brand{display:flex;align-items:center;gap:11px;font-size:19px;font-weight:800;letter-spacing:-.01em}
+  header .brand .logo{width:38px;height:38px;border-radius:11px;background:rgba(255,255,255,.16);display:flex;align-items:center;justify-content:center;font-size:20px;backdrop-filter:blur(4px)}
+  header .brand small{display:block;font-size:11px;font-weight:500;opacity:.8;letter-spacing:.02em}
+  header .live{display:flex;align-items:center;gap:7px;background:rgba(255,255,255,.14);padding:6px 12px;border-radius:30px;font-size:12px}
+  header .live .dot{width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 0 0 rgba(74,222,128,.6);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(74,222,128,.55)}70%{box-shadow:0 0 0 7px rgba(74,222,128,0)}100%{box-shadow:0 0 0 0 rgba(74,222,128,0)}}
+  header .toolbar{margin-left:auto;display:flex;gap:8px;align-items:center}
+  .iconbtn{width:38px;height:38px;border-radius:11px;border:none;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;font-size:16px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;transition:background .15s,transform .1s}
+  .iconbtn:hover{background:rgba(255,255,255,.28)} .iconbtn:active{transform:scale(.93)}
+  .iconbtn.logout{width:auto;padding:0 14px;gap:6px;font-size:13px;font-weight:700}
+  .wrap{max-width:1240px;margin:22px auto;padding:0 18px}
+  /* section titles */
+  .sec{display:flex;align-items:center;gap:12px;margin:30px 2px 14px;font-size:12px;font-weight:800;letter-spacing:.10em;text-transform:uppercase;color:var(--mut)}
+  .sec .em{font-size:15px}
+  .sec::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent)}
+  .sec:first-of-type{margin-top:6px}
+  /* KPI */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:13px}
+  .kpi{display:flex;align-items:center;gap:13px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:15px 16px;box-shadow:var(--sh);transition:transform .16s ease,box-shadow .16s ease}
+  .kpi:hover{transform:translateY(-3px);box-shadow:var(--sh2)}
+  .kpi .ic{width:44px;height:44px;flex:none;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:21px;background:rgba(42,120,214,.12);color:var(--accent)}
+  .kpi .n{font-size:23px;font-weight:800;line-height:1.05;letter-spacing:-.02em}
+  .kpi .l{color:var(--mut);font-size:11px;margin-top:4px;font-weight:600;letter-spacing:.01em}
+  .kpi.g .ic{background:rgba(27,175,122,.14);color:var(--accent2)} .kpi.g .n{color:var(--accent2)}
+  .kpi.r .ic{background:rgba(227,73,72,.13);color:#e34948} .kpi.r .n{color:#e34948}
+  .kpi.p .ic{background:rgba(74,58,167,.14);color:#6b5cf0} .kpi.p .n{color:#6b5cf0}
+  .kpi.o .ic{background:rgba(235,104,52,.13);color:#eb6834}
+  .kpi.y .ic{background:rgba(237,161,0,.15);color:#c98500}
+  /* layout */
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+  @media(max-width:900px){.grid,.grid3{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px 17px;margin-bottom:16px;box-shadow:var(--sh)}
+  .card h3{margin:0 0 13px;font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:8px;color:var(--fg)}
+  .card h3 .em{font-size:16px}
+  .card canvas{height:172px!important;width:100%!important}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td,th{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left}
+  tbody tr:last-child td{border-bottom:none}
+  th{cursor:pointer;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:700}
+  .bar{height:9px;background:linear-gradient(90deg,var(--accent),#5fa0ec);border-radius:6px;min-width:6px;box-shadow:inset 0 -1px 2px rgba(0,0,0,.08)}
+  /* buttons */
+  .rbtn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:7px 13px;cursor:pointer;font-weight:700;margin-left:6px;text-decoration:none;display:inline-block;font-size:12.5px;box-shadow:var(--sh);transition:filter .15s} .rbtn:hover{filter:brightness(1.07)}
+  .rbtn.d{background:var(--card2);color:var(--accent);border:1px solid var(--line)}
+  input,select,textarea{padding:9px 11px;border:1px solid var(--line);border-radius:10px;font-size:13px;background:var(--card2);color:var(--fg);font-family:inherit;outline:none;transition:border-color .15s,box-shadow .15s}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(42,120,214,.15)}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:8px 14px;cursor:pointer;font-weight:700;font-size:13px;box-shadow:var(--sh);transition:filter .15s} .btn:hover{filter:brightness(1.07)}
+  .btn.gray{background:#64748b}.btn.red{background:#e34948}
+  .banner{background:linear-gradient(90deg,#fff7d6,#fef3c7);border:1px solid #fadf8a;color:#8a5a00;border-radius:12px;padding:12px 16px;margin-bottom:14px;font-size:13px;font-weight:600;display:none;box-shadow:var(--sh)}
+  html[data-th=dark] .banner{background:linear-gradient(90deg,#3a2f10,#33290c);border-color:#5a4718;color:#fcd34d}
+  .btns{margin-bottom:8px;display:flex;gap:2px;flex-wrap:wrap;align-items:center}
+  .foot{color:var(--mut);font-size:12px;text-align:center;margin:22px 0 10px}
+  .tag{display:inline-block;background:rgba(42,120,214,.12);color:var(--accent);border-radius:20px;padding:2px 9px;font-size:10px;margin-right:3px;font-weight:700}
+  .heat{display:grid;grid-template-columns:repeat(24,1fr);gap:3px}
+  .heat div{height:30px;border-radius:6px;font-size:8px;color:#fff;text-align:center;line-height:30px;font-weight:600}
+  @media print{.toolbar,.btns,.no-print{display:none}.card{break-inside:avoid;box-shadow:none}}
 </style></head><body>
 <header>
-  <div class="toolbar no-print">
-    <button class="rbtn" onclick="toggleTh()" id="thbtn">🌙</button>
-    <button class="rbtn" onclick="location.reload()">🔄</button>
-    <button class="rbtn" onclick="window.print()">🖨</button>
-    <a class="rbtn" href="?logout=1">🔓 Logout</a>
+  <div class="brand">
+    <div class="logo">📊</div>
+    <div>ApneScan <small>Admin Analytics</small></div>
   </div>
-  <h1>📊 ApneScan — Admin Panel</h1>
-  <div class="t">Live · <span id="tm"></span> · sirf ginti (koi document nahi) · <span id="rt"></span> · auto-logout 30min</div>
+  <div class="live no-print"><span class="dot"></span> Live · <span id="tm"></span> · <span id="rt" style="opacity:.75"></span></div>
+  <div class="toolbar no-print">
+    <button class="iconbtn" onclick="toggleTh()" id="thbtn" title="Theme">🌙</button>
+    <button class="iconbtn" onclick="location.reload()" title="Refresh">🔄</button>
+    <button class="iconbtn" onclick="window.print()" title="Print">🖨</button>
+    <a class="iconbtn logout" href="?logout=1" title="Logout">🔓 Logout</a>
+  </div>
 </header>
 <div class="wrap">
   <div id="banner" class="banner"></div>
+
+  <div class="sec"><span class="em">📊</span> Overview</div>
   <div class="kpis" id="kpis"></div>
 
-  <div class="btns no-print">
-    📥 <a class="rbtn d" href="?admin=1&export=days">Daily CSV</a>
+  <div class="btns no-print" style="margin-top:14px">
+    <span style="color:var(--mut);font-size:12px;font-weight:600;margin-right:4px">📥 Export:</span>
+    <a class="rbtn d" href="?admin=1&export=days">Daily CSV</a>
     <a class="rbtn d" href="?admin=1&export=users">Users CSV</a>
     <a class="rbtn d" href="?admin=1&export=json">Backup (JSON)</a>
   </div>
 
+  <div class="sec"><span class="em">📣</span> Broadcast &amp; Control</div>
   <!-- broadcast + remote config -->
   <div class="grid no-print">
-    <div class="card"><h3>📣 Broadcast — sab users ki app me message dikhao</h3>
+    <div class="card"><h3><span class="em">📣</span> Broadcast — sab users ki app me message dikhao</h3>
       <form method="post">
         <input type="hidden" name="act" value="broadcast">
         <input name="msg" maxlength="200" placeholder="Message (jaise: Naya update aa gaya!)" value="<?php echo htmlspecialchars($S['bcMsg']); ?>" style="width:100%;margin-bottom:6px">
@@ -447,7 +519,7 @@ if (isset($_GET['admin'])) {
       </form>
       <div style="color:var(--mut);font-size:11px;margin-top:6px">Abhi: <?php echo $S['bcMsg']!==''?htmlspecialchars($S['bcMsg']).' ('.$S['bcTarget'].')':'— koi message nahi —'; ?></div>
     </div>
-    <div class="card"><h3>⚙️ Remote config — bina update ke app settings badlo</h3>
+    <div class="card"><h3><span class="em">⚙️</span> Remote config — bina update ke app settings badlo</h3>
       <form method="post">
         <input type="hidden" name="act" value="config">
         <textarea name="json" rows="3" style="width:100%" placeholder='{"default_dpi":150}'><?php echo htmlspecialchars($S['rconfigStr']); ?></textarea>
@@ -457,29 +529,32 @@ if (isset($_GET['admin'])) {
     </div>
   </div>
 
-  <div class="card no-print"><h3>🔍 Kisi bhi range ka jod</h3>
-    <input type="date" id="df"> → <input type="date" id="dt"> <b id="drsum" style="margin-left:10px"></b>
+  <div class="card no-print"><h3><span class="em">🔍</span> Kisi bhi range ka jod</h3>
+    <input type="date" id="df"> → <input type="date" id="dt"> <b id="drsum" style="margin-left:10px;color:var(--accent)"></b>
   </div>
 
+  <div class="sec"><span class="em">📈</span> Trends</div>
   <div class="grid">
-    <div class="card"><h3>📊 Last 7 days</h3><canvas id="wk" height="150"></canvas></div>
-    <div class="card"><h3>📈 Last 30 days</h3><canvas id="mo" height="150"></canvas></div>
-    <div class="card"><h3>🌍 Today — 24 hours</h3><canvas id="hr" height="150"></canvas></div>
-    <div class="card"><h3>🏆 Top users (naam ke saath)</h3><canvas id="tp" height="150"></canvas></div>
-    <div class="card"><h3>🌱 New users — 30 days</h3><canvas id="nu" height="150"></canvas></div>
-    <div class="card"><h3>👥 Total users (growth)</h3><canvas id="cu" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">📊</span> Last 7 days</h3><canvas id="wk" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">📈</span> Last 30 days</h3><canvas id="mo" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">🌍</span> Today — 24 hours</h3><canvas id="hr" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">🏆</span> Top users (naam ke saath)</h3><canvas id="tp" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">🌱</span> New users — 30 days</h3><canvas id="nu" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">👥</span> Total users (growth)</h3><canvas id="cu" height="150"></canvas></div>
   </div>
 
+  <div class="sec"><span class="em">🔁</span> Growth &amp; Retention</div>
   <!-- retention + funnel + cohort -->
   <div class="grid3">
-    <div class="card"><h3>🔁 Retention (wapas aaye)</h3><div id="ret"></div></div>
-    <div class="card"><h3>🫗 Funnel</h3><div id="fun"></div></div>
-    <div class="card"><h3>📅 Weekly cohorts (30-din tak tike)</h3><div id="coh"></div></div>
+    <div class="card"><h3><span class="em">🔁</span> Retention (wapas aaye)</h3><div id="ret"></div></div>
+    <div class="card"><h3><span class="em">🫗</span> Funnel</h3><div id="fun"></div></div>
+    <div class="card"><h3><span class="em">📅</span> Weekly cohorts (30-din tak tike)</h3><div id="coh"></div></div>
   </div>
 
-  <div class="card"><h3>🕐 Busiest hours (all-time)</h3><div class="heat" id="heat"></div></div>
+  <div class="card"><h3><span class="em">🕐</span> Busiest hours (all-time)</h3><div class="heat" id="heat"></div></div>
 
-  <div class="card"><h3>👤 Saare users (<span id="ucount"></span>) — header pe click karke sort, naam pe click karke details/manage</h3>
+  <div class="sec"><span class="em">👤</span> Users</div>
+  <div class="card"><h3><span class="em">👤</span> Saare users (<span id="ucount"></span>) <span style="color:var(--mut);font-weight:500;font-size:11px">— header pe click = sort, naam pe click = details/manage</span></h3>
     <input id="usearch" class="no-print" placeholder="🔍 naam / desh / version / tag se dhoondo…" style="width:100%;margin-bottom:8px">
     <div style="overflow:auto;max-height:460px"><table id="utable"></table></div>
   </div>
@@ -491,25 +566,30 @@ if (isset($_GET['admin'])) {
     </div>
   </div>
 
+  <div class="sec"><span class="em">🧰</span> Activity, Usage &amp; Devices</div>
   <div class="grid">
-    <div class="card"><h3>🟢 Abhi online (<span id="oncount"></span>)</h3><div id="onlist"></div></div>
-    <div class="card"><h3>⏱ Recently active</h3><div id="recent"></div></div>
-    <div class="card"><h3>😴 Chhute hue users (churn)</h3><div id="chn"></div></div>
-    <div class="card"><h3>🧰 Feature usage</h3><div id="ft"></div></div>
-    <div class="card"><h3>🖨 Scanner models</h3><div id="sm"></div></div>
-    <div class="card"><h3>🎚 Scan settings (DPI / colour / size)</h3><div id="ss"></div></div>
-    <div class="card"><h3>🗺 Countries (users)</h3><div id="co"></div></div>
-    <div class="card"><h3>🗺 Scans by country</h3><div id="cos"></div></div>
-    <div class="card"><h3>🔢 App versions</h3><div id="ve"></div></div>
-    <div class="card"><h3>🖨 Scan methods</h3><div id="me"></div></div>
-    <div class="card"><h3>💬 Feedback (⭐ <span id="arate"></span>)</h3><div id="fb"></div></div>
-    <div class="card"><h3>💥 Crash reports</h3><div id="cr"></div></div>
-    <div class="card"><h3>🏅 Records</h3><div id="rc"></div></div>
-    <div class="card"><h3>🔒 Admin logins (IP)</h3><div id="al"></div></div>
+    <div class="card"><h3><span class="em">🟢</span> Abhi online (<span id="oncount"></span>)</h3><div id="onlist"></div></div>
+    <div class="card"><h3><span class="em">⏱</span> Recently active</h3><div id="recent"></div></div>
+    <div class="card"><h3><span class="em">😴</span> Chhute hue users (churn)</h3><div id="chn"></div></div>
+    <div class="card"><h3><span class="em">🧰</span> Feature usage</h3><div id="ft"></div></div>
+    <div class="card"><h3><span class="em">🖨</span> Scanner models</h3><div id="sm"></div></div>
+    <div class="card"><h3><span class="em">🎚</span> Scan settings (DPI / colour / size)</h3><div id="ss"></div></div>
+    <div class="card"><h3><span class="em">🗺</span> Countries (users)</h3><div id="co"></div></div>
+    <div class="card"><h3><span class="em">🗺</span> Scans by country</h3><div id="cos"></div></div>
+    <div class="card"><h3><span class="em">🔢</span> App versions</h3><div id="ve"></div></div>
+    <div class="card"><h3><span class="em">🖨</span> Scan methods</h3><div id="me"></div></div>
+  </div>
+
+  <div class="sec"><span class="em">💬</span> Quality, Feedback &amp; System</div>
+  <div class="grid">
+    <div class="card"><h3><span class="em">💬</span> Feedback (⭐ <span id="arate"></span>)</h3><div id="fb"></div></div>
+    <div class="card"><h3><span class="em">💥</span> Crash reports</h3><div id="cr"></div></div>
+    <div class="card"><h3><span class="em">🏅</span> Records</h3><div id="rc"></div></div>
+    <div class="card"><h3><span class="em">🔒</span> Admin logins (IP)</h3><div id="al"></div></div>
   </div>
 
   <!-- maintenance -->
-  <div class="card no-print"><h3>🛠 Maintenance</h3>
+  <div class="card no-print"><h3><span class="em">🛠</span> Maintenance</h3>
     <form method="post" style="display:inline">
       <input type="hidden" name="act" value="purge">
       <button class="btn gray" onclick="return confirm('Purane din ka data hata dein?')">Purane data hatao (rakho last</button>
@@ -532,19 +612,38 @@ function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;
 function ago(ts){ if(!ts)return '—'; var s=Math.floor(Date.now()/1000)-ts; if(s<60)return s+'s'; if(s<3600)return Math.floor(s/60)+'m'; if(s<86400)return Math.floor(s/3600)+'h'; return Math.floor(s/86400)+'d'; }
 
 // theme
-function toggleTh(){ var h=document.documentElement; var dk=h.getAttribute('data-th')==='dark'; h.setAttribute('data-th',dk?'light':'dark'); try{localStorage.setItem('anth',dk?'light':'dark');}catch(e){} document.getElementById('thbtn').textContent=dk?'🌙':'☀️'; }
+function toggleTh(){ var dk=document.documentElement.getAttribute('data-th')==='dark'; try{localStorage.setItem('anth',dk?'light':'dark');}catch(e){} location.reload(); }
 (function(){ try{ if(localStorage.getItem('anth')==='dark'){ document.documentElement.setAttribute('data-th','dark'); document.getElementById('thbtn').textContent='☀️'; } }catch(e){} })();
 
-// KPIs
-function kpi(n,l,cls){return '<div class="kpi '+(cls||'')+'"><div class="n">'+n+'</div><div class="l">'+l+'</div></div>';}
+// palette (validated categorical) + Chart.js theme
+var DKT=document.documentElement.getAttribute('data-th')==='dark';
+var PAL=DKT?{blue:'#3987e5',orange:'#d95926',aqua:'#199e70',yellow:'#c98500',magenta:'#d55181',green:'#008300',violet:'#9085e9',red:'#e66767'}
+           :{blue:'#2a78d6',orange:'#eb6834',aqua:'#1baf7a',yellow:'#eda100',magenta:'#e87ba4',green:'#008300',violet:'#4a3aa7',red:'#e34948'};
+if(window.Chart){
+  Chart.defaults.font.family="Inter,system-ui,'Segoe UI',Roboto,Arial";
+  Chart.defaults.font.size=11;
+  Chart.defaults.color=DKT?'#8a97ad':'#64748b';
+  Chart.defaults.borderColor=DKT?'rgba(255,255,255,.06)':'rgba(15,23,42,.06)';
+  Chart.defaults.plugins.tooltip.backgroundColor=DKT?'#0b0f16':'#0b1220';
+  Chart.defaults.plugins.tooltip.padding=10;
+  Chart.defaults.plugins.tooltip.cornerRadius=9;
+  Chart.defaults.plugins.tooltip.titleFont={weight:'700'};
+  Chart.defaults.maintainAspectRatio=false;
+  Chart.defaults.elements.bar.borderRadius=6;
+  Chart.defaults.elements.bar.borderSkipped=false;
+}
+function grad(ctx,hex){try{var c=ctx.chart.ctx,g=c.createLinearGradient(0,0,0,ctx.chart.height||160);g.addColorStop(0,hex+'55');g.addColorStop(1,hex+'05');return g;}catch(e){return hex+'22';}}
+
+// KPIs (icon + number + label)
+function kpi(ic,n,l,cls){return '<div class="kpi '+(cls||'')+'"><div class="ic">'+ic+'</div><div><div class="n">'+n+'</div><div class="l">'+l+'</div></div></div>';}
 document.getElementById('kpis').innerHTML=
-  kpi(fmt(D.total),'Total scans')+kpi(D.today,'Today')+kpi(D.yesterday,'Yesterday')+
-  kpi(D.weekTotal,'This week')+kpi(D.monthTotal,'This month')+kpi(D.dailyAvg,'Daily avg')+
-  kpi((D.momPct>=0?'+':'')+D.momPct+'%','vs last month',D.momPct>=0?'g':'r')+
-  kpi(D.online,'Online now')+kpi(D.users,'Total users')+kpi(D.newToday,'New today')+
-  kpi(D.dau,'Active today')+kpi(D.wau,'Active 7d')+kpi(D.mau,'Active 30d')+
-  kpi(D.powerUsers,'Power users','p')+kpi(D.oneTime,'One-time','r')+
-  kpi(D.imports,'Imports')+kpi(D.prints,'Prints')+kpi(fmt(D.total),'Paper saved','g');
+  kpi('📄',fmt(D.total),'Total scans')+kpi('📅',fmt(D.today),'Today')+kpi('🕐',fmt(D.yesterday),'Yesterday')+
+  kpi('🗓',fmt(D.weekTotal),'This week')+kpi('📆',fmt(D.monthTotal),'This month')+kpi('📊',D.dailyAvg,'Daily avg')+
+  kpi(D.momPct>=0?'📈':'📉',(D.momPct>=0?'+':'')+D.momPct+'%','vs last month',D.momPct>=0?'g':'r')+
+  kpi('🟢',fmt(D.online),'Online now','g')+kpi('👥',fmt(D.users),'Total users')+kpi('✨',fmt(D.newToday),'New today','o')+
+  kpi('☀️',fmt(D.dau),'Active today')+kpi('📅',fmt(D.wau),'Active 7d')+kpi('🗓',fmt(D.mau),'Active 30d')+
+  kpi('🔥',fmt(D.powerUsers),'Power users','p')+kpi('1️⃣',fmt(D.oneTime),'One-time','r')+
+  kpi('📥',fmt(D.imports),'Imports')+kpi('🖨',fmt(D.prints),'Prints')+kpi('🌿',fmt(D.total),'Paper saved','g');
 
 // banner
 var bmsg='';
@@ -561,25 +660,32 @@ function bars(id,rows,useFlag,label){var mx=rows[0]?rows[0][1]:1;if(!rows.length
   document.getElementById(id).innerHTML=h+'</table>';}
 function obj2rows(o){return Object.keys(o||{}).map(function(k){return [k,o[k]];}).sort(function(a,b){return b[1]-a[1];}).slice(0,12);}
 
-// charts
-new Chart(wk,{type:'bar',data:{labels:D.week.map(function(x){return x[0].slice(5);}),datasets:[{data:D.week.map(function(x){return x[1];}),backgroundColor:'#0f766e'}]},options:{plugins:{legend:{display:false}}}});
-new Chart(mo,{type:'line',data:{labels:D.month.map(function(x){return x[0].slice(5);}),datasets:[{data:D.month.map(function(x){return x[1];}),borderColor:'#0891b2',backgroundColor:'rgba(8,145,178,.15)',fill:true,tension:.3,pointRadius:0}]},options:{plugins:{legend:{display:false}}}});
-new Chart(hr,{type:'bar',data:{labels:D.todayHours.map(function(_,i){return i;}),datasets:[{data:D.todayHours,backgroundColor:'#0f766e'}]},options:{plugins:{legend:{display:false}}}});
-var TN=(D.topNamed&&D.topNamed.length)?D.topNamed:(D.top||[]).map(function(s,i){return {name:'User '+(i+1),scans:s};});
-new Chart(tp,{type:'bar',data:{labels:TN.map(function(t,i){return (t.name&&t.name!=='—')?t.name:('User '+(i+1));}),datasets:[{data:TN.map(function(t){return t.scans;}),backgroundColor:'#7c3aed'}]},options:{indexAxis:'y',plugins:{legend:{display:false}}}});
-new Chart(nu,{type:'bar',data:{labels:D.newUsers30.map(function(x){return x[0].slice(5);}),datasets:[{data:D.newUsers30.map(function(x){return x[1];}),backgroundColor:'#16a34a'}]},options:{plugins:{legend:{display:false}}}});
-new Chart(cu,{type:'line',data:{labels:D.cumUsers30.map(function(x){return x[0].slice(5);}),datasets:[{data:D.cumUsers30.map(function(x){return x[1];}),borderColor:'#7c3aed',backgroundColor:'rgba(124,58,237,.12)',fill:true,tension:.3,pointRadius:0}]},options:{plugins:{legend:{display:false}}}});
+// charts (agar Chart.js load na ho to baaki dashboard fir bhi chale)
+function mkChart(el,cfg){ try{ if(window.Chart) return new Chart(el,cfg); }catch(e){}
+  try{ var c=document.getElementById(el.id||el); if(c&&c.parentNode){ var d=document.createElement('div'); d.style.cssText='color:var(--mut);font-size:12px;text-align:center;padding:20px'; d.textContent='📊 chart load nahi hua (internet?)'; c.parentNode.replaceChild(d,c); } }catch(e){} return null; }
+if(window.Chart){
+  var bc=Chart.defaults.borderColor;
+  var CO={plugins:{legend:{display:false}},scales:{x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:bc},ticks:{precision:0}}}};
+  var COy={indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,grid:{color:bc}},y:{grid:{display:false}}}};
+  mkChart(wk,{type:'bar',data:{labels:D.week.map(function(x){return x[0].slice(5);}),datasets:[{data:D.week.map(function(x){return x[1];}),backgroundColor:PAL.blue}]},options:CO});
+  mkChart(mo,{type:'line',data:{labels:D.month.map(function(x){return x[0].slice(5);}),datasets:[{data:D.month.map(function(x){return x[1];}),borderColor:PAL.blue,backgroundColor:function(c){return grad(c,PAL.blue);},borderWidth:2,fill:true,tension:.35,pointRadius:0}]},options:CO});
+  mkChart(hr,{type:'bar',data:{labels:D.todayHours.map(function(_,i){return i;}),datasets:[{data:D.todayHours,backgroundColor:PAL.aqua}]},options:CO});
+  var TN=(D.topNamed&&D.topNamed.length)?D.topNamed:(D.top||[]).map(function(s,i){return {name:'User '+(i+1),scans:s};});
+  mkChart(tp,{type:'bar',data:{labels:TN.map(function(t,i){return (t.name&&t.name!=='—')?t.name:('User '+(i+1));}),datasets:[{data:TN.map(function(t){return t.scans;}),backgroundColor:PAL.violet}]},options:COy});
+  mkChart(nu,{type:'bar',data:{labels:D.newUsers30.map(function(x){return x[0].slice(5);}),datasets:[{data:D.newUsers30.map(function(x){return x[1];}),backgroundColor:PAL.aqua}]},options:CO});
+  mkChart(cu,{type:'line',data:{labels:D.cumUsers30.map(function(x){return x[0].slice(5);}),datasets:[{data:D.cumUsers30.map(function(x){return x[1];}),borderColor:PAL.violet,backgroundColor:function(c){return grad(c,PAL.violet);},borderWidth:2,fill:true,tension:.35,pointRadius:0}]},options:CO});
+}
 
 // retention / funnel / cohorts
-function retRow(l,p){ return '<tr><td>'+l+'</td><td style="width:55%"><div class="bar" style="width:'+p+'%;background:#16a34a"></div></td><td style="text-align:right"><b>'+p+'%</b></td></tr>'; }
+function retRow(l,p){ return '<tr><td>'+l+'</td><td style="width:55%"><div class="bar" style="width:'+Math.max(3,p)+'%;background:'+PAL.aqua+'"></div></td><td style="text-align:right"><b>'+p+'%</b></td></tr>'; }
 document.getElementById('ret').innerHTML='<table>'+retRow('Next day (D+1)',D.ret1)+retRow('Week 1 (D+7)',D.ret7)+retRow('Month 1 (D+30)',D.ret30)+'</table>';
-var fn=D.funnel||[0,0,0]; function funRow(l,v,base){ var p=base?Math.round(100*v/base):0; return '<tr><td>'+l+'</td><td style="width:50%"><div class="bar" style="width:'+Math.max(3,p)+'%;background:#0891b2"></div></td><td style="text-align:right"><b>'+v+'</b> ('+p+'%)</td></tr>'; }
+var fn=D.funnel||[0,0,0]; function funRow(l,v,base){ var p=base?Math.round(100*v/base):0; return '<tr><td>'+l+'</td><td style="width:50%"><div class="bar" style="width:'+Math.max(3,p)+'%;background:'+PAL.blue+'"></div></td><td style="text-align:right"><b>'+v+'</b> ('+p+'%)</td></tr>'; }
 document.getElementById('fun').innerHTML='<table>'+funRow('Installed',fn[0],fn[0])+funRow('Scanned ≥1',fn[1],fn[0])+funRow('Repeat (2+ din)',fn[2],fn[0])+'</table>';
 document.getElementById('coh').innerHTML='<table><tr><th>Week</th><th>Naye</th><th>Tike</th></tr>'+(D.cohorts||[]).map(function(c){return '<tr><td>'+c.w+'</td><td>'+c.made+'</td><td>'+c.still+' <span style="color:var(--mut)">('+c.pct+'%)</span></td></tr>';}).join('')+'</table>';
 
 // heat (all-time hours)
 var hmax=Math.max.apply(null,D.hoursAll.concat([1]));
-document.getElementById('heat').innerHTML=D.hoursAll.map(function(v,i){var a=v/hmax;var bg='rgba(15,118,110,'+(0.12+a*0.88)+')';return '<div title="'+i+':00 — '+v+' scans" style="background:'+bg+'">'+i+'</div>';}).join('');
+document.getElementById('heat').innerHTML=D.hoursAll.map(function(v,i){var a=v/hmax;var bg='rgba(42,120,214,'+(0.10+a*0.90)+')';return '<div title="'+i+':00 — '+v+' scans" style="background:'+bg+';color:'+(a>0.45?'#fff':'var(--mut)')+'">'+i+'</div>';}).join('');
 
 // breakdowns
 bars('co',obj2rows(D.countries),true);
