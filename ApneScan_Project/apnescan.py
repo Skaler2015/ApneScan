@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "130"
+VERSION = "131"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -4907,6 +4907,10 @@ class ImageEditor(QtWidgets.QDialog):
         self.setCursor(QtCore.Qt.WaitCursor)
         t = self._ocr_text(self.base)
         self.unsetCursor()
+        try:
+            self.win._an_event("ocr")
+        except Exception:
+            pass
         QtWidgets.QApplication.clipboard().setText(t or "")
         if (t or "").strip():
             self.win.status.showMessage(self.L("📋 Text copy ho gaya.", "📋 Text copied."), 5000)
@@ -4921,6 +4925,10 @@ class ImageEditor(QtWidgets.QDialog):
         self.setCursor(QtCore.Qt.WaitCursor)
         t = self._ocr_text(self.base)
         self.unsetCursor()
+        try:
+            self.win._an_event("ocr")
+        except Exception:
+            pass
         dlg = QtWidgets.QDialog(self); dlg.setWindowTitle(self.L("Page ka text", "Page text"))
         dlg.resize(560, 600)
         v = QtWidgets.QVBoxLayout(dlg)
@@ -5937,6 +5945,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, "Scanner IP…", self.set_scanner_ip, "हिन्दी: network स्कैनर का IP सेट करो (जैसे 192.168.1.8)।\nEnglish: Set the network scanner IP.")
         self._ma(ms, "📊 Stats server URL…", self.set_stats_url, "हिन्दी: worldwide-ginti का server URL (जैसे आपका PHP: https://apnesoftware.com/stats.php)। खाली छोड़ने पर default।\nEnglish: The worldwide-stats server URL (e.g. your PHP: https://apnesoftware.com/stats.php). Empty = default.")
         self._ma(ms, "👤 Analytics me naam…", self.set_user_name, "हिन्दी: Analytics में आपका नाम/clinic — ताकि किसने कितने scan किए, नाम के साथ दिखे।\nEnglish: Your name/clinic for analytics — so scans show per name.")
+        self._ma(ms, "💬 Feedback / rating bhejo…", self.send_feedback, "हिन्दी: App को rating दो और अपनी राय भेजो — सीधे developer तक पहुँचेगी।\nEnglish: Rate the app and send feedback — reaches the developer directly.")
         self._ma(ms, "Keyboard Shortcuts…", self.show_shortcuts, "हिन्दी: कीबोर्ड के shortcuts की सूची देखो।\nEnglish: View keyboard shortcuts.")
         self.act_simple = self._ma(ms, tr("simple_on", self._lang), self.toggle_simple_mode, "हिन्दी: Simple mode: सिर्फ़ ज़रूरी buttons दिखें (नए users के लिए आसान)।\nEnglish: Simple mode: show only the essential buttons.")
         self.act_simple.setCheckable(True)
@@ -6828,7 +6837,113 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _an_apply(self, data):
         if data and data.get("ok"):
             self._an_world = data
+            try:
+                self._an_handle_broadcast(data)
+            except Exception:
+                pass
+            try:
+                self._an_apply_rconfig(data.get("rconfig"))
+            except Exception:
+                pass
         self._an_update_box()
+
+    def _an_handle_broadcast(self, data):
+        """Server (admin panel) se aaya message app me ek baar dikhao."""
+        msg = (data.get("broadcast") or "").strip()
+        bid = int(data.get("broadcastId") or 0)
+        if not msg or not bid:
+            return
+        if self._config.get("last_broadcast_id") == bid:
+            return                       # ye message pehle dikha chuke
+        self._config["last_broadcast_id"] = bid
+        try:
+            save_config(self._config)
+        except Exception:
+            pass
+        try:
+            self.status.showMessage("📣 " + msg, 15000)
+        except Exception:
+            pass
+        try:
+            QtWidgets.QMessageBox.information(
+                self, self.L("ApneScan — Sandesh", "ApneScan — Message"), msg)
+        except Exception:
+            pass
+
+    def _an_apply_rconfig(self, cfg):
+        """Remote config: admin panel se bina update ke kuch safe settings badlo.
+        Har naye config ko ek hi baar lagate hain (user baad me khud badal sakta)."""
+        if not isinstance(cfg, dict) or not cfg:
+            return
+        self._rconfig = cfg
+        try:
+            import json as _j
+            sig = _j.dumps(cfg, sort_keys=True)
+        except Exception:
+            sig = str(cfg)
+        if self._config.get("rcfg_sig") == sig:
+            return
+        self._config["rcfg_sig"] = sig
+        # sirf jaani-pehchaani safe key: default DPI
+        dpi = cfg.get("default_dpi")
+        if dpi:
+            try:
+                self._opts["dpi"] = max(50, min(1200, int(dpi)))
+            except Exception:
+                pass
+        try:
+            save_config(self._config)
+            self._save_opts()
+        except Exception:
+            pass
+
+    def _an_event(self, feat):
+        """Feature usage worldwide bhejo (OCR/compress/share/print/import…)."""
+        try:
+            self._an_report("event", feat=feat)
+        except Exception:
+            pass
+
+    def _an_scan_meta(self):
+        """Scan ke settings (DPI / colour / size) + scanner model — worldwide
+        breakdown ke liye. Sirf ginti/setting jaati hai, koi document nahi."""
+        col = {"color": "Colour", "gray": "Grayscale", "bw": "B&W"}.get(
+            str(self._opts.get("color", "")), str(self._opts.get("color", "")))
+        return {"dpi": self._opts.get("dpi", ""), "col": col,
+                "sz": self._opts.get("page_size", ""),
+                "sm": (self._opts.get("scanner_name", "") or "")[:40]}
+
+    def _an_feedback(self, rating, msg):
+        """User feedback + rating admin panel ko bhejo."""
+        p = {"action": "feedback", "client": self._get_client_id(), "v": VERSION,
+             "c": self._an_country(), "u": self._user_name(),
+             "rating": str(int(rating)), "msg": (msg or "")[:400]}
+        self._an_fetch(p, self._an_apply)
+
+    def send_feedback(self):
+        """Feedback/rating dialog — seedha admin panel me pahunchta hai."""
+        items = ["⭐⭐⭐⭐⭐  (5)", "⭐⭐⭐⭐  (4)", "⭐⭐⭐  (3)",
+                 "⭐⭐  (2)", "⭐  (1)"]
+        r, ok = QtWidgets.QInputDialog.getItem(
+            self, self.L("Feedback bhejo", "Send feedback"),
+            self.L("App ko kitne star doge?", "How many stars?"),
+            items, 0, False)
+        if not ok:
+            return
+        rating = 5 - items.index(r)
+        msg, ok2 = QtWidgets.QInputDialog.getMultiLineText(
+            self, self.L("Aapki raay", "Your feedback"),
+            self.L("Kya achha laga / kya sudhaar chahiye? (optional)",
+                   "What did you like / what to improve? (optional)"), "")
+        if not ok2:
+            return
+        try:
+            self._an_feedback(rating, msg.strip())
+            self.status.showMessage(
+                self.L("🙏 Shukriya! Aapki raay bhej di gayi.",
+                       "🙏 Thanks! Your feedback was sent."), 6000)
+        except Exception:
+            pass
 
     def _an_country(self):
         """System se desh-code (jaise 'IN') — sirf ginti/desh-breakdown ke liye."""
@@ -6904,8 +7019,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                         "m": self._opts.get("scanner_method", ""),
                         "u": self._user_name()}, self._an_apply)
 
-    def _an_report(self, action, n=0, imp=0, prt=0):
-        """scan / ping / event (import-print) server ko bhejo + display taaza."""
+    def _an_report(self, action, n=0, imp=0, prt=0, feat="", meta=None):
+        """scan / ping / event (import-print-feature) server ko bhejo + display taaza."""
         p = {"action": action, "client": self._get_client_id(), "v": VERSION,
              "c": self._an_country(), "m": self._opts.get("scanner_method", ""),
              "u": self._user_name()}
@@ -6915,6 +7030,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
             p["imp"] = str(imp)
         if prt:
             p["prt"] = str(prt)
+        if feat:
+            p["feat"] = str(feat)[:20]
+        if meta:
+            for k, v in meta.items():
+                if v not in (None, ""):
+                    p[k] = str(v)[:40]
         self._an_fetch(p, self._an_apply)
 
     def _an_wv(self, key):
@@ -9033,6 +9154,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._copy_file_to_clipboard(pdf)
         self._open_whatsapp()
         self._pstats_bump(shared=1)
+        self._an_event("whatsapp")
         # bina roke chhoti si hint (koi blocking dialog / Explorer popup nahi)
         self.status.showMessage(self.L(
             "WhatsApp khul gaya — contact chuno, phir Ctrl+V (file copy ho chuki hai)",
@@ -9044,6 +9166,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if not pdf:
             return
         self._pstats_bump(shared=1)
+        self._an_event("email")
         # Pehle Outlook try karo (attachment ke saath draft khulta hai)
         if HAS_W32:
             try:
@@ -9450,6 +9573,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             L("%d files compress" % len(pdfs), "Compress %d files" % len(pdfs)))
         if limit is False:
             return
+        self._an_event("compress")
 
         def job():
             results = []
@@ -11883,7 +12007,7 @@ if the toggle is ticked).</p>
                 QtWidgets.QApplication.beep()
             except Exception:
                 pass
-        self._an_report("scan", n=kept)      # worldwide scan-count + refresh
+        self._an_report("scan", n=kept, meta=self._an_scan_meta())   # worldwide scan-count + settings + refresh
         # (naam har page ke scan hote hi background me padh liya gaya —
         #  isliye yahan bulk naming ka intezaar nahi)
         if self._opts.get("auto_save") and kept:
@@ -11988,7 +12112,7 @@ if the toggle is ticked).</p>
         if count:
             self.status.showMessage("Imported %d page(s)." % count, 4000)
             self._pstats_bump(imports=count)     # personal
-            self._an_report("event", imp=count)  # worldwide + refresh
+            self._an_report("event", imp=count, feat="import")  # worldwide + refresh
             self._an_update_box()
         else:
             self.status.clearMessage()
@@ -17677,7 +17801,7 @@ if the toggle is ticked).</p>
         finally:
             painter.end()
         self._pstats_bump(prints=1)          # personal
-        self._an_report("event", prt=1)      # worldwide + refresh
+        self._an_report("event", prt=1, feat="print")      # worldwide + refresh
         self._an_update_box()
         self.status.showMessage("Sent to printer.", 4000)
 
@@ -17876,6 +18000,36 @@ def main():
             with open(CRASH_PATH, "a", encoding="utf-8") as fh:
                 fh.write("\n\n==== %s | ApneScan v%s ====\n" % (datetime.datetime.now(), VERSION))
                 fh.write("".join(traceback.format_exception(t, v, tb)))
+        except Exception:
+            pass
+        # server (admin panel) ko chhoti si crash-summary bhejo taaki agli
+        # update me fix ho sake (koi document/patient data nahi jaata).
+        try:
+            summary = "".join(traceback.format_exception_only(t, v)).strip()
+            try:
+                _cid = win._get_client_id()
+                _url = win._an_url()
+            except Exception:
+                _cid = ""
+                _url = DEFAULT_STATS_URL
+
+            def _snd():
+                try:
+                    import urllib.request as _U
+                    import urllib.parse as _P
+                    import ssl as _ssl
+                    if not _url:
+                        return
+                    _ctx = _ssl._create_unverified_context()
+                    _full = _url + ("&" if "?" in _url else "?") + _P.urlencode(
+                        {"action": "crash", "client": _cid, "v": VERSION,
+                         "err": summary[:200]})
+                    _U.urlopen(_U.Request(_full, headers={"User-Agent": "ApneScan/%s" % VERSION}),
+                               timeout=8, context=_ctx)
+                except Exception:
+                    pass
+            import threading as _th
+            _th.Thread(target=_snd, daemon=True).start()
         except Exception:
             pass
         try:
