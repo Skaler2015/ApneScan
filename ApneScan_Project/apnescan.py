@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "123"
+VERSION = "124"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -233,7 +233,9 @@ SCANNER_PORTS = (80, 443, 8080, 9100)
 
 # Built-in ApneScan worldwide-stats endpoint (Google Apps Script). Every install
 # reports scan COUNTS here (never any document/patient data).
-DEFAULT_STATS_URL = "https://script.google.com/macros/s/AKfycbzwh2HQHXKe_09wgXpSh-NZQu-GbR7N-NVmtUEyRpl8oOa-MdoJ9ShqHB_i0QCcuqe2_w/exec"
+# Worldwide-ginti ab apne PHP server par (Google Apps Script se hataya gaya).
+# Agar aap stats.php kisi aur jagah rakho to Settings -> "Stats server URL" me badlo.
+DEFAULT_STATS_URL = "https://apnesoftware.com/stats.php"
 
 _TESS_GUESSES = [
     r"C:\Program Files\Tesseract-OCR\tesseract.exe",
@@ -5933,6 +5935,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, "🔍 Scanner auto-detect (LAN + USB)…", self.auto_detect_scanner, "हिन्दी: स्कैनर खुद पहचानो — LAN (network) पर है या USB पर, दोनों ढूँढकर सबसे बेहतर चुन लेता है। कुछ सोचना नहीं पड़ता।\nEnglish: Auto-detect the scanner — finds it on LAN or USB automatically and picks the best.")
         self._ma(ms, "Find scanner (network only)…", self.find_scanners, "हिन्दी: सिर्फ़ network (eSCL) पर स्कैनर ढूँढो।\nEnglish: Discover only network (eSCL) scanners.")
         self._ma(ms, "Scanner IP…", self.set_scanner_ip, "हिन्दी: network स्कैनर का IP सेट करो (जैसे 192.168.1.8)।\nEnglish: Set the network scanner IP.")
+        self._ma(ms, "📊 Stats server URL…", self.set_stats_url, "हिन्दी: worldwide-ginti का server URL (जैसे आपका PHP: https://apnesoftware.com/stats.php)। खाली छोड़ने पर default।\nEnglish: The worldwide-stats server URL (e.g. your PHP: https://apnesoftware.com/stats.php). Empty = default.")
         self._ma(ms, "Keyboard Shortcuts…", self.show_shortcuts, "हिन्दी: कीबोर्ड के shortcuts की सूची देखो।\nEnglish: View keyboard shortcuts.")
         self.act_simple = self._ma(ms, tr("simple_on", self._lang), self.toggle_simple_mode, "हिन्दी: Simple mode: सिर्फ़ ज़रूरी buttons दिखें (नए users के लिए आसान)।\nEnglish: Simple mode: show only the essential buttons.")
         self.act_simple.setCheckable(True)
@@ -7659,7 +7662,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
         cur = self._stats_url()
         url, ok = QtWidgets.QInputDialog.getText(
             self, "Stats server URL",
-            'Google Apps Script web app URL (…/exec):\n(leave empty to turn stats off)',
+            self.L("Worldwide-ginti ka server URL (khaali = band):\n"
+                   "Apne PHP ke liye jaise:  https://apnesoftware.com/stats.php",
+                   "Worldwide-stats server URL (empty = off):\n"
+                   "For your PHP e.g.:  https://apnesoftware.com/stats.php"),
             text=cur)
         if not ok:
             return
@@ -7668,8 +7674,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
             save_config(self._config)
         except Exception:
             pass
-        self._set_stats_display(None)
-        self._refresh_stats()
+        try:
+            self._an_refresh()
+        except Exception:
+            pass
+        self.status.showMessage(self.L("📊 Stats server set: ", "📊 Stats server set: ")
+                                + (url.strip() or self.L("(default)", "(default)")), 6000)
 
     def test_stats_connection(self):
         """Stats server se connection ka LIVE test — exact galti dikhata hai
