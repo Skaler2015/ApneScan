@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "132"
+VERSION = "133"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13555,10 +13555,10 @@ if the toggle is ticked).</p>
         """Kai files ko ek naam + number (naam_001, naam_002…) me rename karo."""
         if not files:
             return
-        base, ok = QtWidgets.QInputDialog.getText(
-            self, self.L("Bulk rename", "Bulk rename"),
+        base, ok = self._ask_name(
+            self.L("Bulk rename", "Bulk rename"),
             self.L("Sabhi ke liye ek naam (aage number apne aap lagega):",
-                   "One base name (a number is appended automatically):"), text="doc")
+                   "One base name (a number is appended automatically):"), "doc")
         if not ok or not base.strip():
             return
         base = sanitize(underscore_name(base.strip())) or "doc"
@@ -14323,7 +14323,7 @@ if the toggle is ticked).</p>
 
     def _rename_library_file(self, path):
         stem, ext = os.path.splitext(os.path.basename(path))
-        name, ok = QtWidgets.QInputDialog.getText(self, "Rename", "New name:", text=stem)
+        name, ok = self._ask_name("Rename", "New name:", stem)
         if not ok or not name.strip():
             return
         new = os.path.join(os.path.dirname(path),
@@ -16880,14 +16880,69 @@ if the toggle is ticked).</p>
             "\u2795 The new scan will be inserted right after this page."), 5000)
         self.do_scan()
 
+    # ============ NAAM SUGGESTIONS (rename autocomplete) ============
+    # Aapke pehle likhe naam is PC par yaad rahte hain aur agli baar rename/naam
+    # likhte waqt dropdown me sujhav aate hain. Ye sirf aapke computer par hai
+    # (config me) — server par kabhi nahi jaata, doosre user ko nahi dikhta.
+    def _name_history(self):
+        h = self._config.get("name_history")
+        return h if isinstance(h, list) else []
+
+    def _remember_name(self, name):
+        name = (name or "").strip()
+        if not name:
+            return
+        h = [x for x in self._name_history()
+             if isinstance(x, str) and x.strip().lower() != name.lower()]
+        h.insert(0, name)                       # sabse naya sabse upar
+        self._config["name_history"] = h[:500]  # last 500 naam rakho
+        try:
+            save_config(self._config)
+        except Exception:
+            pass
+
+    def _ask_name(self, title, label, text=""):
+        """Naam poochho + pehle likhe naamon ka dropdown sujhav. Jo naam abhi
+        type ho raha hai usse milte-julte purane naam dikhte hain. Naya naam
+        yaad rakh liya jaata hai (per-user, sirf is PC par). Returns (name, ok)."""
+        dlg = QtWidgets.QInputDialog(self)
+        dlg.setInputMode(QtWidgets.QInputDialog.TextInput)
+        dlg.setWindowTitle(title)
+        dlg.setLabelText(label)
+        dlg.setTextValue(text or "")
+        try:
+            dlg.resize(460, dlg.height())
+        except Exception:
+            pass
+        try:
+            le = dlg.findChild(QtWidgets.QLineEdit)
+            hist = self._name_history()
+            if le is not None and hist:
+                comp = QtWidgets.QCompleter(hist, le)
+                comp.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
+                comp.setCompletionMode(QtWidgets.QCompleter.PopupCompletion)
+                comp.setMaxVisibleItems(12)
+                try:
+                    comp.setFilterMode(QtCore.Qt.MatchContains)   # kahin bhi milta naam
+                except Exception:
+                    pass                                          # purane Qt: prefix match
+                le.setCompleter(comp)
+        except Exception:
+            pass
+        ok = (dlg.exec_() == QtWidgets.QDialog.Accepted)
+        val = dlg.textValue()
+        if ok:
+            self._remember_name(val)
+        return val, ok
+
     def rename_current_page(self):
         # If SEVERAL pages are selected, rename them ALL to the same name at once.
         sel = self.list.selectedItems()
         if len(sel) > 1:
             cur = sel[0].data(TITLE_ROLE) or ""
-            name, ok = QtWidgets.QInputDialog.getText(
-                self, "Rename %d pages" % len(sel),
-                "One name for all %d selected pages:" % len(sel), text=cur)
+            name, ok = self._ask_name(
+                "Rename %d pages" % len(sel),
+                "One name for all %d selected pages:" % len(sel), cur)
             if not ok:
                 return
             name = underscore_name(name)
@@ -16904,7 +16959,7 @@ if the toggle is ticked).</p>
         if it is None:
             self._warn("Select a page first."); return
         cur = it.data(TITLE_ROLE) or ""
-        name, ok = QtWidgets.QInputDialog.getText(self, "Rename", "Name for this page:", text=cur)
+        name, ok = self._ask_name("Rename", "Name for this page:", cur)
         if not ok:
             return
         name = underscore_name(name)
