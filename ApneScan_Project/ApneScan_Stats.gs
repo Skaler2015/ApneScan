@@ -347,36 +347,86 @@ function _bumpCounter(key, n) {
   return c.val + n;
 }
 
+// TEZ _stats: har sheet SIRF EK BAAR padho (pehle 40+ baar padhta tha, isliye
+// request time-out hoti thi aur app me "..." dikhta tha). Ye READ-ONLY hai —
+// peak/peakAll ka update ab scan/ping par hota hai (_handle me), stats-poll par
+// nahi. Isse har poll bahut tez ho gaya.
 function _stats(client) {
-  var online = _onlineCount();
-  var rk = _rankOf(client || "");
-  var top = _topScorers(10);
+  var nowMs = new Date().getTime();
+  function fmt(ms) { return Utilities.formatDate(new Date(ms), TZ, "yyyy-MM-dd"); }
+  var todayStr = fmt(nowMs);
+
+  // ---- totals sheet: ek baar ----
+  var td = _sheet("totals", ["key", "value"]).getDataRange().getValues();
+  var T = {};
+  for (var i = 0; i < td.length; i++) T[String(td[i][0])] = Number(td[i][1]) || 0;
+  function cv(k) { return T[k] || 0; }
+  var week = [], month = [], bestDay = 0;
+  for (var j = 6; j >= 0; j--) { var d1 = fmt(nowMs - j * 86400000); week.push([d1, cv("day_" + d1)]); }
+  for (var j2 = 29; j2 >= 0; j2--) { var d2 = fmt(nowMs - j2 * 86400000); month.push([d2, cv("day_" + d2)]); }
+  for (var k in T) { if (k.indexOf("day_") === 0) bestDay = Math.max(bestDay, T[k]); }
+
+  // ---- online sheet: ek baar ----
+  var od = _sheet("online", ["client", "last_seen"]).getDataRange().getValues();
+  var WINDOW = 5 * 60 * 1000, online = 0;
+  for (var oi = 1; oi < od.length; oi++) { if (nowMs - (Number(od[oi][1]) || 0) <= WINDOW) online++; }
+
+  // ---- clients sheet: ek baar (users/rank/versions/countries/methods/top/newToday) ----
+  var cd = _sheet("clients", _CLIENT_HDR()).getDataRange().getValues();
+  var versions = {}, countries = {}, methods = {}, scores = [], mine = 0, newToday = 0;
+  for (var ci = 1; ci < cd.length; ci++) {
+    var vv = String(cd[ci][3] || "").trim(); if (vv) versions[vv] = (versions[vv] || 0) + 1;
+    var cc = String(cd[ci][4] || "").trim(); if (cc) countries[cc] = (countries[cc] || 0) + 1;
+    var mm = String(cd[ci][6] || "").trim(); if (mm) methods[mm] = (methods[mm] || 0) + 1;
+    var sc = Number(cd[ci][5]) || 0; scores.push(sc);
+    if (client && String(cd[ci][0]) === String(client)) mine = sc;
+    var fs = Number(cd[ci][1]) || 0;
+    if (fs && fmt(fs) === todayStr) newToday++;
+  }
+  scores.sort(function (a, b) { return b - a; });
+  var rank = 1; for (var ri = 0; ri < scores.length; ri++) { if (scores[ri] > mine) rank++; }
+  var top = scores.slice(0, 10);
+
+  // ---- hourly sheet: ek baar (aaj ke 24 ghante + is ghante ki ginti) ----
+  var hd = _sheet("hourly", ["hour", "count"]).getDataRange().getValues();
+  var todayHours = []; for (var h = 0; h < 24; h++) todayHours.push(0);
+  var curHourKey = Utilities.formatDate(new Date(nowMs), TZ, "yyyy-MM-dd-HH");
+  var hourCount = 0;
+  for (var hi = 1; hi < hd.length; hi++) {
+    var hk = String(hd[hi][0] || "");
+    if (hk.indexOf(todayStr + "-") === 0) {
+      var hh = parseInt(hk.slice(todayStr.length + 1), 10);
+      if (hh >= 0 && hh < 24) todayHours[hh] = Number(hd[hi][1]) || 0;
+    }
+    if (hk === curHourKey) hourCount = Number(hd[hi][1]) || 0;
+  }
+
   return {
     ok: true,
-    srv: 5,                 // server code version — redeploy check ke liye
-    time: Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd HH:mm"),
-    today_key: _dayKey(),
-    total: _getTotal(),
-    today: _todayCount(),
+    srv: 6,                 // server code version — redeploy check ke liye
+    time: Utilities.formatDate(new Date(nowMs), TZ, "yyyy-MM-dd HH:mm"),
+    today_key: "day_" + todayStr,
+    total: cv("total_scans"),
+    today: cv("day_" + todayStr),
     online: online,
-    users: _usersCount(),
-    newToday: _newUsersToday(),
-    week: _week(),
-    month: _month(),
-    todayHours: _todayHours(),
-    peak: _bumpPeak(online),
-    peakAll: _peakAll(online),
-    bestDay: _bestDay(),
-    hour: _hourCount(),
-    imports: _getCounter("imports").val,
-    prints: _getCounter("prints").val,
-    versions: _breakdown(4),
-    countries: _breakdown(5),
-    methods: _methods(),
+    users: Math.max(0, cd.length - 1),
+    newToday: newToday,
+    week: week,
+    month: month,
+    todayHours: todayHours,
+    peak: cv("peak_" + todayStr),
+    peakAll: cv("peak_all"),
+    bestDay: bestDay,
+    hour: hourCount,
+    imports: cv("imports"),
+    prints: cv("prints"),
+    versions: versions,
+    countries: countries,
+    methods: methods,
     top: top,
     topscans: (top.length ? top[0] : 0),
-    rank: rk.rank,
-    myscans: rk.myscans
+    rank: rank,
+    myscans: mine
   };
 }
 
@@ -413,9 +463,11 @@ function _handle(e) {
         _bumpHour(n);
         _touchOnline(client);
         _touchClient(client, p.v || "", p.c || "", n, p.m || "");
+        var _on = _onlineCount(); _bumpPeak(_on); _peakAll(_on);   // peak sirf yahan
       } else if (action === "ping") {
         _touchOnline(client);
         _touchClient(client, p.v || "", p.c || "", 0, p.m || "");
+        var _on2 = _onlineCount(); _bumpPeak(_on2); _peakAll(_on2);
       }
       // import/print ki ginti — kisi bhi action ke saath aa sakti hai
       var imp = Math.max(0, Math.min(500, parseInt(p.imp || "0", 10) || 0));
