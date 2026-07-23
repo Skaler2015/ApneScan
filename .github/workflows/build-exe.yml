@@ -7,6 +7,9 @@ on:
       - claude/content-review-jjokt7
       - main
 
+permissions:
+  contents: write        # GitHub Release + tag banane ke liye zaroori
+
 jobs:
   build:
     runs-on: windows-latest

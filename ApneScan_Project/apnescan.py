@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "136"
+VERSION = "137"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1216,17 +1216,11 @@ class UpdateChecker(QtCore.QThread):
     def run(self):
         import urllib.request as U
         import json as J
-        # 1) WEBSITE version.txt — sabse naya (har deploy par banta hai)
-        try:
-            req = U.Request(WEBSITE_URL + "/version.txt",
-                            headers={"User-Agent": "ApneScan"})
-            tag = _urlopen_safe(req, timeout=10).read().decode("utf-8", "ignore").strip()[:20]
-            if re.search(r"\d", tag or ""):
-                self.result.emit(tag, DOWNLOAD_PAGE)
-                return
-        except Exception:
-            pass
-        # 2) GitHub Releases (latest) — website down ho to bhi chale
+        # GitHub Release ko PEHLE dekho — kyunki wahan version-tag aur exe SAATH
+        # bante hain (hamesha match). Website ka version.txt kabhi exe se aage
+        # nikal jaata hai (deploy pehle, build baad me) — isse "update ho gaya
+        # par purana hi khula" wali dikkat aati thi. Isliye GitHub source-of-truth.
+        # 1) GitHub Releases (latest)
         try:
             req = U.Request(UPDATE_API, headers={"User-Agent": "ApneScan"})
             data = J.loads(_urlopen_safe(req, timeout=10).read().decode("utf-8", "ignore"))
@@ -1236,7 +1230,7 @@ class UpdateChecker(QtCore.QThread):
                 return
         except Exception:
             pass
-        # 3) GitHub Releases list — 'latest' na mile (draft/prerelease) to bhi
+        # 2) GitHub Releases list (agar 'latest' na mile)
         try:
             req = U.Request("https://api.github.com/repos/Skaler2015/ApneScan/releases?per_page=5",
                             headers={"User-Agent": "ApneScan"})
@@ -1247,6 +1241,16 @@ class UpdateChecker(QtCore.QThread):
                     if re.search(r"\d", tag):
                         self.result.emit(tag, str(rel.get("html_url") or DOWNLOAD_PAGE))
                         return
+        except Exception:
+            pass
+        # 3) WEBSITE version.txt — fallback (GitHub na chale to)
+        try:
+            req = U.Request(WEBSITE_URL + "/version.txt",
+                            headers={"User-Agent": "ApneScan"})
+            tag = _urlopen_safe(req, timeout=10).read().decode("utf-8", "ignore").strip()[:20]
+            if re.search(r"\d", tag or ""):
+                self.result.emit(tag, DOWNLOAD_PAGE)
+                return
         except Exception:
             pass
         self.result.emit("", "")
@@ -9021,8 +9025,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         Pehle website se, na mile (website down/SSL) to GitHub Releases se —
         taaki update kabhi na atke."""
         urls = [
-            "https://apnescan.apnesoft.com/ApneScan.exe",                                   # website (sabse naya)
-            "https://github.com/Skaler2015/ApneScan/releases/latest/download/ApneScan.exe",  # GitHub backup
+            "https://github.com/Skaler2015/ApneScan/releases/latest/download/ApneScan.exe",  # GitHub (version se match)
+            "https://apnescan.apnesoft.com/ApneScan.exe",                                   # website fallback
         ]
 
         def job():
