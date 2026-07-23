@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "116"
+VERSION = "117"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5824,18 +5824,25 @@ class ScannerWindow(QtWidgets.QMainWindow):
     # ---- profiles / options ----
     def _ensure_default_profile(self):
         """Install ke baad (jab koi profile na ho) ek 'Default' profile khud
-        bana do: DPI 150, 24-bit colour, page-size Auto, single side. Device
-        pehli-baar auto-detect se aata hai (auto_detect_scanner)."""
+        bana do — SPEC:
+            Display Name : Default
+            Device       : jo user select kare wahi (auto-detect / device chunne
+                           par is profile me apne aap bhar jaata hai)
+            Resolution   : 150 DPI
+            Colour Mode  : Colour
+            Page Size    : Auto
+        Device pehli-baar khaali reh sakta hai; user ke device chunte hi
+        _sync_selected_profile_device()/_detect_device_name() ise bhar dete hain."""
         if self._profiles:
             return
         self._profiles = [{
             "name": "Default",
             "dpi": 150,
-            "color": "color",
+            "color": "color",          # Colour
             "duplex": False,
-            "page_size": "auto",
+            "page_size": "auto",       # Auto
             "paper_source": "feeder",
-            "source_name": self._opts.get("scanner_name", ""),
+            "source_name": self._opts.get("scanner_name", ""),   # jo user select kare
         }]
         self._config["profiles"] = self._profiles
         self._config["selected_profile"] = "Default"
@@ -5843,6 +5850,23 @@ class ScannerWindow(QtWidgets.QMainWindow):
             save_config(self._config)
         except Exception:
             pass
+
+    def _fill_default_profile_device(self, name):
+        """Agar 'Default' profile ka Device khaali hai to use user ke chune hue
+        device se bhar do (spec: 'Device: jo user select kare')."""
+        if not name:
+            return
+        changed = False
+        for p in (self._profiles or []):
+            if p.get("name") == "Default" and not p.get("source_name"):
+                p["source_name"] = name
+                changed = True
+        if changed:
+            self._config["profiles"] = self._profiles
+            try:
+                save_config(self._config)
+            except Exception:
+                pass
 
     def _refresh_profile_combo(self):
         self.cmb_profile.blockSignals(True); self.cmb_profile.clear()
@@ -11263,6 +11287,17 @@ if the toggle is ticked).</p>
                 msg = self.L("Scanner set ho gaya (USB): %s" % disp,
                              "Scanner set (USB): %s" % disp)
             self._opts["scanner_name"] = disp
+            # Device: chuna hua device abhi ke profile me bhi rakh do. TWAIN me
+            # exact source_name upar set ho chuka; WIA/eSCL me friendly naam
+            # (taaki 'Default' profile ka "Device: jo user select kare" bhi bhare).
+            try:
+                prof = self._selected_profile()
+                if prof is not None and kind != "twain":
+                    prof["source_name"] = disp
+                    self._config["profiles"] = self._profiles
+                self._fill_default_profile_device(disp)
+            except Exception:
+                pass
             self._save_opts(); save_config(self._config)
             try:
                 self._refresh_conn_and_method()
@@ -11354,6 +11389,11 @@ if the toggle is ticked).</p>
             if name:
                 self._opts["scanner_name"] = name
                 self._save_opts()
+                # 'Default' profile ka Device khaali ho to isi se bhar do
+                try:
+                    self._fill_default_profile_device(name)
+                except Exception:
+                    pass
                 try:
                     self.dev_lbl.setText(name)
                 except Exception:
