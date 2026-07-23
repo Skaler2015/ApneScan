@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "138"
+VERSION = "139"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -4926,13 +4926,21 @@ class ImageEditor(QtWidgets.QDialog):
 
     # ================= TEXT / OCR =================
     def _ocr_text(self, im):
+        lang = "eng+hin"
         try:
-            return pytesseract.image_to_string(im.convert("RGB"), lang="eng+hin")
+            lang = self.win._ocr_lang()
         except Exception:
-            try:
-                return pytesseract.image_to_string(im.convert("RGB"))
+            pass
+        try:
+            return pytesseract.image_to_string(im.convert("RGB"), lang=lang)
+        except Exception:
+            try:                       # chuni bhasha ka pack na ho to eng+hin
+                return pytesseract.image_to_string(im.convert("RGB"), lang="eng+hin")
             except Exception:
-                return ""
+                try:
+                    return pytesseract.image_to_string(im.convert("RGB"))
+                except Exception:
+                    return ""
 
     def _ocr_copy(self):
         if not tesseract_available():
@@ -5991,6 +5999,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, "Scanner IP…", self.set_scanner_ip, "हिन्दी: network स्कैनर का IP सेट करो (जैसे 192.168.1.8)।\nEnglish: Set the network scanner IP.")
         self._ma(ms, "📊 Stats server URL…", self.set_stats_url, "हिन्दी: worldwide-ginti का server URL (जैसे आपका PHP: https://apnesoftware.com/stats.php)। खाली छोड़ने पर default।\nEnglish: The worldwide-stats server URL (e.g. your PHP: https://apnesoftware.com/stats.php). Empty = default.")
         self._ma(ms, "👤 Analytics me naam…", self.set_user_name, "हिन्दी: Analytics में आपका नाम/clinic — ताकि किसने कितने scan किए, नाम के साथ दिखे।\nEnglish: Your name/clinic for analytics — so scans show per name.")
+        self._ma(ms, "🔤 OCR bhashaayein…", self.choose_ocr_langs, "हिन्दी: OCR किन भाषाओं में पढ़े चुनो (Hindi, English, Gujarati, Marathi, Tamil आदि)। ज़्यादा भाषा = थोड़ा धीमा।\nEnglish: Choose which languages OCR should read (Hindi, English, Gujarati, Marathi, Tamil, …). More languages = a bit slower.")
         self._ma(ms, "💬 Feedback / rating bhejo…", self.send_feedback, "हिन्दी: App को rating दो और अपनी राय भेजो — सीधे developer तक पहुँचेगी।\nEnglish: Rate the app and send feedback — reaches the developer directly.")
         self._ma(ms, "Keyboard Shortcuts…", self.show_shortcuts, "हिन्दी: कीबोर्ड के shortcuts की सूची देखो।\nEnglish: View keyboard shortcuts.")
         self.act_simple = self._ma(ms, tr("simple_on", self._lang), self.toggle_simple_mode, "हिन्दी: Simple mode: सिर्फ़ ज़रूरी buttons दिखें (नए users के लिए आसान)।\nEnglish: Simple mode: show only the essential buttons.")
@@ -6019,7 +6028,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mh, "View error report…", self.open_crash_report, "हिन्दी: अगर ऐप कभी crash हुई हो तो उसकी report खोलो (feedback में भेजने के लिए)।\nEnglish: Open the saved crash report, if any.")
         self._ma(mh, tr("feedback", self._lang), self.send_feedback, "हिन्दी: सुझाव/शिकायत भेजो।\nEnglish: Send feedback.")
         mh.addSeparator()
+        self._ma(mh, "❓ FAQ (aksar puchhe sawaal)…", self.show_faq, "हिन्दी: आम सवाल-जवाब — स्कैनर कनेक्ट, OCR, PDF, update वग़ैरह।\nEnglish: Frequently asked questions.")
         self._ma(mh, "📣 Share ApneScan (tell friends)…", self.share_app, "हिन्दी: इस free ऐप को दोस्तों/customers तक पहुँचाओ — WhatsApp, link copy, QR code या poster/pamphlet (दुकान/अस्पताल में लगाने लायक)। जितने ज़्यादा लोग, उतना अच्छा।\nEnglish: Spread this free app — WhatsApp, copy link, QR code, or a printable poster for your shop/clinic.")
+        self._ma(mh, "☕ Support / Donate (app free rakhne me madad)…", self.donate, "हिन्दी: ApneScan हमेशा FREE है। पसंद आया तो थोड़ा सहयोग करके इसे चलते रहने में मदद कर सकते हैं।\nEnglish: ApneScan is always FREE. If you like it, a small donation helps keep it running.")
         self._ma(mh, "⭐ Review / Star (GitHub)…", self.ask_review, "हिन्दी: पसंद आया तो GitHub पर ⭐ star या review दें — इससे ऐप और लोगों तक पहुँचेगा।\nEnglish: Like it? Give a ⭐ or a review on GitHub — it helps others find ApneScan.")
         self._ma(mh, tr("about", self._lang), self.show_about, "हिन्दी: ऐप के बारे में।\nEnglish: About this app.")
 
@@ -6996,6 +7007,113 @@ class ScannerWindow(QtWidgets.QMainWindow):
                        "🙏 Thanks! Your feedback was sent."), 6000)
         except Exception:
             pass
+
+    # ===================== OCR LANGUAGES (feature 12) =====================
+    OCR_LANGS = [("eng", "English"), ("hin", "हिन्दी Hindi"), ("guj", "ગુજરાતી Gujarati"),
+                 ("mar", "मराठी Marathi"), ("tam", "தமிழ் Tamil"), ("tel", "తెలుగు Telugu"),
+                 ("ben", "বাংলা Bengali"), ("pan", "ਪੰਜਾਬੀ Punjabi"), ("kan", "ಕನ್ನಡ Kannada"),
+                 ("mal", "മലയാളം Malayalam"), ("ori", "ଓଡ଼ିଆ Odia"), ("urd", "اردو Urdu")]
+
+    def _ocr_lang(self):
+        """OCR ke liye chuni gayi bhashaayein (Tesseract format, jaise 'eng+hin')."""
+        return self._opts.get("ocr_langs") or "eng+hin"
+
+    def choose_ocr_langs(self):
+        """User chun sakta hai OCR kin bhashaon me padhe."""
+        cur = set((self._opts.get("ocr_langs") or "eng+hin").split("+"))
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("OCR bhashaayein", "OCR languages"))
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel(self.L(
+            "OCR kin bhashaon me text padhe? (zyada = thoda dheere)",
+            "Which languages should OCR read? (more = a bit slower)")))
+        boxes = {}
+        lw = QtWidgets.QWidget(); lg = QtWidgets.QVBoxLayout(lw)
+        for code, name in self.OCR_LANGS:
+            cb = QtWidgets.QCheckBox(name + "  (" + code + ")")
+            cb.setChecked(code in cur)
+            lg.addWidget(cb); boxes[code] = cb
+        sc = QtWidgets.QScrollArea(); sc.setWidget(lw); sc.setWidgetResizable(True); sc.setMinimumHeight(300)
+        v.addWidget(sc)
+        note = QtWidgets.QLabel(self.L(
+            "Note: nayi bhasha ke liye us bhasha ka Tesseract language-pack install hona chahiye.",
+            "Note: a language needs its Tesseract language-pack installed to work."))
+        note.setStyleSheet("color:#64748b;font-size:11px"); note.setWordWrap(True); v.addWidget(note)
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject); v.addWidget(bb)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        chosen = [c for c, _ in self.OCR_LANGS if boxes[c].isChecked()]
+        if not chosen:
+            chosen = ["eng", "hin"]
+        self._opts["ocr_langs"] = "+".join(chosen)
+        self._save_opts()
+        self.status.showMessage(self.L("🔤 OCR bhasha set: ", "🔤 OCR languages: ")
+                                + self._opts["ocr_langs"], 5000)
+
+    # ===================== DONATE / SUPPORT (feature 31) =====================
+    def donate(self):
+        """ApneScan free hai — sahyog ka option (koi majboori nahi)."""
+        self._an_event("donate")
+        url = (self._rconfig.get("donate_url") if isinstance(getattr(self, "_rconfig", None), dict) else None) \
+            or "https://apnescan.apnesoft.com/donate"
+        box = QtWidgets.QMessageBox(self)
+        box.setWindowTitle(self.L("Support ApneScan", "Support ApneScan"))
+        box.setIcon(QtWidgets.QMessageBox.Information)
+        box.setText(self.L(
+            "ApneScan hamesha <b>100% FREE</b> rahega. 🙏<br><br>Agar isne aapka "
+            "kaam aasan kiya, to thoda sa sahyog ise chalte rehne aur naye features "
+            "banane me madad karta hai. Koi majboori nahi — aapka istemaal hi kaafi hai!",
+            "ApneScan will always be <b>100% FREE</b>. 🙏<br><br>If it helped you, a "
+            "small contribution helps keep it running and build new features. No "
+            "pressure at all — just using it is enough!"))
+        b_open = box.addButton(self.L("☕ Sahyog karo", "☕ Donate"), QtWidgets.QMessageBox.AcceptRole)
+        box.addButton(self.L("Baad me", "Maybe later"), QtWidgets.QMessageBox.RejectRole)
+        box.exec_()
+        if box.clickedButton() == b_open:
+            try:
+                import webbrowser
+                webbrowser.open(url)
+            except Exception:
+                pass
+
+    # ===================== FAQ (feature 36) =====================
+    def show_faq(self):
+        """Aksar puchhe jaane wale sawaal — jawab. Admin remote-config se aur
+        sawaal jod sakta hai (rconfig['faq'] = [[q, a], ...])."""
+        faq = [
+            (self.L("Scanner connect nahi ho raha?", "Scanner not connecting?"),
+             self.L("Settings → 'Change / find scanner' se dobara dhoondo. Network scanner ke liye scanner aur PC ek hi WiFi par hone chahiye.",
+                    "Use Settings → 'Change / find scanner'. For a network scanner, the scanner and PC must be on the same WiFi.")),
+            (self.L("OCR (text) kaam nahi kar raha?", "OCR (text) not working?"),
+             self.L("Tesseract OCR install hona chahiye. Bhasha Settings → 'OCR bhashaayein' se chuni ja sakti hai.",
+                    "Tesseract OCR must be installed. Pick languages in Settings → 'OCR languages'.")),
+            (self.L("PDF kaise save karein?", "How to save a PDF?"),
+             self.L("Scan ke baad 'Save' dabayein, ya panel me 'Save here' se seedha chune folder me.",
+                    "After scanning press 'Save', or use 'Save here' in the panel to save to the chosen folder.")),
+            (self.L("File ka size kaise chhota karein?", "How to reduce file size?"),
+             self.L("Tools → Compress se ek ya kai PDF chhoti karein (custom KB/MB bhi).",
+                    "Tools → Compress to shrink one or many PDFs (custom KB/MB too).")),
+            (self.L("Update kaise karein?", "How to update?"),
+             self.L("Help → 'Check for updates' — app khud naya version download karke laga leti hai.",
+                    "Help → 'Check for updates' — the app downloads and installs the new version itself.")),
+            (self.L("Kya ye sach me free hai?", "Is it really free?"),
+             self.L("Haan — ApneScan 100% FREE hai, hamesha rahega. Koi ad-force ya paywall nahi.",
+                    "Yes — ApneScan is 100% FREE, always. No forced ads or paywall.")),
+        ]
+        extra = self._rconfig.get("faq") if isinstance(getattr(self, "_rconfig", None), dict) else None
+        if isinstance(extra, list):
+            for qa in extra:
+                if isinstance(qa, (list, tuple)) and len(qa) >= 2:
+                    faq.append((str(qa[0]), str(qa[1])))
+        html = "<h2>❓ FAQ</h2>"
+        for q, a in faq:
+            html += "<p><b>%s</b><br><span style='color:#334155'>%s</span></p>" % (q, a)
+        dlg = QtWidgets.QDialog(self); dlg.setWindowTitle(self.L("FAQ", "FAQ")); dlg.resize(560, 560)
+        v = QtWidgets.QVBoxLayout(dlg)
+        tb = QtWidgets.QTextBrowser(); tb.setHtml(html); tb.setOpenExternalLinks(True); v.addWidget(tb)
+        b = QtWidgets.QPushButton(self.L("Band karo", "Close")); b.clicked.connect(dlg.accept); v.addWidget(b)
+        dlg.exec_()
 
     def _an_country(self):
         """System se desh-code (jaise 'IN') — sirf ginti/desh-breakdown ke liye."""
@@ -9291,6 +9409,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     def share_app(self):
         """Is app ko doosron tak pahuchao — WhatsApp / link copy / QR / poster."""
+        self._an_event("refer")
         L = self.L
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(L("📣 ApneScan doosron ko batao", "📣 Share ApneScan"))
@@ -10625,33 +10744,8 @@ if the toggle is ticked).</p>
         b.clicked.connect(dlg.accept); lay.addWidget(b)
         dlg.exec_()
 
-    def send_feedback(self):
-        title = tr("feedback", self._lang)
-        text, ok = QtWidgets.QInputDialog.getMultiLineText(
-            self, title,
-            ("Aapka sujhav ya problem likhein:" if self._lang == "hi"
-             else "Write your feedback or problem:"))
-        if not ok or not text.strip():
-            return
-        email = self._opts.get("feedback_email", "").strip()
-        if not email:
-            email, ok2 = QtWidgets.QInputDialog.getText(
-                self, title,
-                ("Which email should feedback go to?"
-                 if self._lang == "hi" else "Which email should feedback go to?"))
-            if not ok2 or not email.strip():
-                QtWidgets.QMessageBox.information(self, title, text)
-                return
-            self._opts["feedback_email"] = email.strip(); self._save_opts()
-            email = email.strip()
-        try:
-            from PyQt5.QtGui import QDesktopServices
-            body = QtCore.QUrl.toPercentEncoding(text).data().decode()
-            url = QtCore.QUrl("mailto:%s?subject=ApneScan%%20Feedback&body=%s" % (email, body))
-            QDesktopServices.openUrl(url)
-        except Exception:
-            QtWidgets.QMessageBox.information(self, title,
-                                              "Email: %s\n\n%s" % (email, text))
+    # (purana email-wala send_feedback hata diya — ab sabse upar wala
+    #  send_feedback rating+raay seedha admin panel me bhejta hai.)
 
     # ---- UI ----
     def _build_ui(self):

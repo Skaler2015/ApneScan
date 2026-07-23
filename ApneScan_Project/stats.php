@@ -1459,7 +1459,7 @@ if(window.Chart){
 })();
 
 // ================= TOOLS & IMPACT (render) =================
-var FEATLBL={ocr:'OCR (text)',compress:'Compress',merge:'Merge',split:'Split page',sign:'Signature',stamp:'Stamp',password:'Password',watermark:'Watermark',whatsapp:'WhatsApp share',email:'Email share',print:'Print',import:'Import',phoneimport:'Phone photo',idcard:'ID-card crop',rename:'Rename'};
+var FEATLBL={ocr:'OCR (text)',compress:'Compress',merge:'Merge',split:'Split page',sign:'Signature',stamp:'Stamp',password:'Password',watermark:'Watermark',whatsapp:'WhatsApp share',email:'Email share',print:'Print',import:'Import',phoneimport:'Phone photo',idcard:'ID-card crop',rename:'Rename',donate:'Donate click',refer:'Share app'};
 function flbl(k){ return FEATLBL[k]||k; }
 // impact tiles
 document.getElementById('impact').innerHTML=
