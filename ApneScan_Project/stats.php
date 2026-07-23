@@ -23,11 +23,16 @@ date_default_timezone_set('Asia/Kolkata');   // "Aaj" India (IST) ke hisaab se
 $DATA_FILE   = __DIR__ . '/stats.json';
 $BACKUP_DIR  = __DIR__ . '/backups';
 $ADMIN_PASS  = 'apne123';            // <-- ISE BADAL LO (admin password)
-$ADMIN_EMAIL = '';                   // <-- daily report yahan aayega (khaali = band)
+$ADMIN_EMAIL = '';                   // <-- daily/weekly report yahan aayega (khaali = band)
 $CRON_KEY    = 'apnecron';           // <-- ?cron=daily&key=... ka key
 $SECRET      = '';                   // optional: scan protect karne ko
 $SESSION_TTL = 1800;                 // admin auto-logout (sec) — 30 min
 $MAX_FAILS   = 6;                    // itni galat koshish -> thodi der lock
+// Telegram phone-notification (optional): @BotFather se token banao, apni
+// chat id daalo. Dono bhare to milestone/crash/daily par phone par message.
+$TELEGRAM_TOKEN = '';                // <-- Telegram bot token (khaali = band)
+$TELEGRAM_CHAT  = '';                // <-- aapki chat id
+$SITE_NAME      = 'ApneScan';        // public page / widget par dikhega
 
 header('Access-Control-Allow-Origin: *');
 
@@ -145,6 +150,38 @@ function today_str() { return date('Y-m-d'); }
 function hour_key()  { return date('Y-m-d-H'); }
 function bump(&$arr, $key, $by=1) { $key=trim((string)$key); if($key==='')return; $arr[$key]=(isset($arr[$key])?intval($arr[$key]):0)+$by; }
 
+// user ka asli IP (CDN/proxy ke peeche bhi)
+function client_ip() {
+    foreach (array('HTTP_CF_CONNECTING_IP','HTTP_X_FORWARDED_FOR','HTTP_X_REAL_IP','REMOTE_ADDR') as $h) {
+        if (!empty($_SERVER[$h])) {
+            $ip = trim(explode(',', $_SERVER[$h])[0]);
+            if (filter_var($ip, FILTER_VALIDATE_IP)) return $ip;
+        }
+    }
+    return '';
+}
+// IP se asli DESH (Windows-locale galat ho to bhi sahi). Pehle host/CDN header,
+// warna free ip-api.com. Result caller cache karta hai (har user par ek baar).
+function geo_country($ip) {
+    foreach (array('HTTP_CF_IPCOUNTRY','GEOIP_COUNTRY_CODE','HTTP_X_COUNTRY_CODE') as $h) {
+        if (!empty($_SERVER[$h]) && strlen($_SERVER[$h])===2 && strtoupper($_SERVER[$h])!=='XX')
+            return strtoupper($_SERVER[$h]);
+    }
+    if ($ip==='' || $ip==='127.0.0.1' || strpos($ip,'192.168.')===0 || strpos($ip,'10.')===0 || strpos($ip,'172.16.')===0)
+        return '';
+    $url = "http://ip-api.com/json/" . urlencode($ip) . "?fields=countryCode";
+    $s = '';
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, array(CURLOPT_RETURNTRANSFER=>true, CURLOPT_TIMEOUT=>3, CURLOPT_CONNECTTIMEOUT=>2));
+        $s = @curl_exec($ch); curl_close($ch);
+    } else {
+        $s = @file_get_contents($url, false, stream_context_create(array('http'=>array('timeout'=>3))));
+    }
+    if ($s) { $j = json_decode($s, true); if (isset($j['countryCode']) && strlen($j['countryCode'])===2) return strtoupper($j['countryCode']); }
+    return '';
+}
+
 function touch_client(&$d, $client, $req, $n, $now, $today) {
     if ($client === '') return true;
     if (!isset($d['clients'][$client]))
@@ -155,7 +192,20 @@ function touch_client(&$d, $client, $req, $n, $now, $today) {
     if (!empty($c['blocked'])) return false;              // blocked user -> ignore
     $c['last'] = $now;
     if (!empty($req['v']))  $c['version'] = substr($req['v'], 0, 10);
-    if (!empty($req['c']))  $c['country'] = substr($req['c'], 0, 4);
+    // DESH: pehle IP se (asli location) — ek baar geolocate karke cache.
+    // Windows-locale (req['c']) sirf fallback, kyunki wo aksar galat hota hai
+    // (bahut se Indian users ka Windows 'English (US)' par hota -> galat US).
+    $ip = client_ip();
+    if ($ip !== '' && (!isset($c['gip']) || $c['gip'] !== $ip)) {   // har IP par SIRF EK BAAR
+        $gc = geo_country($ip);
+        if ($gc !== '') $c['gcc'] = $gc;
+        $c['gip'] = $ip;                                            // fail ho to bhi dobara try nahi
+    }
+    if (!empty($c['gcc'])) {
+        $c['country'] = $c['gcc'];                       // IP-country authoritative
+    } elseif (empty($c['country']) && !empty($req['c'])) {
+        $c['country'] = substr($req['c'], 0, 4);         // fallback: app-locale
+    }
     if (!empty($req['m']))  $c['method']  = substr($req['m'], 0, 10);
     if (!empty($req['u']))  $c['name']    = substr($req['u'], 0, 40);
     if (!empty($req['sm'])) $c['model']   = substr($req['sm'], 0, 40);   // scanner model
@@ -260,13 +310,52 @@ function build_growth($d, $now) {
     return array($newU,$cumU);
 }
 
+// Telegram par phone-notification bhejo (token+chat set ho to)
+function tg_send($msg) {
+    global $TELEGRAM_TOKEN, $TELEGRAM_CHAT;
+    if (empty($TELEGRAM_TOKEN) || empty($TELEGRAM_CHAT)) return false;
+    $url = "https://api.telegram.org/bot" . $TELEGRAM_TOKEN . "/sendMessage";
+    $q = http_build_query(array('chat_id'=>$TELEGRAM_CHAT,'text'=>$msg,'parse_mode'=>'HTML','disable_web_page_preview'=>'true'));
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, array(CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>$q,CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT=>8,CURLOPT_SSL_VERIFYPEER=>false));
+        @curl_exec($ch); curl_close($ch);
+    } else {
+        @file_get_contents($url . '?' . $q);
+    }
+    return true;
+}
+
+// Public/safe stats — koi personal data nahi (widget + transparency page ke liye)
+function public_stats($d) {
+    $today = today_str(); $now = time();
+    $cos = array();
+    foreach ($d['clients'] as $c) { if(!empty($c['blocked']))continue; $co=trim(isset($c['country'])?$c['country']:''); if($co!=='') $cos[$co]=(isset($cos[$co])?$cos[$co]:0)+1; }
+    arsort($cos);
+    $online = 0; foreach ($d['online'] as $ts) { if ($now-intval($ts)<=300) $online++; }
+    return array(
+        'total'=>intval($d['total']),
+        'today'=>intval(isset($d['days'][$today])?$d['days'][$today]:0),
+        'users'=>count($d['clients']),
+        'countries'=>count($cos),
+        'topCountries'=>array_slice(array_keys($cos),0,6),
+        'online'=>$online,
+        'imports'=>intval($d['imports']),
+        'prints'=>intval($d['prints']),
+        'site'=>$GLOBALS['SITE_NAME'],
+        'time'=>date('Y-m-d H:i')
+    );
+}
+
 // =================================================================
 //  CRON:  ?cron=daily&key=CRONKEY   (email report + auto-backup)
 //  CLI:   php stats.php cron=daily key=CRONKEY
 // =================================================================
 if (PHP_SAPI === 'cli' && isset($argv)) { foreach ($argv as $a){ if(strpos($a,'=')!==false){ list($kk,$vv)=explode('=',$a,2); $_GET[$kk]=$vv; } } }
 if (isset($_GET['cron'])) {
-    if ($_GET['cron']==='daily' && isset($_GET['key']) && hash_equals($CRON_KEY,(string)$_GET['key'])) {
+    $ckey = isset($_GET['key']) ? (string)$_GET['key'] : '';
+    $ctype = $_GET['cron'];
+    if (($ctype==='daily' || $ctype==='weekly') && hash_equals($CRON_KEY, $ckey)) {
         $d = load_data($DATA_FILE);
         // auto-backup (roz ek, 14 rakho)
         if (!is_dir($BACKUP_DIR)) @mkdir($BACKUP_DIR,0755,true);
@@ -274,20 +363,86 @@ if (isset($_GET['cron'])) {
         @file_put_contents($bf, json_encode($d));
         $all=glob($BACKUP_DIR.'/stats-*.json'); if($all && count($all)>14){ sort($all); foreach(array_slice($all,0,count($all)-14) as $old) @unlink($old); }
         $d['lastBackup']=time(); save_data($DATA_FILE,$d);
-        // email
-        $y=date('Y-m-d',time()-86400); $t=today_str();
+        $t=today_str(); $now=time();
+        if ($ctype==='weekly') {
+            // pichhle 7 din ka jod
+            $wk=0; for($i=1;$i<=7;$i++){ $k=date('Y-m-d',$now-$i*86400); $wk+=intval(isset($d['days'][$k])?$d['days'][$k]:0); }
+            $newW=0; foreach($d['clients'] as $c){ if($now-intval($c['first'])<=7*86400)$newW++; }
+            $msg="ApneScan — Weekly Report\n\nPichhle 7 din ke scans: $wk\nNaye users (7 din): $newW\n"
+                ."Total (all-time): ".intval($d['total'])."\nTotal users: ".count($d['clients'])."\n\nDashboard: ?admin=...\n";
+            if ($ADMIN_EMAIL!=='') @mail($ADMIN_EMAIL, "ApneScan weekly — $wk scans", $msg, "From: ApneScan <no-reply@apnesoft.com>");
+            tg_send("📊 <b>ApneScan — Weekly</b>\nScans (7 din): <b>$wk</b>\nNaye users: <b>$newW</b>\nTotal: <b>".intval($d['total'])."</b>");
+            header('Content-Type: text/plain'); echo "cron weekly ok\n".$msg; exit;
+        }
+        // daily email + telegram
+        $y=date('Y-m-d',$now-86400);
         $yc=intval(isset($d['days'][$y])?$d['days'][$y]:0);
         $tc=intval(isset($d['days'][$t])?$d['days'][$t]:0);
         $newY=0; foreach($d['clients'] as $c){ if(date('Y-m-d',intval($c['first']))===$y)$newY++; }
+        $ncr=count($d['crashes']);
         $msg="ApneScan — Daily Report ($y)\n\n"
             ."Kal ke scans: $yc\nAaj abhi tak: $tc\nTotal (all-time): ".intval($d['total'])."\n"
             ."Total users: ".count($d['clients'])."\nKal naye users: $newY\n"
-            ."Crashes stored: ".count($d['crashes'])."\nFeedback stored: ".count($d['feedback'])."\n\n"
+            ."Crashes stored: ".$ncr."\nFeedback stored: ".count($d['feedback'])."\n\n"
             ."Backup: ".basename($bf)."\nDashboard: open ?admin=...\n";
         if ($ADMIN_EMAIL!=='') @mail($ADMIN_EMAIL, "ApneScan daily — $yc scans kal", $msg, "From: ApneScan <no-reply@apnesoft.com>");
+        tg_send("📊 <b>ApneScan — Daily</b>\nKal: <b>$yc</b> scans · Naye users: <b>$newY</b>\nAaj tak: <b>$tc</b>\nTotal: <b>".intval($d['total'])."</b>".($ncr?"\n💥 $ncr crash report":""));
         header('Content-Type: text/plain'); echo "cron ok\n".$msg; exit;
     }
     header('Content-Type: text/plain'); echo "cron: bad key"; exit;
+}
+
+// =================================================================
+//  PUBLIC WIDGET / TRANSPARENCY (login nahi chahiye — sirf safe ginti)
+//    ?widget=count  -> JSON {total,today,...}   (apni website me use karo)
+//    ?widget=1      -> embed-ready HTML snippet (iframe me lagao)
+//    ?public=1      -> sundar public transparency page
+// =================================================================
+if (isset($_GET['widget'])) {
+    $P = public_stats(load_data($DATA_FILE));
+    if ($_GET['widget']==='count') { header('Content-Type: application/json'); echo json_encode($P); exit; }
+    header('Content-Type: text/html; charset=utf-8');
+    ?><!doctype html><meta charset="utf-8"><style>
+    *{margin:0;box-sizing:border-box}body{font-family:Inter,system-ui,Segoe UI,Arial;background:transparent}
+    .w{display:inline-flex;gap:14px;align-items:center;background:linear-gradient(120deg,#12325f,#178a8a);color:#fff;padding:12px 18px;border-radius:14px;box-shadow:0 6px 20px rgba(9,20,45,.25)}
+    .w .n{font-size:24px;font-weight:800;line-height:1}.w .l{font-size:10px;opacity:.85;margin-top:2px}
+    .w .d{width:1px;height:34px;background:rgba(255,255,255,.25)}
+    </style><div class="w"><div>📊</div><div><div class="n" id="t">…</div><div class="l"><?php echo htmlspecialchars($P['site']); ?> — Total scans worldwide</div></div>
+    <div class="d"></div><div><div class="n" id="d">…</div><div class="l">Aaj</div></div></div>
+    <script>var P=<?php echo json_encode($P); ?>;function f(n){return (n||0).toLocaleString();}document.getElementById('t').textContent=f(P.total);document.getElementById('d').textContent=f(P.today);</script>
+    <?php exit;
+}
+if (isset($_GET['public'])) {
+    $P = public_stats(load_data($DATA_FILE));
+    header('Content-Type: text/html; charset=utf-8');
+    function _fl($cc){ if(strlen($cc)!==2) return '🏳'; $a=strtoupper($cc); return mb_convert_encoding('&#'.(127397+ord($a[0])).';&#'.(127397+ord($a[1])).';','UTF-8','HTML-ENTITIES'); }
+    ?><!doctype html><html lang="hi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title><?php echo htmlspecialchars($P['site']); ?> — Live Stats</title><style>
+    *{margin:0;box-sizing:border-box}body{font-family:Inter,system-ui,Segoe UI,Arial;background:#0a0f1c;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+    .box{max-width:760px;width:100%;text-align:center}
+    h1{font-size:26px;margin-bottom:6px}.sub{color:#8ea0bd;font-size:13px;margin-bottom:26px}
+    .g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+    .c{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:20px}
+    .c .n{font-size:30px;font-weight:800;background:linear-gradient(120deg,#3987e5,#2dd4bf);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .c .l{color:#a9b6ce;font-size:12px;margin-top:6px}
+    .f{color:#7f8fab;font-size:11px;margin-top:22px}.cos{margin-top:16px;font-size:20px;letter-spacing:4px}
+    </style></head><body><div class="box">
+    <h1>🌍 <?php echo htmlspecialchars($P['site']); ?> — Worldwide</h1>
+    <div class="sub">100% FREE document scanner · live ginti (koi personal data nahi)</div>
+    <div class="g">
+      <div class="c"><div class="n" id="total">…</div><div class="l">📄 Total scans</div></div>
+      <div class="c"><div class="n" id="today">…</div><div class="l">📅 Aaj ke scans</div></div>
+      <div class="c"><div class="n" id="users">…</div><div class="l">👥 Total users</div></div>
+      <div class="c"><div class="n" id="countries">…</div><div class="l">🌍 Countries</div></div>
+      <div class="c"><div class="n" id="online">…</div><div class="l">🟢 Abhi online</div></div>
+      <div class="c"><div class="n" id="paper">…</div><div class="l">🌿 Paper digitized</div></div>
+    </div>
+    <div class="cos"><?php foreach($P['topCountries'] as $cc) echo _fl($cc).' '; ?></div>
+    <div class="f">Updated <?php echo htmlspecialchars($P['time']); ?> · apnescan.apnesoft.com</div>
+    </div><script>var P=<?php echo json_encode($P); ?>;function f(n){return (n||0).toLocaleString();}
+    ['total','today','users','countries','online'].forEach(function(k){document.getElementById(k).textContent=f(P[k]);});
+    document.getElementById('paper').textContent=f(P.total);
+    setTimeout(function(){location.reload();},60000);</script></body></html><?php exit;
 }
 
 // ================= ADMIN — login + dashboard =================
@@ -654,6 +809,20 @@ if (isset($_GET['admin'])) {
     usort($sug, function($a,$b){ return $a['p']-$b['p']; });
     $S['suggestions']=$sug;
 
+    // ---- AI-style daily summary (Hindi) — rozana ek nazar ----
+    $ai=array();
+    $line="Aaj ab tak <b>".number_format($S['today'])."</b> scans hue";
+    if ($S['yesterday']>0){ $dp=round(100*($S['today']-$S['yesterday'])/$S['yesterday']); $line.=" (kal se ".($dp>=0?"+$dp% 📈":"$dp% 📉").")"; }
+    $ai[]=$line;
+    $ai[]="Ab tak kul <b>".number_format($S['total'])."</b> scans aur <b>".number_format($S['users'])."</b> users";
+    if ($S['newToday']>0) $ai[]="Aaj <b>".$S['newToday']."</b> naye users jude 🎉";
+    if (!empty($S['features'])){ $ff=$S['features']; arsort($ff); $ai[]="Sabse zyada ‘<b>".ucfirst(key($ff))."</b>’ feature chala"; }
+    $ncrash2=count(isset($d['crashes'])?$d['crashes']:array());
+    $ai[]=$ncrash2>0 ? "⚠️ <b>$ncrash2</b> crash report aaye — dekhna zaroori" : "✅ Koi crash nahi, sab theek";
+    if ($S['online']>0) $ai[]="Abhi <b>".$S['online']."</b> log online";
+    if (!empty($S['nextMilestone'])) $ai[]="Agle milestone (".number_format($S['nextMilestone']).") tak bas <b>".number_format($S['milestoneLeft'])."</b> baaki 🎯";
+    $S['aiSummary']=implode('. ',$ai).'.';
+
     // health
     $S['fileKB']=file_exists($DATA_FILE)?round(filesize($DATA_FILE)/1024,1):0;
     $S['lastBackup']=intval(isset($d['lastBackup'])?$d['lastBackup']:0);
@@ -785,6 +954,10 @@ if (isset($_GET['admin'])) {
   <div id="banner" class="banner"></div>
 
   <div class="page" data-p="overview">
+  <div class="card" style="background:linear-gradient(120deg,rgba(42,120,214,.10),rgba(23,138,138,.06));border-color:rgba(42,120,214,.25)">
+    <h3><span class="em">🤖</span> Aaj ka summary (auto)</h3>
+    <div id="aisum" style="font-size:12.5px;line-height:1.7;color:var(--fg)"></div>
+  </div>
   <div class="sec"><span class="em">📊</span> Overview</div>
   <div class="kpis" id="kpis"></div>
 
@@ -959,6 +1132,15 @@ if (isset($_GET['admin'])) {
     <div class="card"><h3><span class="em">🔒</span> Admin logins (IP)</h3><div id="al"></div></div>
   </div>
 
+  <!-- public tools -->
+  <div class="card no-print"><h3><span class="em">🌐</span> Public tools (website ke liye)</h3>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Ye login-free hain — sirf safe ginti dikhate hain (koi personal data nahi).</div>
+    <div style="margin-bottom:8px">🔗 <b>Public stats page:</b> <a href="?public=1" target="_blank" style="color:var(--accent)">status.apnesoft.com/stats.php?public=1</a></div>
+    <div style="margin-bottom:6px">📌 <b>Website widget</b> — apni site me ye code paste karo (live "X scans worldwide" dikhega):</div>
+    <textarea readonly onclick="this.select()" style="width:100%;height:52px;font-family:monospace;font-size:10px">&lt;iframe src="https://status.apnesoft.com/stats.php?widget=1" style="border:0;width:420px;height:70px" scrolling="no"&gt;&lt;/iframe&gt;</textarea>
+    <div style="font-size:10px;color:var(--mut);margin-top:4px">Sirf ginti chahiye (apna design)? → <a href="?widget=count" target="_blank" style="color:var(--accent)">?widget=count</a> (JSON)</div>
+  </div>
+
   <!-- maintenance -->
   <div class="card no-print"><h3><span class="em">🛠</span> Maintenance</h3>
     <form method="post" style="display:inline">
@@ -1017,6 +1199,9 @@ document.getElementById('kpis').innerHTML=
   kpi('⚡',fmt(D.dau),'Active today')+kpi('📶',fmt(D.wau),'Active 7d')+kpi('🔆',fmt(D.mau),'Active 30d')+
   kpi('🔥',fmt(D.powerUsers),'Power users','p')+kpi('🔸',fmt(D.oneTime),'One-time','r')+
   kpi('📥',fmt(D.imports),'Imports','o')+kpi('🖨️',fmt(D.prints),'Prints')+kpi('🌿',fmt(D.total),'Paper saved','g');
+
+// AI summary
+try{ if(D.aiSummary) document.getElementById('aisum').innerHTML=D.aiSummary; }catch(e){}
 
 // banner
 var bmsg='';
@@ -1352,7 +1537,12 @@ if ($action === 'scan') {
     $n = max(0, min(100, intval(isset($_REQUEST['n'])?$_REQUEST['n']:1)));
     $okc = touch_client($d, $client, $_REQUEST, $n, $now, $today);   // blocked -> false
     if ($okc) {
+        $_before = intval($d['total']);
         $d['total'] = intval($d['total']) + $n;
+        // milestone paar hua? -> Telegram par khushkhabri
+        foreach (array(100,500,1000,5000,10000,25000,50000,100000,250000,500000,1000000) as $_m) {
+            if ($_before < $_m && $d['total'] >= $_m) { tg_send("🎉 <b>Milestone!</b> ApneScan ne duniya bhar me <b>".number_format($_m)."</b> scans paar kar liye!"); break; }
+        }
         $d['days'][$today] = (isset($d['days'][$today])?intval($d['days'][$today]):0) + $n;
         $hk = hour_key(); $d['hours'][$hk] = (isset($d['hours'][$hk])?intval($d['hours'][$hk]):0) + $n;
         // scan settings breakdown
@@ -1396,9 +1586,11 @@ if ($action === 'scan') {
     if ($kb) $d['metrics']['kbSaved'] = intval(isset($d['metrics']['kbSaved'])?$d['metrics']['kbSaved']:0) + $kb;
     if ($pg && !empty($_REQUEST['feat'])) { $fk = 'pg_'.substr($_REQUEST['feat'],0,16); $d['metrics'][$fk] = intval(isset($d['metrics'][$fk])?$d['metrics'][$fk]:0) + $pg; }
 } else if ($action === 'crash') {
-    $d['crashes'][] = array('t'=>$now,'v'=>substr(isset($_REQUEST['v'])?$_REQUEST['v']:'',0,10),
-        'err'=>substr(isset($_REQUEST['err'])?$_REQUEST['err']:'',0,200),'client'=>substr($client,0,40));
+    $_cv = substr(isset($_REQUEST['v'])?$_REQUEST['v']:'',0,10);
+    $_ce = substr(isset($_REQUEST['err'])?$_REQUEST['err']:'',0,200);
+    $d['crashes'][] = array('t'=>$now,'v'=>$_cv,'err'=>$_ce,'client'=>substr($client,0,40));
     $d['crashes'] = array_slice($d['crashes'], -100);
+    tg_send("💥 <b>Crash report</b> (v".$_cv.")\n".htmlspecialchars($_ce));
 } else if ($action === 'feedback') {
     $d['feedback'][] = array('t'=>$now,'name'=>substr(isset($_REQUEST['u'])?$_REQUEST['u']:'',0,40),
         'v'=>substr(isset($_REQUEST['v'])?$_REQUEST['v']:'',0,10),'rating'=>max(0,min(5,intval(isset($_REQUEST['rating'])?$_REQUEST['rating']:0))),

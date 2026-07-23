@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "137"
+VERSION = "138"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -12059,7 +12059,9 @@ if the toggle is ticked).</p>
     def _on_scan_done(self, kept, skipped):
         self._scan_place = None          # rescan/insert mode khatam
         if kept:
-            self._pstats_bump(scan_ok=1)
+            # scan hote hi LOCAL pages bhi turant badhein (pehle sirf PDF save
+            # par badhte the — isliye "self stats change nahi ho rahe" lagta tha)
+            self._pstats_bump(pages=kept, scan_ok=1)
             # LIVE: scan poora hote hi worldwide scan-number TURANT badhao —
             # server ke jawab ka intezaar nahi (jawab aane par asli ginti se
             # apne aap theek ho jaata hai). Isse ginti "live" dikhti hai.
@@ -17427,7 +17429,9 @@ if the toggle is ticked).</p>
             dt = dt.split("_")[0] if dt else None
         except Exception:
             dt = None
-        self._pstats_bump(pages=num_pages, pdfs=1, doc_type=dt)
+        # pages ab SCAN par gine jaate hain (upar), isliye yahan sirf PDF ki
+        # ginti — warna double count ho jaata.
+        self._pstats_bump(pdfs=1, doc_type=dt)
         # recent
         self._add_recent(out)
         # used claims (duplicate detection)
