@@ -45,7 +45,8 @@ function default_data() {
         'colors'=>array(),'sizes'=>array(),'crashes'=>array(),'feedback'=>array(),
         'broadcast'=>array('msg'=>'','target'=>'all','id'=>0),'rconfig'=>array(),
         'adminLogins'=>array(),'failLog'=>array(),'lastBackup'=>0,
-        'scanEvents'=>0,'recentScans'=>array(),'metrics'=>array(),'featUsers'=>array()
+        'scanEvents'=>0,'recentScans'=>array(),'metrics'=>array(),'featUsers'=>array(),
+        'blockedIPs'=>array()
     );
 }
 // ek file se saaf JSON padho (khaali/tuti -> null)
@@ -162,14 +163,15 @@ function client_ip() {
 }
 // IP se asli DESH (Windows-locale galat ho to bhi sahi). Pehle host/CDN header,
 // warna free ip-api.com. Result caller cache karta hai (har user par ek baar).
+// Returns array('cc'=>'IN','region'=>'Rajasthan','city'=>'Jaipur') — jitna mile.
 function geo_country($ip) {
+    $out = array('cc'=>'', 'region'=>'', 'city'=>'');
     foreach (array('HTTP_CF_IPCOUNTRY','GEOIP_COUNTRY_CODE','HTTP_X_COUNTRY_CODE') as $h) {
-        if (!empty($_SERVER[$h]) && strlen($_SERVER[$h])===2 && strtoupper($_SERVER[$h])!=='XX')
-            return strtoupper($_SERVER[$h]);
+        if (!empty($_SERVER[$h]) && strlen($_SERVER[$h])===2 && strtoupper($_SERVER[$h])!=='XX') { $out['cc']=strtoupper($_SERVER[$h]); }
     }
     if ($ip==='' || $ip==='127.0.0.1' || strpos($ip,'192.168.')===0 || strpos($ip,'10.')===0 || strpos($ip,'172.16.')===0)
-        return '';
-    $url = "http://ip-api.com/json/" . urlencode($ip) . "?fields=countryCode";
+        return $out;
+    $url = "http://ip-api.com/json/" . urlencode($ip) . "?fields=countryCode,regionName,city";
     $s = '';
     if (function_exists('curl_init')) {
         $ch = curl_init($url);
@@ -178,8 +180,12 @@ function geo_country($ip) {
     } else {
         $s = @file_get_contents($url, false, stream_context_create(array('http'=>array('timeout'=>3))));
     }
-    if ($s) { $j = json_decode($s, true); if (isset($j['countryCode']) && strlen($j['countryCode'])===2) return strtoupper($j['countryCode']); }
-    return '';
+    if ($s) { $j = json_decode($s, true);
+        if (isset($j['countryCode']) && strlen($j['countryCode'])===2) $out['cc']=strtoupper($j['countryCode']);
+        if (!empty($j['regionName'])) $out['region']=substr($j['regionName'],0,40);
+        if (!empty($j['city']))       $out['city']=substr($j['city'],0,40);
+    }
+    return $out;
 }
 
 function touch_client(&$d, $client, $req, $n, $now, $today) {
@@ -190,15 +196,18 @@ function touch_client(&$d, $client, $req, $n, $now, $today) {
             'days'=>array(),'active'=>array());
     $c =& $d['clients'][$client];
     if (!empty($c['blocked'])) return false;              // blocked user -> ignore
+    $ip = client_ip();
+    // IP se block (feature 5): is IP wale sabhi ko roko
+    if ($ip !== '' && !empty($d['blockedIPs']) && in_array($ip, $d['blockedIPs'])) { $c['blocked']=1; return false; }
     $c['last'] = $now;
     if (!empty($req['v']))  $c['version'] = substr($req['v'], 0, 10);
-    // DESH: pehle IP se (asli location) — ek baar geolocate karke cache.
-    // Windows-locale (req['c']) sirf fallback, kyunki wo aksar galat hota hai
-    // (bahut se Indian users ka Windows 'English (US)' par hota -> galat US).
-    $ip = client_ip();
+    // DESH + RAJYA + SHEHAR: IP se (asli location) — ek baar geolocate karke cache.
+    // Windows-locale (req['c']) sirf fallback (wo aksar galat: 'English (US)').
     if ($ip !== '' && (!isset($c['gip']) || $c['gip'] !== $ip)) {   // har IP par SIRF EK BAAR
-        $gc = geo_country($ip);
-        if ($gc !== '') $c['gcc'] = $gc;
+        $g = geo_country($ip);
+        if (!empty($g['cc']))     $c['gcc']    = $g['cc'];
+        if (!empty($g['region'])) $c['region'] = $g['region'];
+        if (!empty($g['city']))   $c['city']   = $g['city'];
         $c['gip'] = $ip;                                            // fail ho to bhi dobara try nahi
     }
     if (!empty($c['gcc'])) {
@@ -278,6 +287,13 @@ function compute_stats($d, $client) {
         else if ($tgt==='old' && $myver!=='' && intval($myver)<$latest) $bmsg=$bc['msg'];
         else if ($tgt!=='all' && $tgt!=='old' && $myver===$tgt) $bmsg=$bc['msg'];
     }
+    // targeted message (1) + feedback reply (2) is client ke liye
+    $umsg=''; $umsgId=0; $freply=''; $freplyId=0;
+    if ($client!=='' && isset($d['clients'][$client])) {
+        $cc=$d['clients'][$client];
+        if (!empty($cc['msg']['t'])) { $umsg=$cc['msg']['t']; $umsgId=intval($cc['msg']['id']); }
+        if (!empty($cc['freply']['t'])) { $freply=$cc['freply']['t']; $freplyId=intval($cc['freply']['id']); }
+    }
 
     return array(
         'ok'=>true,'srv'=>'php2','time'=>date('Y-m-d H:i'),'today_key'=>'day_'.$today,
@@ -292,6 +308,7 @@ function compute_stats($d, $client) {
         'top'=>$top,'topNamed'=>$topNamed,'topscans'=>(count($top)?$top[0]:0),
         'rank'=>$rank,'myscans'=>$mine,
         'broadcast'=>$bmsg,'broadcastId'=>$bid,
+        'umsg'=>$umsg,'umsgId'=>$umsgId,'freply'=>$freply,'freplyId'=>$freplyId,
         'rconfig'=>isset($d['rconfig'])?$d['rconfig']:array()
     );
 }
@@ -526,6 +543,30 @@ if (isset($_GET['admin'])) {
         if ($act==='purge')  { $days=max(30,intval($_POST['days'])); $cut=date('Y-m-d',time()-$days*86400); foreach($d['days'] as $k=>$v){ if($k<$cut) unset($d['days'][$k]); } }
         if ($act==='clearcrashes') $d['crashes']=array();
         if ($act==='clearfeedback') $d['feedback']=array();
+        // targeted message ek user ko (1) — app broadcast ki tarah dikhata hai
+        if ($act==='umsg' && isset($d['clients'][$id])) $d['clients'][$id]['msg']=array('t'=>substr(trim($_POST['msg']),0,200),'id'=>time());
+        // feedback reply (2) — feedback index par jawab
+        if ($act==='freply') { $fi=intval($_POST['fi']); $rt=substr(trim($_POST['reply']),0,300);
+            if (isset($d['feedback'][$fi])) { $d['feedback'][$fi]['reply']=$rt; $d['feedback'][$fi]['replyId']=time();
+                $fc=isset($d['feedback'][$fi]['client'])?$d['feedback'][$fi]['client']:''; // reply us user ki app me
+                if ($fc==='' && isset($d['feedback'][$fi]['name'])) { foreach($d['clients'] as $cid=>$cc){ if(trim($cc['name'])===trim($d['feedback'][$fi]['name'])){ $fc=$cid; break; } } }
+                if ($fc!=='' && isset($d['clients'][$fc])) $d['clients'][$fc]['freply']=array('t'=>$rt,'id'=>time()); } }
+        // bulk action (3) — kai users par ek saath
+        if ($act==='bulk') { $ids=explode(',', isset($_POST['ids'])?$_POST['ids']:''); $ba=isset($_POST['ba'])?$_POST['ba']:'';
+            foreach($ids as $bid){ $bid=trim($bid); if($bid==='' || !isset($d['clients'][$bid]))continue;
+                if($ba==='block') $d['clients'][$bid]['blocked']=1; elseif($ba==='unblock') $d['clients'][$bid]['blocked']=0;
+                elseif($ba==='tag') $d['clients'][$bid]['tags']=substr(trim($_POST['tags']),0,60);
+                elseif($ba==='msg') $d['clients'][$bid]['msg']=array('t'=>substr(trim($_POST['msg']),0,200),'id'=>time()); } }
+        // IP se block (5)
+        if ($act==='blockip') { $bip=trim($_POST['ip']); if(filter_var($bip,FILTER_VALIDATE_IP)){ if(!isset($d['blockedIPs']))$d['blockedIPs']=array(); if(!in_array($bip,$d['blockedIPs']))$d['blockedIPs'][]=$bip;
+            foreach($d['clients'] as $cid=>&$cc){ if(isset($cc['gip'])&&$cc['gip']===$bip)$cc['blocked']=1; } unset($cc); } }
+        if ($act==='unblockip') { $bip=trim($_POST['ip']); if(!empty($d['blockedIPs'])) $d['blockedIPs']=array_values(array_diff($d['blockedIPs'],array($bip))); }
+        // remote-config editors (rconfig me): FAQ (6), donate link (9), tips (8), flags (7)
+        if (in_array($act,array('faq','donate','tips','flags'))) { if(!isset($d['rconfig'])||!is_array($d['rconfig']))$d['rconfig']=array();
+            if ($act==='faq')    { $j=json_decode(isset($_POST['json'])?$_POST['json']:'',true); if(is_array($j)) $d['rconfig']['faq']=$j; }
+            if ($act==='donate') { $d['rconfig']['donate_url']=substr(trim($_POST['url']),0,200); }
+            if ($act==='tips')   { $lines=array_filter(array_map('trim',explode("\n", isset($_POST['tips'])?$_POST['tips']:''))); $d['rconfig']['tips']=array_slice(array_values($lines),0,20); }
+            if ($act==='flags')  { $j=json_decode(isset($_POST['json'])?$_POST['json']:'',true); if(is_array($j)) $d['rconfig']['flags']=$j; } }
         save_data($DATA_FILE,$d,true);   // admin ka jaan-boojhkar action (purge/clear) -> force
         header('Location: '.strtok($_SERVER['REQUEST_URI'],'?').'?admin=1'); exit;
     }
@@ -602,7 +643,12 @@ if (isset($_GET['admin'])) {
             'first'=>intval(isset($c['first'])?$c['first']:0),'last'=>$last,'version'=>trim(isset($c['version'])?$c['version']:''),
             'country'=>trim(isset($c['country'])?$c['country']:''),'method'=>trim(isset($c['method'])?$c['method']:''),
             'model'=>trim(isset($c['model'])?$c['model']:''),'note'=>trim(isset($c['note'])?$c['note']:''),
-            'tags'=>trim(isset($c['tags'])?$c['tags']:''),'blocked'=>!empty($c['blocked'])?1:0,'online'=>(($now-$last)<=300));
+            'tags'=>trim(isset($c['tags'])?$c['tags']:''),'blocked'=>!empty($c['blocked'])?1:0,'online'=>(($now-$last)<=300),
+            'region'=>trim(isset($c['region'])?$c['region']:''),'city'=>trim(isset($c['city'])?$c['city']:''),
+            'ip'=>trim(isset($c['gip'])?$c['gip']:''),
+            'feats'=>array_keys(isset($c['feats'])&&is_array($c['feats'])?$c['feats']:array()),
+            'active'=>array_slice(isset($c['active'])&&is_array($c['active'])?$c['active']:array(),-30),
+            'daysMap'=>isset($c['days'])&&is_array($c['days'])?$c['days']:array());
         if (($now-$last)<=300 && $nm!=='' && empty($c['blocked'])) $onlineNames[]=$nm;
     }
     usort($userList,function($a,$b){return $b['scans']-$a['scans'];});
@@ -823,10 +869,86 @@ if (isset($_GET['admin'])) {
     if (!empty($S['nextMilestone'])) $ai[]="Agle milestone (".number_format($S['nextMilestone']).") tak bas <b>".number_format($S['milestoneLeft'])."</b> baaki 🎯";
     $S['aiSummary']=implode('. ',$ai).'.';
 
+    // ---- Churn prediction / at-risk (13): active the, ab dheere-dheere gayab ----
+    $atRisk=array();
+    foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $last=intval($c['last']); $sc=intval($c['scans']); $ad=count(isset($c['active'])?$c['active']:array()); $gap=$now-$last;
+        if($sc>=3 && $ad>=2 && $gap>=4*86400 && $gap<14*86400) $atRisk[]=array('name'=>(trim($c['name'])!==''?$c['name']:'—'),'scans'=>$sc,'last'=>$last,'days'=>round($gap/86400)); }
+    usort($atRisk,function($a,$b){return $b['scans']-$a['scans'];});
+    $S['atRisk']=array_slice($atRisk,0,15);
+
+    // ---- Feedback sentiment (14) ----
+    $posW=array('badhiya','achha','accha','acha','best','good','great','nice','perfect','love','shukriya','thanks','superb','mast','helpful','easy','fast','sahi','अच्छा','बढ़िया');
+    $negW=array('slow','bug','crash','error','problem','dikkat','kharab','kharaab','bekaar','bad','worst','hang','issue','fail','खराब','धीमा');
+    $reqW=array('add','chahiye','feature','kaash','should','request','option','banao','jodo','चाहिए','बनाओ');
+    $sent=array('pos'=>0,'neg'=>0,'req'=>0,'neu'=>0);
+    foreach($S['feedback'] as &$f){ $m=strtolower(isset($f['msg'])?$f['msg']:''); $r=intval(isset($f['rating'])?$f['rating']:0); $s='neu'; $hp=false;$hn=false;$hr=false;
+        foreach($posW as $w){ if($w!=='' && strpos($m,$w)!==false){$hp=true;break;} }
+        foreach($negW as $w){ if($w!=='' && strpos($m,$w)!==false){$hn=true;break;} }
+        foreach($reqW as $w){ if($w!=='' && strpos($m,$w)!==false){$hr=true;break;} }
+        if($hr)$s='req'; elseif($r>=4||$hp)$s='pos'; elseif(($r>0&&$r<=2)||$hn)$s='neg'; else $s='neu';
+        $f['sent']=$s; $sent[$s]++; } unset($f);
+    $S['sentiment']=$sent;
+
+    // ---- Version quality / crash-rate per version (15) ----
+    $vq=array(); $vusers=$S['versions'];
+    foreach($d['crashes'] as $cr){ $vv=trim(isset($cr['v'])?$cr['v']:''); if($vv!==''){ if(!isset($vq[$vv]))$vq[$vv]=array('users'=>isset($vusers[$vv])?$vusers[$vv]:0,'crashes'=>0); $vq[$vv]['crashes']++; } }
+    foreach($vusers as $vv=>$u){ if(!isset($vq[$vv]))$vq[$vv]=array('users'=>$u,'crashes'=>0); }
+    $vqOut=array(); foreach($vq as $vv=>$x){ $vqOut[]=array('v'=>$vv,'users'=>$x['users'],'crashes'=>$x['crashes'],'rate'=>($x['users']>0?round($x['crashes']/max(1,$x['users']),2):$x['crashes'])); }
+    usort($vqOut,function($a,$b){ return strcmp($b['v'],$a['v']); });
+    $S['versionQuality']=array_slice($vqOut,0,8);
+
+    // ---- Feature correlation (16): jo X karte wo Y bhi ----
+    $featCl=array();
+    foreach($d['clients'] as $id=>$c){ if(!empty($c['blocked']))continue; foreach((isset($c['feats'])?$c['feats']:array()) as $ft=>$cnt){ if(!isset($featCl[$ft]))$featCl[$ft]=array(); $featCl[$ft][$id]=1; } }
+    $tf=array(); foreach($featCl as $ft=>$set){ $tf[$ft]=count($set); } arsort($tf); $tf=array_slice(array_keys($tf),0,6);
+    $corr=array();
+    foreach($tf as $a){ foreach($tf as $b){ if(strcmp($a,$b)>=0)continue; $ca=$featCl[$a]; $cb=$featCl[$b]; $both=0; foreach($ca as $id=>$_){ if(isset($cb[$id]))$both++; }
+        if(count($ca)>0 && $both>0) $corr[]=array('a'=>$a,'b'=>$b,'both'=>$both,'pct'=>round(100*$both/count($ca))); } }
+    usort($corr,function($x,$y){return $y['pct']-$x['pct'];});
+    $S['featCorr']=array_slice($corr,0,8);
+
     // health
     $S['fileKB']=file_exists($DATA_FILE)?round(filesize($DATA_FILE)/1024,1):0;
     $S['lastBackup']=intval(isset($d['lastBackup'])?$d['lastBackup']:0);
     $S['respMs']=round((microtime(true)-$t0)*1000);
+
+    // ---- Branded PDF report (18): saaf printable page -> "Save as PDF" ----
+    if (isset($_GET['report'])) {
+        header('Content-Type: text/html; charset=utf-8');
+        $tf=$S['features']; arsort($tf); $topf=$tf?ucfirst(key($tf)):'—';
+        ?><!doctype html><html><head><meta charset="utf-8"><title>ApneScan Report — <?php echo date('d M Y'); ?></title><style>
+        *{box-sizing:border-box}body{font-family:Inter,system-ui,Segoe UI,Arial;color:#111;margin:0;padding:34px;font-size:13px}
+        h1{margin:0;font-size:22px;color:#12325f}.sub{color:#666;font-size:12px;margin:2px 0 20px}
+        .g{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+        .k{border:1px solid #e2e8f0;border-radius:10px;padding:12px}.k .n{font-size:20px;font-weight:800;color:#1f5fb0}.k .l{color:#666;font-size:11px}
+        h2{font-size:14px;margin:18px 0 8px;border-bottom:2px solid #12325f;padding-bottom:4px;color:#12325f}
+        table{width:100%;border-collapse:collapse;font-size:12px}td,th{border-bottom:1px solid #eee;padding:5px 7px;text-align:left}
+        .foot{margin-top:26px;color:#999;font-size:11px;text-align:center}
+        @media print{body{padding:0}.noprint{display:none}}
+        </style></head><body>
+        <button class="noprint" onclick="window.print()" style="float:right;background:#1f5fb0;color:#fff;border:0;padding:9px 16px;border-radius:8px;font-weight:700;cursor:pointer">🖨 Save as PDF</button>
+        <h1>📊 ApneScan — Worldwide Report</h1>
+        <div class="sub"><?php echo date('d M Y, H:i'); ?> · ApneSoftware.com</div>
+        <div class="g">
+          <div class="k"><div class="n"><?php echo number_format($S['total']); ?></div><div class="l">Total scans</div></div>
+          <div class="k"><div class="n"><?php echo number_format($S['today']); ?></div><div class="l">Aaj</div></div>
+          <div class="k"><div class="n"><?php echo number_format($S['weekTotal']); ?></div><div class="l">Is hafte</div></div>
+          <div class="k"><div class="n"><?php echo number_format($S['monthTotal']); ?></div><div class="l">Is mahine</div></div>
+          <div class="k"><div class="n"><?php echo number_format($S['users']); ?></div><div class="l">Total users</div></div>
+          <div class="k"><div class="n"><?php echo $S['newToday']; ?></div><div class="l">Aaj naye users</div></div>
+          <div class="k"><div class="n"><?php echo $S['dailyAvg']; ?></div><div class="l">Daily avg</div></div>
+          <div class="k"><div class="n"><?php echo $S['dau'].'/'.$S['mau']; ?></div><div class="l">DAU / MAU</div></div>
+        </div>
+        <h2>Top desh (scans)</h2><table><tr><th>Desh</th><th>Scans</th></tr>
+        <?php $sc=$S['scansByCountry']; arsort($sc); $i=0; foreach($sc as $co=>$v){ if($i++>=8)break; echo "<tr><td>$co</td><td>".number_format($v)."</td></tr>"; } ?></table>
+        <h2>Feature usage</h2><table><tr><th>Feature</th><th>Baar</th></tr>
+        <?php $ff=$S['features']; arsort($ff); $i=0; foreach($ff as $k=>$v){ if($i++>=10)break; echo "<tr><td>".ucfirst($k)."</td><td>$v</td></tr>"; } if(!$ff)echo "<tr><td>—</td><td>—</td></tr>"; ?></table>
+        <h2>App versions</h2><table><tr><th>Version</th><th>Users</th></tr>
+        <?php $vv=$S['versions']; arsort($vv); foreach($vv as $k=>$v){ echo "<tr><td>v$k</td><td>$v</td></tr>"; } ?></table>
+        <div class="foot">Auto-generated · sirf ginti (koi personal/document data nahi) · apnescan.apnesoft.com</div>
+        <script>setTimeout(function(){window.print();},400);</script>
+        </body></html><?php exit;
+    }
 
     $J=json_encode($S);
     ?><!doctype html>
@@ -1094,6 +1216,14 @@ if (isset($_GET['admin'])) {
   <div class="sec"><span class="em">👤</span> Users</div>
   <div class="card"><h3><span class="em">👤</span> Saare users (<span id="ucount"></span>) <span style="color:var(--mut);font-weight:500;font-size:11px">— header pe click = sort, naam pe click = details/manage</span></h3>
     <input id="usearch" class="no-print" placeholder="🔍 naam / desh / version / tag se dhoondo…" style="width:100%;margin-bottom:8px">
+    <form method="post" id="bulkform" class="no-print" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;padding:8px;background:var(--card2);border-radius:8px">
+      <input type="hidden" name="act" value="bulk"><input type="hidden" name="ids" id="bulkids">
+      <b style="font-size:12px"><span id="bulkn">0</span> chune</b>
+      <select name="ba" id="bulkba" style="font-size:11px"><option value="tag">🏷 Tag</option><option value="msg">📨 Message</option><option value="block">🚫 Block</option><option value="unblock">✅ Unblock</option></select>
+      <input name="tags" id="bulktags" placeholder="Tags: VIP,Hospital" style="font-size:11px;width:130px">
+      <input name="msg" id="bulkmsg" placeholder="Message…" style="font-size:11px;width:150px;display:none">
+      <button class="btn" onclick="return bulkGo()">Lagao</button>
+    </form>
     <div style="overflow:auto;max-height:460px"><table id="utable"></table></div>
   </div>
 
@@ -1126,8 +1256,11 @@ if (isset($_GET['admin'])) {
   <div class="page" data-p="system">
   <div class="sec"><span class="em">💬</span> Quality, Feedback &amp; System</div>
   <div class="grid">
-    <div class="card"><h3><span class="em">💬</span> Feedback (⭐ <span id="arate"></span>)</h3><div id="fb"></div></div>
+    <div class="card"><h3><span class="em">💬</span> Feedback (⭐ <span id="arate"></span>) <span id="sentsum" style="font-weight:500;font-size:11px"></span></h3><div id="fb"></div></div>
     <div class="card"><h3><span class="em">💥</span> Crash reports</h3><div id="cr"></div></div>
+    <div class="card"><h3><span class="em">😟</span> Churn-risk (chhutne waale) <span style="color:var(--mut);font-weight:500;font-size:11px">— active the, 4–14 din se gayab</span></h3><div id="atr"></div></div>
+    <div class="card"><h3><span class="em">🩺</span> Version quality (crash-rate)</h3><div id="vq"></div></div>
+    <div class="card"><h3><span class="em">🔗</span> Feature jodi (jo X karte wo Y bhi)</h3><div id="fcorr"></div></div>
     <div class="card"><h3><span class="em">🏅</span> Records</h3><div id="rc"></div></div>
     <div class="card"><h3><span class="em">🔒</span> Admin logins (IP)</h3><div id="al"></div></div>
   </div>
@@ -1139,6 +1272,44 @@ if (isset($_GET['admin'])) {
     <div style="margin-bottom:6px">📌 <b>Website widget</b> — apni site me ye code paste karo (live "X scans worldwide" dikhega):</div>
     <textarea readonly onclick="this.select()" style="width:100%;height:52px;font-family:monospace;font-size:10px">&lt;iframe src="https://status.apnesoft.com/stats.php?widget=1" style="border:0;width:420px;height:70px" scrolling="no"&gt;&lt;/iframe&gt;</textarea>
     <div style="font-size:10px;color:var(--mut);margin-top:4px">Sirf ginti chahiye (apna design)? → <a href="?widget=count" target="_blank" style="color:var(--accent)">?widget=count</a> (JSON)</div>
+  </div>
+
+  <!-- remote-config editors (app inko live padhta hai — bina naye build ke badlав) -->
+  <div class="grid no-print">
+    <div class="card"><h3><span class="em">❓</span> App FAQ (in-app madad)</h3>
+      <div style="font-size:11px;color:var(--mut);margin-bottom:6px">JSON list — har item <code>{"q":"sawal","a":"jawab"}</code>. App ke FAQ me neeche add ho jaata hai.</div>
+      <form method="post"><input type="hidden" name="act" value="faq">
+        <textarea name="json" id="faqbox" rows="5" style="width:100%;font-family:monospace;font-size:10px" placeholder='[{"q":"...","a":"..."}]'></textarea>
+        <button class="btn" style="margin-top:6px">FAQ save karo</button>
+      </form>
+    </div>
+    <div class="card"><h3><span class="em">💛</span> Donate link</h3>
+      <div style="font-size:11px;color:var(--mut);margin-bottom:6px">"Support / Donate" button isi URL par jaata hai (UPI/website).</div>
+      <form method="post"><input type="hidden" name="act" value="donate">
+        <input name="url" id="donbox" placeholder="https://... ya upi://pay?pa=..." style="width:100%">
+        <button class="btn" style="margin-top:6px">Link save karo</button>
+      </form>
+    </div>
+    <div class="card"><h3><span class="em">💡</span> App tips (rotating)</h3>
+      <div style="font-size:11px;color:var(--mut);margin-bottom:6px">Har line = ek tip. App status-bar/start par ghoomti hai (max 20).</div>
+      <form method="post"><input type="hidden" name="act" value="tips">
+        <textarea name="tips" id="tipbox" rows="4" style="width:100%;font-size:11px" placeholder="Tip 1&#10;Tip 2"></textarea>
+        <button class="btn" style="margin-top:6px">Tips save karo</button>
+      </form>
+    </div>
+    <div class="card"><h3><span class="em">🚩</span> Feature flags</h3>
+      <div style="font-size:11px;color:var(--mut);margin-bottom:6px">JSON — feature on/off. Jaise <code>{"phonescan":true,"donate":false}</code>.</div>
+      <form method="post"><input type="hidden" name="act" value="flags">
+        <textarea name="json" id="flagbox" rows="4" style="width:100%;font-family:monospace;font-size:10px" placeholder='{"phonescan":true}'></textarea>
+        <button class="btn" style="margin-top:6px">Flags save karo</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- printable report -->
+  <div class="card no-print"><h3><span class="em">📄</span> Report (PDF)</h3>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Ek-page ka worldwide summary — KPIs, top desh, feature usage, versions. Print → "Save as PDF".</div>
+    <a class="btn" href="?admin=1&report=1" target="_blank">📄 Report kholo / PDF banao</a>
   </div>
 
   <!-- maintenance -->
@@ -1188,6 +1359,7 @@ if(window.Chart){
   Chart.defaults.elements.bar.borderSkipped=false;
 }
 function grad(ctx,hex){try{var c=ctx.chart.ctx,g=c.createLinearGradient(0,0,0,ctx.chart.height||160);g.addColorStop(0,hex+'55');g.addColorStop(1,hex+'05');return g;}catch(e){return hex+'22';}}
+var FEATLBL={ocr:'OCR (text)',compress:'Compress',merge:'Merge',split:'Split page',sign:'Signature',stamp:'Stamp',password:'Password',watermark:'Watermark',whatsapp:'WhatsApp share',email:'Email share',print:'Print',import:'Import',phoneimport:'Phone photo',idcard:'ID-card crop',rename:'Rename',donate:'Donate click',refer:'Share app',phonescan:'Phone scan'};
 
 // KPIs (icon + number + label)
 function kpi(ic,n,l,cls){return '<div class="kpi '+(cls||'')+'"><div class="ic">'+ic+'</div><div class="tx"><div class="n">'+n+'</div><div class="l">'+l+'</div></div></div>';}
@@ -1267,8 +1439,27 @@ document.getElementById('chn').innerHTML=(D.churn&&D.churn.length)?'<table>'+D.c
 
 // feedback + crashes
 document.getElementById('arate').textContent=(D.avgRating||0)+' ('+(D.ratingCount||0)+')';
-document.getElementById('fb').innerHTML=(D.feedback&&D.feedback.length)?D.feedback.map(function(f){return '<div style="border-bottom:1px solid var(--line);padding:5px 0"><b>'+('★'.repeat(f.rating||0)||'—')+'</b> '+esc(f.name||'—')+' <span style="color:var(--mut);font-size:11px">'+(f.v?'v'+f.v:'')+'</span><div>'+esc(f.msg||'')+'</div></div>';}).join(''):'<div style="color:var(--mut);font-size:12px">— abhi koi feedback nahi —</div>';
+var SENT={pos:{e:'😊',c:PAL.green,t:'Khush'},neg:{e:'😟',c:PAL.red,t:'Naraz'},req:{e:'💡',c:PAL.orange,t:'Farmaish'},neu:{e:'😐',c:'var(--mut)',t:'Neutral'}};
+(function(){var s=D.sentiment||{};var parts=['pos','neg','req','neu'].filter(function(k){return s[k];}).map(function(k){return '<span style="color:'+SENT[k].c+'">'+SENT[k].e+' '+s[k]+'</span>';});document.getElementById('sentsum').innerHTML=parts.length?('— '+parts.join(' · ')):'';})();
+document.getElementById('fb').innerHTML=(D.feedback&&D.feedback.length)?D.feedback.map(function(f,i){var se=SENT[f.sent||'neu'];return '<div style="border-bottom:1px solid var(--line);padding:6px 0"><b>'+('★'.repeat(f.rating||0)||'—')+'</b> '+esc(f.name||'—')+' <span style="color:var(--mut);font-size:11px">'+(f.v?'v'+f.v:'')+'</span> <span title="'+se.t+'" style="font-size:11px;color:'+se.c+'">'+se.e+'</span><div>'+esc(f.msg||'')+'</div>'+(f.reply?'<div style="margin:4px 0 2px;padding:5px 8px;background:var(--card2);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;font-size:12px">↩️ <b>Aapne kaha:</b> '+esc(f.reply)+'</div>':'<form method="post" class="no-print" style="margin-top:4px;display:flex;gap:4px"><input type="hidden" name="act" value="freply"><input type="hidden" name="fi" value="'+i+'"><input name="reply" placeholder="Jawab likho (user ki app me dikhega)…" style="flex:1;font-size:11px"><button class="btn" style="padding:4px 8px">↩️</button></form>')+'</div>';}).join(''):'<div style="color:var(--mut);font-size:12px">— abhi koi feedback nahi —</div>';
 document.getElementById('cr').innerHTML=(D.crashes&&D.crashes.length)?'<table>'+D.crashes.map(function(c){return '<tr><td>💥 '+esc((c.err||'').slice(0,60))+'</td><td style="text-align:right;color:var(--mut);white-space:nowrap">v'+(c.v||'?')+' · '+ago(c.t)+'</td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— koi crash nahi 🎉 —</div>';
+
+// churn-risk / at-risk (13)
+document.getElementById('atr').innerHTML=(D.atRisk&&D.atRisk.length)?'<table>'+D.atRisk.map(function(u){return '<tr><td>😟 '+esc(u.name)+'</td><td style="text-align:right"><b>'+u.scans+'</b> scans · '+u.days+' din se gayab</td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— koi risk par nahi 🎉 —</div>';
+
+// version quality / crash-rate (15)
+document.getElementById('vq').innerHTML=(D.versionQuality&&D.versionQuality.length)?'<table><tr><th>Version</th><th style="text-align:right">Users</th><th style="text-align:right">Crashes</th><th style="text-align:right">Rate</th></tr>'+D.versionQuality.map(function(v){var bad=v.crashes>0&&v.rate>=0.3;return '<tr><td>v'+esc(v.v)+'</td><td style="text-align:right">'+fmt(v.users)+'</td><td style="text-align:right">'+v.crashes+'</td><td style="text-align:right;font-weight:700;color:'+(bad?PAL.red:(v.crashes?PAL.orange:PAL.green))+'">'+v.rate+'</td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— data nahi —</div>';
+
+// feature correlation (16)
+document.getElementById('fcorr').innerHTML=(D.featCorr&&D.featCorr.length)?'<table>'+D.featCorr.map(function(c){var A=(FEATLBL[c.a]||c.a),B=(FEATLBL[c.b]||c.b);return '<tr><td><b>'+esc(A)+'</b> → '+esc(B)+'</td><td style="text-align:right"><b>'+c.pct+'%</b> <span style="color:var(--mut)">('+c.both+')</span></td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— abhi kaafi data nahi —</div>';
+
+// prefill remote-config editors from live rconfig
+(function(){ var rc={}; try{rc=JSON.parse(D.rconfigStr||'{}');}catch(e){}
+  try{ if(rc.faq) document.getElementById('faqbox').value=JSON.stringify(rc.faq,null,1); }catch(e){}
+  try{ document.getElementById('donbox').value=rc.donate_url||''; }catch(e){}
+  try{ if(rc.tips&&rc.tips.length) document.getElementById('tipbox').value=rc.tips.join('\n'); }catch(e){}
+  try{ if(rc.flags) document.getElementById('flagbox').value=JSON.stringify(rc.flags); }catch(e){}
+})();
 
 // records + admin logins
 document.getElementById('rc').innerHTML='<table>'+
@@ -1285,12 +1476,18 @@ function renderUsers(){
   var rows=(D.userList||[]).filter(function(u){ return (u.name+' '+u.country+' '+u.version+' '+u.method+' '+u.tags+' '+u.model).toLowerCase().indexOf(q)>=0; });
   rows.sort(function(a,b){ var x=a[sortKey],y=b[sortKey]; if(typeof x==='string'){return sortDir*x.localeCompare(y);} return sortDir*((x||0)-(y||0)); });
   document.getElementById('ucount').textContent=rows.length;
-  var h='<tr>'+[['name','Name'],['scans','Scans'],['last','Last seen'],['first','Joined'],['version','Ver'],['country','Desh'],['method','Method']].map(function(c){return '<th data-k="'+c[0]+'">'+c[1]+(sortKey===c[0]?(sortDir<0?' ▼':' ▲'):'')+'</th>';}).join('')+'</tr>';
-  rows.forEach(function(u,i){ h+='<tr data-i="'+i+'" style="cursor:pointer'+(u.blocked?';opacity:.45':'')+'"><td>'+(u.blocked?'🚫 ':(u.online?'🟢 ':''))+esc(u.name)+(u.tags?' '+u.tags.split(',').map(function(t){return '<span class="tag">'+esc(t.trim())+'</span>';}).join(''):'')+'</td><td><b>'+u.scans+'</b></td><td>'+ago(u.last)+' ago</td><td>'+(u.first?new Date(u.first*1000).toISOString().slice(0,10):'—')+'</td><td>'+(u.version||'—')+'</td><td>'+(u.country?flag(u.country)+' '+u.country:'—')+'</td><td>'+({escl:'Network',wia:'USB',twain:'TWAIN',naps2:'NAPS2'}[u.method]||u.method||'—')+'</td></tr>'; });
+  var h='<tr><th class="no-print" style="width:22px"><input type="checkbox" id="uall" title="Sab chuno"></th>'+[['name','Name'],['scans','Scans'],['last','Last seen'],['first','Joined'],['version','Ver'],['country','Desh'],['method','Method']].map(function(c){return '<th data-k="'+c[0]+'">'+c[1]+(sortKey===c[0]?(sortDir<0?' ▼':' ▲'):'')+'</th>';}).join('')+'</tr>';
+  rows.forEach(function(u,i){ h+='<tr data-i="'+i+'" style="'+(u.blocked?'opacity:.45':'')+'"><td class="no-print" style="text-align:center"><input type="checkbox" class="ubox" data-id="'+esc(u.id)+'"></td><td style="cursor:pointer" data-open="'+i+'">'+(u.blocked?'🚫 ':(u.online?'🟢 ':''))+esc(u.name)+(u.tags?' '+u.tags.split(',').map(function(t){return '<span class="tag">'+esc(t.trim())+'</span>';}).join(''):'')+'</td><td><b>'+u.scans+'</b></td><td>'+ago(u.last)+' ago</td><td>'+(u.first?new Date(u.first*1000).toISOString().slice(0,10):'—')+'</td><td>'+(u.version||'—')+'</td><td>'+(u.country?flag(u.country)+' '+u.country:'—')+'</td><td>'+({escl:'Network',wia:'USB',twain:'TWAIN',naps2:'NAPS2'}[u.method]||u.method||'—')+'</td></tr>'; });
   var t=document.getElementById('utable'); t.innerHTML=h;
-  [].forEach.call(t.querySelectorAll('th'),function(th){ th.onclick=function(){ var k=th.getAttribute('data-k'); if(sortKey===k)sortDir*=-1; else {sortKey=k;sortDir=(k==='name'||k==='country'||k==='version'||k==='method')?1:-1;} renderUsers(); }; });
-  [].forEach.call(t.querySelectorAll('tr[data-i]'),function(tr){ tr.onclick=function(){ showUser(rows[+tr.getAttribute('data-i')]); }; });
+  [].forEach.call(t.querySelectorAll('th[data-k]'),function(th){ th.style.cursor='pointer'; th.onclick=function(){ var k=th.getAttribute('data-k'); if(sortKey===k)sortDir*=-1; else {sortKey=k;sortDir=(k==='name'||k==='country'||k==='version'||k==='method')?1:-1;} renderUsers(); }; });
+  [].forEach.call(t.querySelectorAll('td[data-open]'),function(td){ td.onclick=function(){ showUser(rows[+td.getAttribute('data-open')]); }; });
+  [].forEach.call(t.querySelectorAll('.ubox'),function(b){ b.onchange=bulkSync; });
+  var ua=document.getElementById('uall'); if(ua) ua.onchange=function(){ [].forEach.call(t.querySelectorAll('.ubox'),function(b){ b.checked=ua.checked; }); bulkSync(); };
+  bulkSync();
 }
+function bulkSync(){ var ids=[].filter.call(document.querySelectorAll('.ubox'),function(b){return b.checked;}).map(function(b){return b.getAttribute('data-id');}); document.getElementById('bulkids').value=ids.join(','); document.getElementById('bulkn').textContent=ids.length; document.getElementById('bulkform').style.display=ids.length?'flex':'none'; }
+(function(){ var ba=document.getElementById('bulkba'); if(ba) ba.onchange=function(){ document.getElementById('bulktags').style.display=ba.value==='tag'?'':'none'; document.getElementById('bulkmsg').style.display=ba.value==='msg'?'':'none'; }; })();
+function bulkGo(){ var n=document.getElementById('bulkids').value.split(',').filter(Boolean).length; if(!n){alert('Pehle users chuno');return false;} return confirm(n+' users par ye action lagaayein?'); }
 function showUser(u){
   if(!u) return;
   var mth={escl:'Network (eSCL/WiFi)',wia:'USB (WIA)',twain:'TWAIN',naps2:'NAPS2'}[u.method]||u.method||'—';
@@ -1304,19 +1501,25 @@ function showUser(u){
       row('Total scans','<span style="font-size:18px">'+fmt(u.scans)+'</span>')+
       row('World me hissa',share)+
       row('Country',u.country?flag(u.country)+' '+u.country:'—')+
+      ((u.region||u.city)?row('Location',esc([u.city,u.region].filter(Boolean).join(', ')||'—')):'')+
       row('App version',u.version?'v'+u.version:'—')+
       row('Scan method',mth)+
       row('Scanner model',esc(u.model||'—'))+
       row('Joined',u.first?new Date(u.first*1000).toLocaleString():'—')+
       row('Aakhri activity',u.last?new Date(u.last*1000).toLocaleString():'—')+
+      row('Active din',(u.active&&u.active.length?u.active.length+' din':'—'))+
       (u.note?row('Note','<i>'+esc(u.note)+'</i>'):'')+
     '</table>'+
+    ((u.feats&&u.feats.length)?'<div style="margin-top:10px"><div style="color:var(--mut);font-size:12px;margin-bottom:4px">🧰 Istemaal ke tools</div>'+u.feats.map(function(f){return '<span class="tag">'+esc(FEATLBL[f]||f)+'</span>';}).join(' ')+'</div>':'')+
+    ((u.active&&u.active.length)?'<div style="margin-top:10px"><div style="color:var(--mut);font-size:12px;margin-bottom:4px">📅 Pichhle 30 din (active)</div><div style="display:flex;flex-wrap:wrap;gap:2px">'+(function(){var s=new Set(u.active),h='',dt=new Date();for(var i=29;i>=0;i--){var d=new Date(dt.getTime()-i*86400000).toISOString().slice(0,10);var on=s.has(d);h+='<span title="'+d+'" style="width:9px;height:9px;border-radius:2px;background:'+(on?PAL.aqua:'var(--line)')+'"></span>';}return h;})()+'</div></div>':'')+
     '<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px">'+
       '<div style="font-weight:700;font-size:13px;margin-bottom:8px">✏️ Manage</div>'+
       '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="rename"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="name" value="'+esc(u.name!=='—'?u.name:'')+'" placeholder="Naam badlo" style="width:60%"> <button class="btn">Rename</button></form>'+
       '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="tag"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="tags" value="'+esc(u.tags)+'" placeholder="Tags (comma se): VIP,Hospital" style="width:60%"> <button class="btn">Tag</button></form>'+
       '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="note"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="note" value="'+esc(u.note)+'" placeholder="Note likho" style="width:60%"> <button class="btn">Note</button></form>'+
-      '<form method="post"><input type="hidden" name="act" value="block"><input type="hidden" name="id" value="'+esc(u.id)+'"><input type="hidden" name="on" value="'+(u.blocked?'':'1')+'"><button class="btn '+(u.blocked?'gray':'red')+'">'+(u.blocked?'✅ Unblock':'🚫 Block (stats se hatao)')+'</button></form>'+
+      '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="umsg"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="msg" placeholder="Is user ko message (app me dikhega)" style="width:60%"> <button class="btn">📨 Message</button></form>'+
+      '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="block"><input type="hidden" name="id" value="'+esc(u.id)+'"><input type="hidden" name="on" value="'+(u.blocked?'':'1')+'"><button class="btn '+(u.blocked?'gray':'red')+'">'+(u.blocked?'✅ Unblock':'🚫 Block (stats se hatao)')+'</button></form>'+
+      (u.ip?'<form method="post" onsubmit="return confirm(\'Is IP ('+esc(u.ip)+') ke saare users block? (spam/abuse ke liye)\')"><input type="hidden" name="act" value="blockip"><input type="hidden" name="ip" value="'+esc(u.ip)+'"><button class="btn red">🚫 IP block ('+esc(u.ip)+')</button></form>':'')+
     '</div>';
   document.getElementById('umbody').innerHTML=html;
   document.getElementById('umodal').style.display='flex';
@@ -1459,7 +1662,6 @@ if(window.Chart){
 })();
 
 // ================= TOOLS & IMPACT (render) =================
-var FEATLBL={ocr:'OCR (text)',compress:'Compress',merge:'Merge',split:'Split page',sign:'Signature',stamp:'Stamp',password:'Password',watermark:'Watermark',whatsapp:'WhatsApp share',email:'Email share',print:'Print',import:'Import',phoneimport:'Phone photo',idcard:'ID-card crop',rename:'Rename',donate:'Donate click',refer:'Share app',phonescan:'Phone scan'};
 function flbl(k){ return FEATLBL[k]||k; }
 // impact tiles
 document.getElementById('impact').innerHTML=
@@ -1594,7 +1796,8 @@ if ($action === 'scan') {
 } else if ($action === 'feedback') {
     $d['feedback'][] = array('t'=>$now,'name'=>substr(isset($_REQUEST['u'])?$_REQUEST['u']:'',0,40),
         'v'=>substr(isset($_REQUEST['v'])?$_REQUEST['v']:'',0,10),'rating'=>max(0,min(5,intval(isset($_REQUEST['rating'])?$_REQUEST['rating']:0))),
-        'msg'=>substr(isset($_REQUEST['msg'])?$_REQUEST['msg']:'',0,400));
+        'msg'=>substr(isset($_REQUEST['msg'])?$_REQUEST['msg']:'',0,400),
+        'client'=>substr($client,0,40));            // reply is user tak pahunchane ke liye
     $d['feedback'] = array_slice($d['feedback'], -300);
     touch_client($d, $client, $_REQUEST, 0, $now, $today);
 }
