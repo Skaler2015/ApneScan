@@ -48,12 +48,13 @@ function hour_key()  { return date('Y-m-d-H'); }
 function touch_client(&$d, $client, $req, $n, $now, $today) {
     if ($client === '') return;
     if (!isset($d['clients'][$client]))
-        $d['clients'][$client] = array('first'=>$now,'last'=>$now,'version'=>'','country'=>'','scans'=>0,'method'=>'');
+        $d['clients'][$client] = array('first'=>$now,'last'=>$now,'version'=>'','country'=>'','scans'=>0,'method'=>'','name'=>'');
     $c =& $d['clients'][$client];
     $c['last'] = $now;
     if (!empty($req['v'])) $c['version'] = substr($req['v'], 0, 10);
     if (!empty($req['c'])) $c['country'] = substr($req['c'], 0, 4);
     if (!empty($req['m'])) $c['method']  = substr($req['m'], 0, 10);
+    if (!empty($req['u'])) $c['name']    = substr($req['u'], 0, 40);   // user ka naam
     if ($n) $c['scans'] = intval($c['scans']) + $n;
     $d['online'][$client] = $now;
 }
@@ -77,12 +78,15 @@ function compute_stats($d, $client) {
     for ($j = 29; $j >= 0; $j--) { $k = date('Y-m-d', $now - $j*86400); $month[] = array($k, intval(isset($d['days'][$k])?$d['days'][$k]:0)); }
     foreach ($d['days'] as $v) { if (intval($v) > $bestDay) $bestDay = intval($v); }
 
-    $versions = array(); $countries = array(); $methods = array(); $scores = array(); $mine = 0; $newToday = 0;
+    $versions = array(); $countries = array(); $methods = array(); $scores = array();
+    $named = array(); $mine = 0; $newToday = 0;
     foreach ($d['clients'] as $id => $c) {
         $v  = trim(isset($c['version'])?$c['version']:''); if ($v  !== '') $versions[$v]   = (isset($versions[$v])?$versions[$v]:0) + 1;
         $co = trim(isset($c['country'])?$c['country']:''); if ($co !== '') $countries[$co] = (isset($countries[$co])?$countries[$co]:0) + 1;
         $m  = trim(isset($c['method'])?$c['method']:'');  if ($m  !== '') $methods[$m]    = (isset($methods[$m])?$methods[$m]:0) + 1;
         $sc = intval(isset($c['scans'])?$c['scans']:0); $scores[] = $sc;
+        $nm = trim(isset($c['name'])?$c['name']:'');
+        $named[] = array('name'=>($nm !== '' ? $nm : '—'), 'scans'=>$sc);
         if ($client !== '' && (string)$id === (string)$client) $mine = $sc;
         $fs = intval(isset($c['first'])?$c['first']:0);
         if ($fs && date('Y-m-d', $fs) === $today) $newToday++;
@@ -90,6 +94,8 @@ function compute_stats($d, $client) {
     rsort($scores);
     $rank = 1; foreach ($scores as $s) { if ($s > $mine) $rank++; }
     $top = array_slice($scores, 0, 10);
+    usort($named, function($a, $b) { return $b['scans'] - $a['scans']; });
+    $topNamed = array_slice($named, 0, 10);
 
     $todayHours = array_fill(0, 24, 0); $hourCount = 0; $curHK = hour_key();
     foreach ($d['hours'] as $hk => $hv) {
@@ -111,7 +117,8 @@ function compute_stats($d, $client) {
         'peakAll'=>intval($d['peakAll']), 'bestDay'=>$bestDay, 'hour'=>$hourCount,
         'imports'=>intval($d['imports']), 'prints'=>intval($d['prints']),
         'versions'=>$versions, 'countries'=>$countries, 'methods'=>$methods,
-        'top'=>$top, 'topscans'=>(count($top)?$top[0]:0), 'rank'=>$rank, 'myscans'=>$mine
+        'top'=>$top, 'topNamed'=>$topNamed, 'topscans'=>(count($top)?$top[0]:0),
+        'rank'=>$rank, 'myscans'=>$mine
     );
 }
 
@@ -198,7 +205,7 @@ if (isset($_GET['admin'])) {
     <div class="card"><h3>📊 Last 7 days</h3><canvas id="wk" height="150"></canvas></div>
     <div class="card"><h3>📈 Last 30 days</h3><canvas id="mo" height="150"></canvas></div>
     <div class="card"><h3>🌍 Today — 24 hours</h3><canvas id="hr" height="150"></canvas></div>
-    <div class="card"><h3>🏆 Top users (anonymous)</h3><canvas id="tp" height="150"></canvas></div>
+    <div class="card"><h3>🏆 Top users (naam ke saath)</h3><canvas id="tp" height="150"></canvas></div>
     <div class="card"><h3>🗺 Countries</h3><div id="co"></div></div>
     <div class="card"><h3>🔢 App versions</h3><div id="ve"></div></div>
     <div class="card"><h3>🖨 Scan methods</h3><div id="me"></div></div>
@@ -220,7 +227,8 @@ function obj2rows(o){return Object.keys(o).map(function(k){return [k,o[k]];}).so
 new Chart(wk,{type:'bar',data:{labels:D.week.map(function(x){return x[0].slice(5);}),datasets:[{data:D.week.map(function(x){return x[1];}),backgroundColor:'#0f766e'}]},options:{plugins:{legend:{display:false}}}});
 new Chart(mo,{type:'line',data:{labels:D.month.map(function(x){return x[0].slice(5);}),datasets:[{data:D.month.map(function(x){return x[1];}),borderColor:'#0891b2',backgroundColor:'rgba(8,145,178,.15)',fill:true,tension:.3,pointRadius:0}]},options:{plugins:{legend:{display:false}}}});
 new Chart(hr,{type:'bar',data:{labels:D.todayHours.map(function(_,i){return i;}),datasets:[{data:D.todayHours,backgroundColor:'#0f766e'}]},options:{plugins:{legend:{display:false}}}});
-new Chart(tp,{type:'bar',data:{labels:D.top.map(function(_,i){return 'User '+(i+1);}),datasets:[{data:D.top,backgroundColor:'#7c3aed'}]},options:{indexAxis:'y',plugins:{legend:{display:false}}}});
+var TN = (D.topNamed && D.topNamed.length) ? D.topNamed : D.top.map(function(s,i){return {name:'User '+(i+1),scans:s};});
+new Chart(tp,{type:'bar',data:{labels:TN.map(function(t,i){return (t.name&&t.name!=='—'?t.name:('User '+(i+1)));}),datasets:[{data:TN.map(function(t){return t.scans;}),backgroundColor:'#7c3aed'}]},options:{indexAxis:'y',plugins:{legend:{display:false}}}});
 bars('co',obj2rows(D.countries));bars('ve',obj2rows(D.versions));bars('me',obj2rows(D.methods));
 document.getElementById('rc').innerHTML='<table>'+
  '<tr><td>🏔 Peak online (all-time)</td><td style="text-align:right"><b>'+D.peakAll+'</b></td></tr>'+

@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "127"
+VERSION = "128"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5936,6 +5936,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, "Find scanner (network only)…", self.find_scanners, "हिन्दी: सिर्फ़ network (eSCL) पर स्कैनर ढूँढो।\nEnglish: Discover only network (eSCL) scanners.")
         self._ma(ms, "Scanner IP…", self.set_scanner_ip, "हिन्दी: network स्कैनर का IP सेट करो (जैसे 192.168.1.8)।\nEnglish: Set the network scanner IP.")
         self._ma(ms, "📊 Stats server URL…", self.set_stats_url, "हिन्दी: worldwide-ginti का server URL (जैसे आपका PHP: https://apnesoftware.com/stats.php)। खाली छोड़ने पर default।\nEnglish: The worldwide-stats server URL (e.g. your PHP: https://apnesoftware.com/stats.php). Empty = default.")
+        self._ma(ms, "👤 Analytics me naam…", self.set_user_name, "हिन्दी: Analytics में आपका नाम/clinic — ताकि किसने कितने scan किए, नाम के साथ दिखे।\nEnglish: Your name/clinic for analytics — so scans show per name.")
         self._ma(ms, "Keyboard Shortcuts…", self.show_shortcuts, "हिन्दी: कीबोर्ड के shortcuts की सूची देखो।\nEnglish: View keyboard shortcuts.")
         self.act_simple = self._ma(ms, tr("simple_on", self._lang), self.toggle_simple_mode, "हिन्दी: Simple mode: सिर्फ़ ज़रूरी buttons दिखें (नए users के लिए आसान)।\nEnglish: Simple mode: show only the essential buttons.")
         self.act_simple.setCheckable(True)
@@ -6839,17 +6840,75 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
         return ""
 
+    def _user_name(self):
+        """Analytics me dikhane ke liye user ka naam (config me)."""
+        return (self._config.get("user_name") or "")[:40]
+
+    def _ensure_user_name(self):
+        """Pehli baar: user se naam pucho (analytics me kisne kitne scan kiye —
+        naam ke saath dikhe). Sirf ek baar puchte hain."""
+        if self._config.get("user_name") or self._config.get("user_name_asked"):
+            return
+        self._config["user_name_asked"] = True
+        try:
+            name, ok = QtWidgets.QInputDialog.getText(
+                self, self.L("Aapka naam?", "Your name?"),
+                self.L("Analytics me dikhane ke liye apna naam ya clinic likho\n"
+                       "(jaise 'Dr Subhash' ya 'ECHS OPD'). Sirf naam jaata hai,\n"
+                       "koi document/patient data nahi:",
+                       "Enter your name or clinic for analytics\n"
+                       "(e.g. 'Dr Subhash' or 'ECHS OPD'). Only the name is sent,\n"
+                       "no document/patient data:"),
+                text=self._opts.get("scanner_name", ""))
+        except Exception:
+            ok = False; name = ""
+        if ok and name.strip():
+            self._config["user_name"] = name.strip()[:40]
+        try:
+            save_config(self._config)
+        except Exception:
+            pass
+        # naam turant server ko bhejo
+        try:
+            self._an_report("ping")
+        except Exception:
+            pass
+
+    def set_user_name(self):
+        """Analytics wala naam kabhi bhi badlo."""
+        cur = self._config.get("user_name", "")
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Analytics me naam", "Analytics name"),
+            self.L("Aapka naam / clinic (analytics me dikhega):",
+                   "Your name / clinic (shown in analytics):"), text=cur)
+        if not ok:
+            return
+        self._config["user_name"] = name.strip()[:40]
+        self._config["user_name_asked"] = True
+        try:
+            save_config(self._config)
+        except Exception:
+            pass
+        try:
+            self._an_report("ping")
+        except Exception:
+            pass
+        self.status.showMessage(self.L("👤 Naam set: ", "👤 Name set: ")
+                                + (self._config["user_name"] or "—"), 5000)
+
     def _an_refresh(self):
         """Worldwide numbers laao + sidebar/box taaza karo. client + desh + method
-        bhejte hain taaki server rank/desh/method bhi bhar sake."""
+        + naam bhejte hain taaki server rank/desh/method/naam bhi bhar sake."""
         self._an_fetch({"action": "stats", "client": self._get_client_id(),
                         "v": VERSION, "c": self._an_country(),
-                        "m": self._opts.get("scanner_method", "")}, self._an_apply)
+                        "m": self._opts.get("scanner_method", ""),
+                        "u": self._user_name()}, self._an_apply)
 
     def _an_report(self, action, n=0, imp=0, prt=0):
         """scan / ping / event (import-print) server ko bhejo + display taaza."""
         p = {"action": action, "client": self._get_client_id(), "v": VERSION,
-             "c": self._an_country(), "m": self._opts.get("scanner_method", "")}
+             "c": self._an_country(), "m": self._opts.get("scanner_method", ""),
+             "u": self._user_name()}
         if n:
             p["n"] = str(n)
         if imp:
@@ -7185,7 +7244,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._an_world_widgets.append(("hours24", w24))
         # leaderboard (anonymous — sirf ginti)
         lbw = HBars([])
-        grp(wl, L("🏆 Top users (anonymous)", "🏆 Top users (anonymous)"), widget=lbw)
+        grp(wl, L("🏆 Top users (naam ke saath)", "🏆 Top users (by name)"), widget=lbw)
         self._an_world_widgets.append(("top", lbw))
         cbox = grp(wl, L("🗺 Desh", "🗺 Countries"), widget=HBars([]))
         vbox = grp(wl, L("🔢 App version", "🔢 App versions"), widget=HBars([]))
@@ -7304,9 +7363,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     elif kind == "month" and wid is not None:
                         wid.set_values([int(c) for _d, c in (w2.get("month") or [])])
                     elif kind == "top" and wid is not None:
-                        top = w2.get("top") or []
-                        wid.set_rows([(L("User %d" % (i + 1), "User %d" % (i + 1)), s)
-                                      for i, s in enumerate(top[:10])])
+                        tn = w2.get("topNamed") or []
+                        if tn:
+                            rows = []
+                            for i, t in enumerate(tn[:10]):
+                                nm = (t.get("name") or "").strip()
+                                rows.append((nm if nm and nm != "—" else L("User %d" % (i + 1),
+                                             "User %d" % (i + 1)), int(t.get("scans", 0))))
+                            wid.set_rows(rows)
+                        else:
+                            top = w2.get("top") or []
+                            wid.set_rows([(L("User %d" % (i + 1), "User %d" % (i + 1)), s)
+                                          for i, s in enumerate(top[:10])])
                     elif kind == "you":
                         total = int(w2.get("total", 0) or 0)
                         mine = int(w2.get("myscans", 0) or 0)
@@ -11485,6 +11553,8 @@ if the toggle is ticked).</p>
         # NAYA analytics: startup par + har 2 min me worldwide numbers laao,
         # aur online-ping bhejo
         QtCore.QTimer.singleShot(1500, self._an_refresh)
+        # Pehli baar: user se naam pucho (analytics me naam ke saath dikhe)
+        QtCore.QTimer.singleShot(2200, self._ensure_user_name)
         # ApneSoftware ke tools ki nayi list (agar ho) background me le aao
         QtCore.QTimer.singleShot(5000, lambda: self._run_bg_quiet(
             self._fetch_apnesoft_tools, lambda _r: None))
