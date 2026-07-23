@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "118"
+VERSION = "119"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -10220,11 +10220,22 @@ if the toggle is ticked).</p>
         self.btn_grid.toggled.connect(self._toggle_files_grid)
         _qrow.addWidget(self.btn_grid)
         fp.addLayout(_qrow)
-        # Abhi kis folder me ho — chhoti si patti (breadcrumb)
+        # Abhi kis folder me ho — chhoti si patti (breadcrumb) + uske saamne ⭐
+        # (abhi khule folder ko seedhe favourite banao/hatao)
+        _cwdrow = QtWidgets.QHBoxLayout(); _cwdrow.setSpacing(4); _cwdrow.setContentsMargins(0, 0, 0, 0)
         self.lbl_panel_cwd = QtWidgets.QLabel("")
         self.lbl_panel_cwd.setStyleSheet("color:#0f766e;font-size:11px;font-weight:600;")
         self.lbl_panel_cwd.setWordWrap(True)
-        fp.addWidget(self.lbl_panel_cwd)
+        _cwdrow.addWidget(self.lbl_panel_cwd, 1)
+        self.btn_cwd_fav = QtWidgets.QToolButton()
+        self.btn_cwd_fav.setText("☆"); self.btn_cwd_fav.setAutoRaise(True)
+        self.btn_cwd_fav.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_cwd_fav.setToolTip(self.L(
+            "Is khule folder ko favourite banao / hatao",
+            "Add / remove this open folder as a favourite"))
+        self.btn_cwd_fav.clicked.connect(self._toggle_current_fav)
+        _cwdrow.addWidget(self.btn_cwd_fav)
+        _cwdw = QtWidgets.QWidget(); _cwdw.setLayout(_cwdrow); fp.addWidget(_cwdw)
         # Is folder me kitni files + kul size
         self.lbl_folder_info = QtWidgets.QLabel("")
         self.lbl_folder_info.setStyleSheet("color:#64748b;font-size:11px;")
@@ -12063,6 +12074,45 @@ if the toggle is ticked).</p>
             self.btn_panel_back.setEnabled(not at_top)
         if hasattr(self, "lbl_panel_cwd"):
             self.lbl_panel_cwd.setText("📂 " + (os.path.basename(cur) or cur))
+        # ⭐ star: abhi khula folder favourite hai to bhara ⭐, warna khaali ☆
+        if hasattr(self, "btn_cwd_fav"):
+            favs = self._opts.get("fav_folders") or []
+            is_fav = os.path.normpath(cur) in [os.path.normpath(f) for f in favs]
+            self.btn_cwd_fav.setText("⭐" if is_fav else "☆")
+            self.btn_cwd_fav.setToolTip(self.L(
+                "Is folder ko favourite se hatao" if is_fav
+                else "Is khule folder ko favourite banao",
+                "Remove this folder from favourites" if is_fav
+                else "Add this open folder as a favourite"))
+
+    def _toggle_current_fav(self):
+        """Abhi khule (breadcrumb wale) folder ko favourite banao/hatao.
+        Slash-style (/ vs \\) alag ho to bhi sahi match kare."""
+        cur = self._panel_current_dir()
+        if not (cur and os.path.isdir(cur)):
+            return
+        favs = self._opts.setdefault("fav_folders", [])
+        ncur = os.path.normpath(cur)
+        existing = [f for f in favs if os.path.normpath(f) == ncur]
+        if existing:
+            for f in existing:
+                favs.remove(f)
+            msg = self.L("⭐ Favourite hata diya", "⭐ Removed from favourites")
+        else:
+            favs.append(ncur)
+            while len(favs) > 12:
+                favs.pop(0)
+            msg = self.L("⭐ Favourite me jud gaya", "⭐ Added to favourites")
+        self._save_opts()
+        try:
+            self._rebuild_fav_bar()
+        except Exception:
+            pass
+        try:
+            self.status.showMessage(msg, 3000)
+        except Exception:
+            pass
+        self._update_panel_nav()      # star turant sahi dikhe
 
     # ---- List sort (user ki pasand save rehti hai) ----
     SORT_MODES = [
