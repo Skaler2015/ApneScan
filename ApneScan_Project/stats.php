@@ -329,9 +329,16 @@ if (isset($_GET['admin'])) {
     <div class="card"><h3>👥 Total users (growth)</h3><canvas id="cu" height="150"></canvas></div>
   </div>
 
-  <div class="card"><h3>👤 Saare users (<span id="ucount"></span>) — click header to sort</h3>
+  <div class="card"><h3>👤 Saare users (<span id="ucount"></span>) — header pe click karke sort, kisi naam pe click karke details</h3>
     <input id="usearch" class="no-print" placeholder="🔍 naam / desh / version se dhoondo…" style="width:100%;margin-bottom:8px">
     <div style="overflow:auto;max-height:460px"><table id="utable"></table></div>
+  </div>
+
+  <div id="umodal" class="no-print" onclick="if(event.target===this)closeUser()" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:14px;max-width:420px;width:92%;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.3);position:relative">
+      <button onclick="closeUser()" style="position:absolute;top:12px;right:14px;border:none;background:#f1f5f9;border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:16px">✕</button>
+      <div id="umbody"></div>
+    </div>
   </div>
 
   <div class="grid">
@@ -415,10 +422,37 @@ function renderUsers(){
   rows.sort(function(a,b){ var x=a[sortKey],y=b[sortKey]; if(typeof x==='string'){return sortDir*x.localeCompare(y);} return sortDir*((x||0)-(y||0)); });
   document.getElementById('ucount').textContent=rows.length;
   var h='<tr>'+[['name','Name'],['scans','Scans'],['last','Last seen'],['first','Joined'],['version','Ver'],['country','Desh'],['method','Method']].map(function(c){return '<th data-k="'+c[0]+'">'+c[1]+(sortKey===c[0]?(sortDir<0?' ▼':' ▲'):'')+'</th>';}).join('')+'</tr>';
-  rows.forEach(function(u){ h+='<tr><td>'+(u.online?'🟢 ':'')+u.name+'</td><td><b>'+u.scans+'</b></td><td>'+ago(u.last)+' ago</td><td>'+(u.first?new Date(u.first*1000).toISOString().slice(0,10):'—')+'</td><td>'+(u.version||'—')+'</td><td>'+(u.country?flag(u.country)+' '+u.country:'—')+'</td><td>'+({escl:'Network',wia:'USB',twain:'TWAIN',naps2:'NAPS2'}[u.method]||u.method||'—')+'</td></tr>'; });
+  rows.forEach(function(u,i){ h+='<tr data-i="'+i+'" style="cursor:pointer"><td>'+(u.online?'🟢 ':'')+u.name+'</td><td><b>'+u.scans+'</b></td><td>'+ago(u.last)+' ago</td><td>'+(u.first?new Date(u.first*1000).toISOString().slice(0,10):'—')+'</td><td>'+(u.version||'—')+'</td><td>'+(u.country?flag(u.country)+' '+u.country:'—')+'</td><td>'+({escl:'Network',wia:'USB',twain:'TWAIN',naps2:'NAPS2'}[u.method]||u.method||'—')+'</td></tr>'; });
   var t=document.getElementById('utable'); t.innerHTML=h;
   [].forEach.call(t.querySelectorAll('th'),function(th){ th.onclick=function(){ var k=th.getAttribute('data-k'); if(sortKey===k)sortDir*=-1; else {sortKey=k;sortDir=(k==='name'||k==='country'||k==='version'||k==='method')?1:-1;} renderUsers(); }; });
+  [].forEach.call(t.querySelectorAll('tr[data-i]'),function(tr){ tr.onmouseover=function(){tr.style.background='#f1f5f9';}; tr.onmouseout=function(){tr.style.background='';}; tr.onclick=function(){ showUser(rows[+tr.getAttribute('data-i')]); }; });
 }
+
+// ---- user detail popup ----
+function showUser(u){
+  if(!u) return;
+  var mth={escl:'Network (eSCL/WiFi)',wia:'USB (WIA)',twain:'TWAIN',naps2:'NAPS2'}[u.method]||u.method||'—';
+  var share=(D.total>0)?((u.scans*100/D.total).toFixed(u.scans*100/D.total<1?2:1)+'%'):'—';
+  var joined=u.first?new Date(u.first*1000).toLocaleString():'—';
+  var seen=u.last?new Date(u.last*1000).toLocaleString():'—';
+  function row(l,v){ return '<tr><td style="color:#64748b;padding:6px 14px 6px 0;white-space:nowrap">'+l+'</td><td style="font-weight:600">'+v+'</td></tr>'; }
+  var html='<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">'+
+      '<div style="font-size:26px">'+(u.online?'🟢':'👤')+'</div>'+
+      '<div><div style="font-size:20px;font-weight:700">'+(u.name&&u.name!=='—'?u.name:'(bina naam)')+'</div>'+
+      '<div style="color:#64748b;font-size:13px">'+(u.online?'Abhi online':'Offline · '+ago(u.last)+' pehle active')+'</div></div></div>'+
+    '<table style="width:100%;border-collapse:collapse;font-size:14px">'+
+      row('Total scans','<span style="font-size:18px">'+fmt(u.scans)+'</span>')+
+      row('World me hissa',share)+
+      row('Country',u.country?flag(u.country)+' '+u.country:'—')+
+      row('App version',u.version?'v'+u.version:'—')+
+      row('Scan method',mth)+
+      row('Pehli baar (joined)',joined)+
+      row('Aakhri activity',seen)+
+    '</table>';
+  document.getElementById('umbody').innerHTML=html;
+  document.getElementById('umodal').style.display='flex';
+}
+function closeUser(){ document.getElementById('umodal').style.display='none'; }
 document.getElementById('usearch').addEventListener('input',renderUsers);
 renderUsers();
 
