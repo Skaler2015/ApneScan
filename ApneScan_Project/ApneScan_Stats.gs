@@ -96,25 +96,23 @@ function _getToday() {
   return { row: r, count: 0 };
 }
 
-// Aaj ka TOTAL — purane bug ki wajah se ek hi din ki kai rows ban gayi hain,
-// isliye sab matching rows ko jod kar dikhao (data waapas sahi dikhega).
+// ====== AAJ ki ginti — ab 'daily' sheet ke date-cell par NAHI ======
+// Purani daily-sheet wali ginti timezone/date-convert ki wajah se 0 aati thi.
+// Import/Print ki ginti (jo bilkul theek chalti hai) 'totals' sheet me ek
+// TEXT key ("imports"/"prints") se hoti hai — exact string match, koi date
+// nahi. Isliye "aaj" ki ginti bhi ab usi pakke tareeke se: har din ki apni
+// key  day_YYYY-MM-DD  (jaise day_2026-07-23). Ye kabhi date me convert nahi
+// hoti, isliye "aaj" hamesha sahi ginega.
+function _dayKey() {
+  return "day_" + _today();
+}
+
 function _todayCount() {
-  var sh = _sheet("daily", ["date", "count"]);
-  var day = _today();
-  var data = sh.getDataRange().getValues();
-  var sum = 0;
-  for (var i = 1; i < data.length; i++) {
-    if (_cellDay(data[i][0]) === day) sum += Number(data[i][1]) || 0;
-  }
-  return sum;
+  return _getCounter(_dayKey()).val;
 }
 
 function _addToday(inc) {
-  var sh = _sheet("daily", ["date", "count"]);
-  var t = _getToday();
-  var nv = t.count + inc;
-  sh.getRange(t.row, 2).setValue(nv);
-  return nv;
+  return _bumpCounter(_dayKey(), inc);
 }
 
 // Online = alag-alag client jinhone pichhle 5 min me ping kiya
@@ -189,20 +187,13 @@ function _breakdown(col) {
 }
 
 function _week() {
-  // pichhle 7 din: [[date, count], ...] purane-se-naye
-  var sh = _sheet("daily", ["date", "count"]);
-  var data = sh.getDataRange().getValues();
-  var byDay = {};
-  for (var i = 1; i < data.length; i++) {
-    var d = _cellDay(data[i][0]);
-    byDay[d] = (byDay[d] || 0) + (Number(data[i][1]) || 0);
-  }
+  // pichhle 7 din: [[date, count], ...] purane-se-naye — wahi pakki
+  // day_YYYY-MM-DD key se (jaise 'aaj').
   var out = [];
-  var tz = TZ;
   for (var j = 6; j >= 0; j--) {
     var dt = new Date(new Date().getTime() - j * 86400000);
-    var key = Utilities.formatDate(dt, tz, "yyyy-MM-dd");
-    out.push([key, byDay[key] || 0]);
+    var key = Utilities.formatDate(dt, TZ, "yyyy-MM-dd");
+    out.push([key, _getCounter("day_" + key).val]);
   }
   return out;
 }
@@ -232,12 +223,13 @@ function _hourCount() {
 }
 
 function _bumpPeak(online) {
-  // aaj ke daily row ke col 3 me aaj ka sabse bada online
-  var sh = _sheet("daily", ["date", "count"]);
-  var t = _getToday();
-  var cur = Number(sh.getRange(t.row, 3).getValue()) || 0;
-  if (online > cur) sh.getRange(t.row, 3).setValue(online);
-  return Math.max(cur, online);
+  // aaj ka sabse bada online — pakki  peak_YYYY-MM-DD  key se (max rakhta hai)
+  var c = _getCounter("peak_" + _today());
+  if (online > c.val) {
+    _sheet("totals", ["key", "value"]).getRange(c.row, 2).setValue(online);
+    return online;
+  }
+  return c.val;
 }
 
 // Generic ginti-counter (import/print jaise) — totals sheet me key-value row.
@@ -261,6 +253,8 @@ function _stats() {
   var online = _onlineCount();
   return {
     ok: true,
+    srv: 3,                 // server code version — redeploy check ke liye
+    today_key: _dayKey(),   // konsi key gini ja rahi hai (diagnosis)
     total: _getTotal(),
     today: _todayCount(),
     online: online,
