@@ -86,29 +86,28 @@ jobs:
       # Pehle ISI commit ki exe build ka intezaar karte hain (taaki website
       # aur exe hamesha same version hon); na mile to branch ki sabse nayi
       # successful build ki exe use hoti hai.
-      - name: Download latest ApneScan.exe into site
+      - name: Download ApneScan.exe (GitHub Release) into site
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          RUN_ID=""
-          for i in $(seq 1 25); do
-            RUN_ID=$(gh run list -R "$GITHUB_REPOSITORY" --workflow build-exe.yml \
-                     --branch "$GITHUB_REF_NAME" --status success \
-                     --json databaseId,headSha \
-                     -q "[.[] | select(.headSha == \"$GITHUB_SHA\")][0].databaseId")
-            [ -n "$RUN_ID" ] && break
-            echo "Exe build abhi chal rahi hai... intezaar ($i/25)"
-            sleep 20
+          # Website ka download exe ab GitHub RELEASE se aata hai (artifact nahi) —
+          # Release quota-free + version-matched hai. Isi version ka release banne
+          # ka intezaar karte hain (build parallel me chal rahi hoti hai).
+          V=$(grep -m1 -oP 'VERSION = "\K[0-9]+' ApneScan_Project/apnescan.py)
+          echo "Chahiye version: v$V"
+          for i in $(seq 1 30); do
+            if gh release download "v$V" -R "$GITHUB_REPOSITORY" \
+                 -p "ApneScan.exe" -p "ApneScan-Setup.exe" -D _site/ --clobber 2>/dev/null; then
+              echo "Release v$V mil gaya"; break
+            fi
+            echo "Release v$V abhi ban raha hai... intezaar ($i/30)"; sleep 20
           done
-          if [ -z "$RUN_ID" ]; then
-            RUN_ID=$(gh run list -R "$GITHUB_REPOSITORY" --workflow build-exe.yml \
-                     --branch "$GITHUB_REF_NAME" --status success --limit 1 \
-                     --json databaseId -q '.[0].databaseId')
+          # Na mile to sabse nayi release se (taaki website kabhi khaali na ho)
+          if [ ! -f _site/ApneScan.exe ]; then
+            echo "v$V na mila — latest release se le rahe hain"
+            gh release download -R "$GITHUB_REPOSITORY" \
+              -p "ApneScan.exe" -p "ApneScan-Setup.exe" -D _site/ --clobber || true
           fi
-          echo "Exe build run: $RUN_ID"
-          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n ApneScan-exe -D _site/
-          # Installer bhi website par (na mile to koi baat nahi — purani builds me nahi tha)
-          gh run download "$RUN_ID" -R "$GITHUB_REPOSITORY" -n ApneScan-Setup -D _site/ || true
           # Browser "Suspicious download blocked" (SmartScreen) sirf naye unsigned
           # .exe par aata hai — .zip ko browser block nahi karta. Isliye exe ka
           # ek ZIP bhi banate hain; website ka main download button isi par lagta hai.

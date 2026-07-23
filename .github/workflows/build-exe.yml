@@ -34,13 +34,6 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --clean --onefile --windowed --name "ApneScan" --icon apnescan.ico --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes --hidden-import PyQt5.QtMultimedia --hidden-import PyQt5.QtMultimediaWidgets --hidden-import PyQt5.QtNetwork --hidden-import qrcode --hidden-import qrcode.image.pil apnescan.py
 
-      - name: Upload EXE artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ApneScan-exe
-          path: ApneScan_Project/dist/ApneScan.exe
-          if-no-files-found: error
-
       # One-click installer (Start menu + desktop icon ke saath)
       - name: Build installer (Inno Setup)
         shell: pwsh
@@ -48,25 +41,41 @@ jobs:
           choco install innosetup -y --no-progress
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ApneScan_Project\ApneScan_installer_ci.iss
 
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ApneScan-Setup
-          path: ApneScan_Project/Output/ApneScan-Setup.exe
-          if-no-files-found: error
-
-      # Har build par exe GitHub Releases par bhi jaata hai (tag v<VERSION>) —
-      # yahi app ka backup download/update source hai jab website down/SSL ho.
+      # ---- GitHub Release SABSE PEHLE (quota-free, permanent, public) ----
+      # Ye app ka asli download + update source hai. Artifact storage bhar jaaye
+      # to bhi Release banta rahega (Release alag storage me hai).
       - name: Read app version
         id: ver
         shell: bash
         run: echo "v=$(grep -m1 -oP 'VERSION = \"\K[0-9]+' ApneScan_Project/apnescan.py)" >> "$GITHUB_OUTPUT"
 
-      - name: Publish GitHub Release (latest exe backup)
+      - name: Publish GitHub Release (exe + installer)
         if: steps.ver.outputs.v != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.v }}
           name: ApneScan v${{ steps.ver.outputs.v }}
-          files: ApneScan_Project/dist/ApneScan.exe
+          files: |
+            ApneScan_Project/dist/ApneScan.exe
+            ApneScan_Project/Output/ApneScan-Setup.exe
           generate_release_notes: true
+
+      # ---- Artifacts (best-effort) — sirf deploy-website ke same-SHA match ke
+      # liye. Storage-quota (403) aaye to build FAIL na ho + 1 din me expire. ----
+      - name: Upload EXE artifact
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApneScan-exe
+          path: ApneScan_Project/dist/ApneScan.exe
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload installer artifact
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApneScan-Setup
+          path: ApneScan_Project/Output/ApneScan-Setup.exe
+          if-no-files-found: error
+          retention-days: 1
