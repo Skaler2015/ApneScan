@@ -1,2 +1,4 @@
 stats.json
 backups/
+stats.json.bak
+stats.json.tmp*

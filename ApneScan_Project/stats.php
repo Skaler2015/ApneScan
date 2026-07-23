@@ -42,17 +42,102 @@ function default_data() {
         'adminLogins'=>array(),'failLog'=>array(),'lastBackup'=>0
     );
 }
-function load_data($file) {
-    if (!file_exists($file)) return default_data();
-    $d = json_decode(@file_get_contents($file), true);
-    if (!is_array($d)) $d = default_data();
-    return array_merge(default_data(), $d);
+// ek file se saaf JSON padho (khaali/tuti -> null)
+function _read_json($f) {
+    if (!is_file($f)) return null;
+    $s = @file_get_contents($f);
+    if ($s === false) return null;
+    $s = trim($s);
+    if ($s === '') return null;
+    $d = json_decode($s, true);
+    return is_array($d) ? $d : null;
 }
-function save_data($file, $d) {
-    $fp = @fopen($file, 'c+');
-    if ($fp) {
-        flock($fp, LOCK_EX); ftruncate($fp, 0); rewind($fp);
-        fwrite($fp, json_encode($d)); fflush($fp); flock($fp, LOCK_UN); fclose($fp);
+// kisi bhi data ka "kitna bhara hai" score (jitna zyada, utna asli)
+function _data_score($d) {
+    if (!is_array($d)) return -1;
+    return intval(isset($d['total'])?$d['total']:0)
+         + count(isset($d['clients'])&&is_array($d['clients'])?$d['clients']:array())
+         + count(isset($d['days'])&&is_array($d['days'])?$d['days']:array());
+}
+/**
+ * BULLETPROOF LOAD: main file, uska shadow (.bak) aur haal ke dated backups —
+ * in sab me se jisme SABSE ZYADA data ho wahi lo. Isse agar main file kabhi
+ * khaali/tuti/0 ho jaaye to bhi purana data apne aap wapas aa jaata hai.
+ */
+function load_data($file) {
+    $cands = array();
+    $m = _read_json($file);          if ($m !== null) $cands[] = $m;
+    $b = _read_json($file . '.bak'); if ($b !== null) $cands[] = $b;
+    $g = @glob(dirname($file) . '/backups/stats-*.json');
+    if ($g) { rsort($g); $n = 0; foreach ($g as $bf) { $c = _read_json($bf); if ($c !== null) { $cands[] = $c; if (++$n >= 3) break; } } }
+    if (!$cands) return default_data();
+    $best = $cands[0]; $bs = _data_score($best);
+    foreach ($cands as $c) { $s = _data_score($c); if ($s > $bs) { $bs = $s; $best = $c; } }
+    return array_merge(default_data(), $best);
+}
+/**
+ * BULLETPROOF SAVE:
+ *  - counters (total/imports/prints) kabhi kam nahi hote (monotonic)
+ *  - non-force save purani days/clients ko wipe nahi karta
+ *  - agar naya data KHAALI hai par purana bhara tha -> likhta hi nahi (0 se bachao)
+ *  - atomic write (temp file -> rename) taaki aadha-likha/tuta file kabhi na bane
+ *  - har safal write ke baad ek shadow copy (.bak)
+ * $force=true sirf admin ke jaan-boojhkar kiye actions ke liye (purge waghairah).
+ */
+function save_data($file, $d, $force = false) {
+    $prev = _read_json($file);
+    if ($prev === null) $prev = _read_json($file . '.bak');
+    if (is_array($prev)) {
+        // counters kabhi peeche nahi jaate
+        foreach (array('total','imports','prints','peakAll') as $k) {
+            if (intval(isset($d[$k])?$d[$k]:0) < intval(isset($prev[$k])?$prev[$k]:0)) $d[$k] = intval($prev[$k]);
+        }
+        if (!$force) {
+            // din ka itihaas wipe se bachao
+            if (isset($prev['days']) && is_array($prev['days'])) {
+                if (!isset($d['days']) || !is_array($d['days'])) $d['days'] = array();
+                foreach ($prev['days'] as $k => $v) { if (!isset($d['days'][$k]) || intval($d['days'][$k]) < intval($v)) $d['days'][$k] = intval($v); }
+            }
+            // users (clients) wipe se bachao
+            if (isset($prev['clients']) && is_array($prev['clients'])) {
+                if (!isset($d['clients']) || !is_array($d['clients'])) $d['clients'] = array();
+                foreach ($prev['clients'] as $k => $v) { if (!isset($d['clients'][$k])) $d['clients'][$k] = $v; }
+            }
+        }
+    }
+    // KHAALI-WIPE GUARD: bhara data 0 se replace mat karo
+    $newTotal  = intval(isset($d['total'])?$d['total']:0);
+    $prevScore = _data_score($prev);
+    if ($newTotal === 0 && $prevScore > 0) return;      // 0 likhne se saaf inkaar
+
+    $json = json_encode($d);
+    if ($json === false || strlen($json) < 2) return;   // encode fail -> kuch mat karo
+
+    // atomic write: temp -> rename (readers ko kabhi aadha file nahi milta)
+    $tmp = $file . '.tmp.' . @getmypid() . '.' . @uniqid();
+    $ok = @file_put_contents($tmp, $json, LOCK_EX);
+    if ($ok !== false && $ok === strlen($json)) {
+        @chmod($tmp, 0644);
+        if (@rename($tmp, $file)) {
+            @copy($file, $file . '.bak');               // shadow backup
+        } else {
+            @unlink($tmp);
+        }
+    } else {
+        @unlink($tmp);
+    }
+}
+// Roz ek dated backup apne aap (cron ki zaroorat nahi) — 14 rakho.
+function maybe_backup($file, &$d) {
+    $now = time();
+    if ($now - intval(isset($d['lastBackup'])?$d['lastBackup']:0) < 86400) return;
+    if (_data_score($d) <= 0) return;                 // khaali ka backup nahi
+    $dir = dirname($file) . '/backups';
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    if (@file_put_contents($dir . '/stats-' . date('Y-m-d') . '.json', json_encode($d)) !== false) {
+        $all = @glob($dir . '/stats-*.json');
+        if ($all && count($all) > 14) { sort($all); foreach (array_slice($all, 0, count($all) - 14) as $old) @unlink($old); }
+        $d['lastBackup'] = $now;
     }
 }
 function today_str() { return date('Y-m-d'); }
@@ -283,7 +368,7 @@ if (isset($_GET['admin'])) {
         if ($act==='purge')  { $days=max(30,intval($_POST['days'])); $cut=date('Y-m-d',time()-$days*86400); foreach($d['days'] as $k=>$v){ if($k<$cut) unset($d['days'][$k]); } }
         if ($act==='clearcrashes') $d['crashes']=array();
         if ($act==='clearfeedback') $d['feedback']=array();
-        save_data($DATA_FILE,$d);
+        save_data($DATA_FILE,$d,true);   // admin ka jaan-boojhkar action (purge/clear) -> force
         header('Location: '.strtok($_SERVER['REQUEST_URI'],'?').'?admin=1'); exit;
     }
 
@@ -835,6 +920,7 @@ if ($imp) $d['imports'] = intval($d['imports']) + $imp;
 if ($prt) $d['prints']  = intval($d['prints'])  + $prt;
 
 foreach ($d['online'] as $id => $ts) { if ($now - intval($ts) > 86400) unset($d['online'][$id]); }
+maybe_backup($DATA_FILE, $d);      // roz ek auto-backup (cron ke bina bhi)
 save_data($DATA_FILE, $d);
 
 header('Content-Type: application/json');
