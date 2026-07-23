@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "124"
+VERSION = "125"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -235,7 +235,7 @@ SCANNER_PORTS = (80, 443, 8080, 9100)
 # reports scan COUNTS here (never any document/patient data).
 # Worldwide-ginti ab apne PHP server par (Google Apps Script se hataya gaya).
 # Agar aap stats.php kisi aur jagah rakho to Settings -> "Stats server URL" me badlo.
-DEFAULT_STATS_URL = "https://apnesoftware.com/stats.php"
+DEFAULT_STATS_URL = "https://apnescan.apnesoft.com/stats.php"
 
 _TESS_GUESSES = [
     r"C:\Program Files\Tesseract-OCR\tesseract.exe",

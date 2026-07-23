@@ -115,13 +115,52 @@ function compute_stats($d, $client) {
     );
 }
 
-// ================= ADMIN DASHBOARD =================
+// ================= ADMIN — login + dashboard =================
+// Clean URL:  apnescan.apnesoft.com/admin   (.htaccess -> stats.php?admin=1)
 if (isset($_GET['admin'])) {
-    if ($_GET['admin'] !== $ADMIN_PASS) {
-        http_response_code(403);
-        echo 'Galat password. Aise kholo:  ?admin=YOURPASS';
+    session_start();
+    // logout
+    if (isset($_GET['logout'])) {
+        $_SESSION = array(); @session_destroy();
+        header('Location: ' . strtok($_SERVER['REQUEST_URI'], '?')); exit;
+    }
+    // login form POST
+    $login_err = '';
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pass'])) {
+        if (hash_equals($ADMIN_PASS, (string)$_POST['pass'])) { $_SESSION['ok'] = true; }
+        else { $login_err = 'Galat password. Dubara koshish karo.'; }
+    }
+    // ---- agar login nahi hua: login page dikhao ----
+    if (empty($_SESSION['ok'])) {
+        header('Content-Type: text/html; charset=utf-8');
+        ?><!doctype html>
+<html lang="hi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ApneScan Admin — Login</title>
+<style>
+  body{margin:0;font-family:system-ui,Segoe UI,Roboto,Arial;background:#0f172a;
+    display:flex;align-items:center;justify-content:center;min-height:100vh;color:#e2e8f0}
+  .box{background:#fff;color:#1e293b;width:320px;max-width:90%;padding:26px;border-radius:16px;
+    box-shadow:0 12px 40px rgba(0,0,0,.35);text-align:center}
+  .box .logo{font-size:34px} h1{font-size:19px;margin:6px 0 2px}
+  .sub{color:#64748b;font-size:12px;margin-bottom:16px}
+  input{width:100%;padding:11px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:15px;margin-bottom:10px}
+  button{width:100%;padding:11px;border:none;border-radius:10px;background:#0f766e;color:#fff;
+    font-size:15px;font-weight:700;cursor:pointer}
+  button:hover{background:#0b5c55}
+  .err{color:#dc2626;font-size:12px;margin-bottom:8px}
+</style></head><body>
+  <form class="box" method="post" action="">
+    <div class="logo">📊🔒</div>
+    <h1>ApneScan Admin</h1>
+    <div class="sub">Worldwide stats dashboard</div>
+    <?php if ($login_err) echo '<div class="err">'.htmlspecialchars($login_err).'</div>'; ?>
+    <input type="password" name="pass" placeholder="Password" autofocus required>
+    <button type="submit">Login →</button>
+  </form>
+</body></html><?php
         exit;
     }
+    // ---- login ho gaya: dashboard ----
     $d = load_data($DATA_FILE);
     $S = compute_stats($d, '');
     $J = json_encode($S);
@@ -148,6 +187,7 @@ if (isset($_GET['admin'])) {
   .rbtn{float:right;background:#fff;color:#0f766e;border:1px solid #fff;border-radius:8px;padding:5px 12px;cursor:pointer;font-weight:700}
 </style></head><body>
 <header>
+  <a class="rbtn" href="?logout=1" style="text-decoration:none;margin-left:8px">🔓 Logout</a>
   <button class="rbtn" onclick="location.reload()">🔄 Refresh</button>
   <h1>📊 ApneScan — Worldwide Stats</h1>
   <div class="t">Live data · <span id="tm"></span> · sirf ginti (koi document/naam nahi)</div>
