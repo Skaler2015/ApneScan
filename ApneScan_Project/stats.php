@@ -227,6 +227,8 @@ document.getElementById('rc').innerHTML='<table>'+
  '<tr><td>📅 Best single day</td><td style="text-align:right"><b>'+D.bestDay+'</b></td></tr>'+
  '<tr><td>🕐 This hour</td><td style="text-align:right"><b>'+D.hour+'</b></td></tr>'+
  '<tr><td>🖥 Server</td><td style="text-align:right"><b>'+D.srv+'</b></td></tr></table>';
+// LIVE: har 30 sec me apne aap taaza (naye scan turant dikhein)
+setInterval(function(){ location.reload(); }, 30000);
 </script>
 </body></html><?php
     exit;
