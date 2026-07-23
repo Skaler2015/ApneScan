@@ -39,7 +39,8 @@ function default_data() {
         'features'=>array(),'scanners'=>array(),'dpis'=>array(),
         'colors'=>array(),'sizes'=>array(),'crashes'=>array(),'feedback'=>array(),
         'broadcast'=>array('msg'=>'','target'=>'all','id'=>0),'rconfig'=>array(),
-        'adminLogins'=>array(),'failLog'=>array(),'lastBackup'=>0
+        'adminLogins'=>array(),'failLog'=>array(),'lastBackup'=>0,
+        'scanEvents'=>0,'recentScans'=>array()
     );
 }
 // ek file se saaf JSON padho (khaali/tuti -> null)
@@ -474,6 +475,87 @@ if (isset($_GET['admin'])) {
     $S['adminLogins']=$al;
     $S['fails']=count(isset($d['failLog'])?$d['failLog']:array());
     $S['daysMap']=$d['days'];
+    // ================= DEEP WORLDWIDE ANALYTICS =================
+    // day-of-week (Mon..Sun)
+    $dow=array_fill(0,7,0);
+    foreach($d['days'] as $k=>$v){ $ts=strtotime($k); if($ts){ $dow[intval(date('w',$ts))]+=intval($v); } }
+    $S['dow']=array($dow[1],$dow[2],$dow[3],$dow[4],$dow[5],$dow[6],$dow[0]);
+    $S['weekdayTotal']=$dow[1]+$dow[2]+$dow[3]+$dow[4]+$dow[5];
+    $S['weekendTotal']=$dow[6]+$dow[0];
+    // month-by-month (last 12)
+    $mbm=array();
+    for($i=11;$i>=0;$i--){ $mk=date('Y-m',strtotime("first day of -$i month",$now)); $sum=0; foreach($d['days'] as $k=>$v){ if(strpos($k,$mk.'-')===0)$sum+=intval($v); } $mbm[]=array(date('M y',strtotime($mk.'-01')),$sum); }
+    $S['monthByMonth']=$mbm;
+    // 7x24 heatmap
+    $hw=array(); for($i=0;$i<7;$i++)$hw[$i]=array_fill(0,24,0);
+    foreach($d['hours'] as $hk=>$hv){ if(preg_match('/^(\d{4}-\d{2}-\d{2})-(\d{1,2})$/',$hk,$m)){ $ts=strtotime($m[1]); if($ts){ $hh=intval($m[2]); if($hh>=0&&$hh<24)$hw[intval(date('w',$ts))][$hh]+=intval($hv); } } }
+    $S['heat7x24']=array($hw[1],$hw[2],$hw[3],$hw[4],$hw[5],$hw[6],$hw[0]);
+    // week-over-week
+    $tw=0; for($i=0;$i<7;$i++){ $k=date('Y-m-d',$now-$i*86400); $tw+=intval(isset($d['days'][$k])?$d['days'][$k]:0); }
+    $lw=0; for($i=7;$i<14;$i++){ $k=date('Y-m-d',$now-$i*86400); $lw+=intval(isset($d['days'][$k])?$d['days'][$k]:0); }
+    $S['thisWeek7']=$tw; $S['lastWeek7']=$lw; $S['wowPct']=($lw>0)?round(100*($tw-$lw)/$lw):($tw>0?100:0);
+    // year-over-year
+    $ty=0;$ly=0; $cy=date('Y'); $py=$cy-1;
+    foreach($d['days'] as $k=>$v){ if(strpos($k,$cy.'-')===0)$ty+=intval($v); elseif(strpos($k,$py.'-')===0)$ly+=intval($v); }
+    $S['thisYear']=$ty; $S['lastYear']=$ly;
+    // country depth
+    $usersByCo=array();
+    foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $co=trim($c['country']); if($co!=='')bump($usersByCo,$co,1); }
+    $S['usersByCountry']=$usersByCo;
+    $perUserCo=array(); foreach($usersByCo as $co=>$u){ $sc=isset($S['scansByCountry'][$co])?$S['scansByCountry'][$co]:0; $perUserCo[$co]=$u?round($sc/$u,1):0; }
+    $S['perUserByCountry']=$perUserCo;
+    $moStart=strtotime(date('Y-m-01')); $coFirst=array();
+    foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $co=trim($c['country']); if($co==='')continue; $f=intval($c['first']); if(!isset($coFirst[$co])||$f<$coFirst[$co])$coFirst[$co]=$f; }
+    $newCos=array(); foreach($coFirst as $co=>$f){ if($f>=$moStart)$newCos[]=$co; } $S['newCountries']=$newCos;
+    // segments
+    $seg=array('new'=>0,'regular'=>0,'power'=>0,'asleep'=>0);
+    foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $sc=intval($c['scans']); $last=intval($c['last']); $first=intval($c['first']);
+      if($now-$last>14*86400)$seg['asleep']++; elseif($sc>=50)$seg['power']++; elseif($now-$first<7*86400)$seg['new']++; else $seg['regular']++; }
+    $S['segments']=$seg;
+    $S['avgPerUser']=count($d['clients'])?round($S['total']/max(1,count($d['clients'])),1):0;
+    // distribution
+    $bk=array('1-5'=>0,'6-20'=>0,'21-50'=>0,'51-100'=>0,'100+'=>0);
+    foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $sc=intval($c['scans']); if($sc<=0)continue; if($sc<=5)$bk['1-5']++; elseif($sc<=20)$bk['6-20']++; elseif($sc<=50)$bk['21-50']++; elseif($sc<=100)$bk['51-100']++; else $bk['100+']++; }
+    $S['scanDist']=$bk;
+    // retention curve
+    $rcv=array(); foreach(array(1,3,7,14,30) as $dd){ $e=0;$r=0;
+      foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $first=intval($c['first']); if(!$first||$now-$first<$dd*86400)continue; $e++; $act=isset($c['active'])?$c['active']:array(); $cut=date('Y-m-d',$first+$dd*86400); foreach($act as $ad){ if($ad>=$cut){$r++;break;} } }
+      $rcv[]=array($dd,$e?round(100*$r/$e):0); }
+    $S['retCurve']=$rcv;
+    $S['stickiness']=$S['mau']?round(100*$S['dau']/$S['mau']):0;
+    $rep=0;$tot=0; foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $tot++; if(count(isset($c['active'])?$c['active']:array())>=2)$rep++; }
+    $S['repeatRate']=$tot?round(100*$rep/$tot):0;
+    // scanner brands
+    $brands=array(); foreach($d['scanners'] as $mm=>$cnt){ $bw=trim(strtok($mm,' ')); if($bw!=='')bump($brands,$bw,$cnt); } $S['brands']=$brands;
+    // avg pages/scan
+    $S['scanEvents']=intval(isset($d['scanEvents'])?$d['scanEvents']:0);
+    $S['avgPages']=$S['scanEvents']?round($S['total']/max(1,$S['scanEvents']),1):0;
+    // most common settings
+    $tk=function($a){ if(!is_array($a)||!$a)return array('—',0); arsort($a); $k=key($a); return array((string)$k,intval($a[$k])); };
+    $S['topDpi']=$tk($d['dpis']); $S['topColor']=$tk($d['colors']); $S['topSize']=$tk($d['sizes']);
+    // growth + churn rate
+    $ntm=0;$nlm=0; $lmS=strtotime(date('Y-m-01',strtotime('-1 month'))); $lmE=$moStart-1;
+    foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $f=intval($c['first']); if($f>=$moStart)$ntm++; elseif($f>=$lmS&&$f<=$lmE)$nlm++; }
+    $S['newThisMonth']=$ntm; $S['newLastMonth']=$nlm; $S['userGrowthPct']=$nlm?round(100*($ntm-$nlm)/$nlm):($ntm?100:0);
+    $chn=0; foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; if($now-intval($c['last'])>=14*86400 && intval($c['scans'])>=1)$chn++; }
+    $S['churnRate']=count($d['clients'])?round(100*$chn/max(1,count($d['clients']))):0; $S['churnCount']=$chn;
+    $S['netGrowthMo']=$ntm-$chn;
+    // milestone countdown
+    $miles=array(100,500,1000,5000,10000,25000,50000,100000,250000,500000,1000000);
+    $next=null; foreach($miles as $m){ if($S['total']<$m){$next=$m;break;} }
+    $prevM=0; foreach($miles as $m){ if($m<=$S['total'])$prevM=$m; }
+    $S['nextMilestone']=$next; $S['milestoneLeft']=$next?($next-$S['total']):0; $S['milestonePct']=$next?round(100*($S['total']-$prevM)/max(1,($next-$prevM))):100;
+    // global streak
+    $streak=0; for($i=0;$i<400;$i++){ $k=date('Y-m-d',$now-$i*86400); if(intval(isset($d['days'][$k])?$d['days'][$k]:0)>0)$streak++; elseif($i>0)break; } $S['globalStreak']=$streak;
+    // forecast + projection
+    $S['forecastMonth']=round($S['dailyAvg']*30);
+    $dLeft=(intval(date('z',mktime(0,0,0,12,31,intval($cy))))-intval(date('z')));
+    $S['yearEndProj']=$S['thisYear']+round($S['dailyAvg']*max(0,$dLeft));
+    // live feed + last hour/24h
+    $S['recentScans']=array_reverse(array_slice(isset($d['recentScans'])?$d['recentScans']:array(),-20));
+    $S['lastHour']=intval(isset($d['hours'][hour_key()])?$d['hours'][hour_key()]:0);
+    $l24=0; for($i=0;$i<24;$i++){ $hk=date('Y-m-d-H',$now-$i*3600); $l24+=intval(isset($d['hours'][$hk])?$d['hours'][$hk]:0); } $S['last24h']=$l24;
+
     // health
     $S['fileKB']=file_exists($DATA_FILE)?round(filesize($DATA_FILE)/1024,1):0;
     $S['lastBackup']=intval(isset($d['lastBackup'])?$d['lastBackup']:0);
@@ -645,6 +727,46 @@ if (isset($_GET['admin'])) {
   </div>
 
   <div class="card"><h3><span class="em">🕐</span> Busiest hours (all-time)</h3><div class="heat" id="heat"></div></div>
+
+  <div class="sec"><span class="em">🌐</span> Deep Worldwide Analytics</div>
+  <div class="kpis" id="kpis2" style="margin-bottom:16px"></div>
+
+  <!-- milestone + forecast + live feed -->
+  <div class="grid3">
+    <div class="card"><h3><span class="em">🎯</span> Agle milestone tak</h3><div id="mile"></div></div>
+    <div class="card"><h3><span class="em">🔮</span> Forecast &amp; projection</h3><div id="fore"></div></div>
+    <div class="card"><h3><span class="em">🔴</span> Live scan feed</h3><div id="feed" style="max-height:200px;overflow:auto"></div></div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><h3><span class="em">📅</span> Din-vaar (Mon–Sun)</h3><canvas id="dowc" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">📆</span> Mahina-dar-mahina (12 month)</h3><canvas id="mbmc" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">🥧</span> User segments</h3><canvas id="segc" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">📊</span> Scans distribution (per user)</h3><canvas id="distc" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">📉</span> Retention curve</h3><canvas id="retcv" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">🏭</span> Scanner brands (market-share)</h3><div id="brands"></div></div>
+  </div>
+
+  <div class="card"><h3><span class="em">🗓</span> World rhythm — din × ghanta (7×24)</h3>
+    <div style="overflow-x:auto"><div id="heat7"></div></div>
+  </div>
+
+  <div class="card"><h3><span class="em">🗺</span> World map — scans by country</h3><canvas id="wmap" height="300" style="height:340px!important"></canvas></div>
+
+  <div class="grid">
+    <div class="card"><h3><span class="em">🌍</span> Country depth (users · scans · per-user · %)</h3><div style="max-height:320px;overflow:auto"><div id="coDeep"></div></div></div>
+    <div class="card"><h3><span class="em">🎚</span> Sabse common setting</h3><div id="common"></div>
+      <h3 style="margin-top:14px"><span class="em">⚡</span> Weekday vs Weekend</h3><div id="wwe"></div></div>
+  </div>
+
+  <!-- compare tool -->
+  <div class="card no-print"><h3><span class="em">⚖️</span> Compare tool</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <select id="cmpType"><option value="country">Desh vs Desh</option><option value="version">Version vs Version</option><option value="date">Do date-range</option></select>
+      <span id="cmpAB"></span>
+    </div>
+    <div id="cmpOut"></div>
+  </div>
 
   <div class="sec"><span class="em">👤</span> Users</div>
   <div class="card"><h3><span class="em">👤</span> Saare users (<span id="ucount"></span>) <span style="color:var(--mut);font-weight:500;font-size:11px">— header pe click = sort, naam pe click = details/manage</span></h3>
@@ -866,6 +988,133 @@ function drCalc(){ var a=document.getElementById('df').value,b=document.getEleme
 document.getElementById('df').addEventListener('change',drCalc);
 document.getElementById('dt').addEventListener('change',drCalc); drCalc();
 
+// ================= DEEP WORLDWIDE ANALYTICS (render) =================
+// extra KPI row
+document.getElementById('kpis2').innerHTML=
+  kpi('📈',D.avgPerUser,'Avg / user','p')+
+  kpi('📄',D.avgPages,'Avg pages/scan')+
+  kpi(D.wowPct>=0?'📈':'📉',(D.wowPct>=0?'+':'')+D.wowPct+'%','Week/week',D.wowPct>=0?'g':'r')+
+  kpi('🧲',D.stickiness+'%','Stickiness (DAU/MAU)','o')+
+  kpi('🔁',D.repeatRate+'%','Repeat rate','g')+
+  kpi('🔥',D.globalStreak,'Day streak','r')+
+  kpi('🕐',fmt(D.lastHour),'Last hour')+
+  kpi('⏱',fmt(D.last24h),'Last 24h')+
+  kpi('📆',fmt(D.thisYear),'This year')+
+  kpi(D.userGrowthPct>=0?'🌱':'🍂',(D.userGrowthPct>=0?'+':'')+D.userGrowthPct+'%','User growth',D.userGrowthPct>=0?'g':'r')+
+  kpi('😴',D.churnRate+'%','Churn rate','r')+
+  kpi('📊',(D.netGrowthMo>=0?'+':'')+D.netGrowthMo,'Net users (mo)',D.netGrowthMo>=0?'g':'r');
+
+// milestone countdown
+(function(){ var el=document.getElementById('mile');
+  if(!D.nextMilestone){ el.innerHTML='<div style="color:var(--mut)">🏆 Sab milestones paar!</div>'; return; }
+  el.innerHTML='<div style="font-size:22px;font-weight:800">'+fmt(D.milestoneLeft)+' <span style="font-size:13px;color:var(--mut);font-weight:600">aur '+fmt(D.nextMilestone)+' tak</span></div>'+
+    '<div style="height:12px;background:var(--line);border-radius:8px;overflow:hidden;margin:10px 0 4px"><div style="height:100%;width:'+D.milestonePct+'%;background:linear-gradient(90deg,'+PAL.blue+','+PAL.aqua+')"></div></div>'+
+    '<div style="color:var(--mut);font-size:12px">'+D.milestonePct+'% done · abhi '+fmt(D.total)+'</div>'; })();
+
+// forecast
+document.getElementById('fore').innerHTML='<table>'+
+  '<tr><td>🔮 Agle mahine (~)</td><td style="text-align:right"><b>'+fmt(D.forecastMonth)+'</b></td></tr>'+
+  '<tr><td>📅 Year-end tak (~)</td><td style="text-align:right"><b>'+fmt(D.yearEndProj)+'</b></td></tr>'+
+  '<tr><td>🔥 Global streak</td><td style="text-align:right"><b>'+D.globalStreak+' din</b></td></tr>'+
+  '<tr><td>🆕 Naye desh (is mahine)</td><td style="text-align:right"><b>'+((D.newCountries||[]).map(function(c){return flag(c);}).join(' ')||'—')+'</b></td></tr></table>';
+
+// live feed
+(function(){ var el=document.getElementById('feed'); var r=D.recentScans||[];
+  el.innerHTML=r.length?r.map(function(s){return '<div style="padding:5px 0;border-bottom:1px solid var(--line);font-size:13px">'+(s.cc?flag(s.cc):'🌍')+' <b>'+esc(s.name||'—')+'</b> ne '+s.n+' page scan kiye <span style="color:var(--mut);float:right">'+ago(s.t)+' pehle</span></div>';}).join(''):'<div style="color:var(--mut)">— abhi koi scan nahi —</div>'; })();
+
+if(window.Chart){
+  var bc2=Chart.defaults.borderColor;
+  var COb={plugins:{legend:{display:false}},scales:{x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:bc2},ticks:{precision:0}}}};
+  mkChart(dowc,{type:'bar',data:{labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],datasets:[{data:D.dow,backgroundColor:D.dow.map(function(_,i){return i>=5?PAL.orange:PAL.blue;})}]},options:COb});
+  mkChart(mbmc,{type:'bar',data:{labels:D.monthByMonth.map(function(x){return x[0];}),datasets:[{data:D.monthByMonth.map(function(x){return x[1];}),backgroundColor:PAL.aqua}]},options:COb});
+  var sg=D.segments||{};
+  mkChart(segc,{type:'doughnut',data:{labels:['New','Regular','Power','Asleep'],datasets:[{data:[sg['new'],sg.regular,sg.power,sg.asleep],backgroundColor:[PAL.aqua,PAL.blue,PAL.violet,'#94a3b8'],borderWidth:2,borderColor:'var(--card)'}]},options:{plugins:{legend:{position:'right',labels:{boxWidth:12}}}}});
+  var db=D.scanDist||{}; var dl=Object.keys(db);
+  mkChart(distc,{type:'bar',data:{labels:dl,datasets:[{data:dl.map(function(k){return db[k];}),backgroundColor:PAL.blue}]},options:COb});
+  mkChart(retcv,{type:'line',data:{labels:D.retCurve.map(function(x){return 'D+'+x[0];}),datasets:[{data:D.retCurve.map(function(x){return x[1];}),borderColor:PAL.aqua,backgroundColor:function(c){return grad(c,PAL.aqua);},borderWidth:2,fill:true,tension:.3,pointRadius:3,pointBackgroundColor:PAL.aqua}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,max:100,grid:{color:bc2},ticks:{callback:function(v){return v+'%';}}},x:{grid:{display:false}}}}});
+}
+
+// scanner brands
+bars('brands',obj2rows(D.brands),false);
+
+// 7x24 heatmap
+(function(){ var el=document.getElementById('heat7'); var H=D.heat7x24||[]; var days=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  var mx=1; H.forEach(function(row){row.forEach(function(v){if(v>mx)mx=v;});});
+  var h='<table style="border-collapse:separate;border-spacing:2px"><tr><td></td>';
+  for(var hh=0;hh<24;hh++) h+='<td style="font-size:8px;color:var(--mut);text-align:center">'+hh+'</td>';
+  h+='</tr>';
+  H.forEach(function(row,di){ h+='<tr><td style="font-size:10px;color:var(--mut);padding-right:4px">'+days[di]+'</td>';
+    row.forEach(function(v,hh){ var a=v/mx; var bg=a>0?'rgba(42,120,214,'+(0.12+a*0.88)+')':'var(--line)'; h+='<td title="'+days[di]+' '+hh+':00 — '+v+'" style="width:15px;height:15px;border-radius:3px;background:'+bg+'"></td>'; });
+    h+='</tr>'; });
+  el.innerHTML=h+'</table>'; })();
+
+// world map (scatter by lat/lng)
+var CC={IN:[22,79],US:[38,-97],GB:[54,-2],CA:[56,-106],AU:[-25,133],DE:[51,10],FR:[46,2],IT:[42,12],ES:[40,-4],BR:[-10,-55],RU:[61,105],CN:[35,104],JP:[36,138],KR:[36,128],ID:[-2,118],PK:[30,70],BD:[24,90],NG:[9,8],ZA:[-29,24],EG:[26,30],SA:[24,45],AE:[24,54],TR:[39,35],MX:[23,-102],AR:[-38,-63],PH:[13,122],VN:[16,108],TH:[15,101],MY:[4,102],SG:[1,104],NP:[28,84],LK:[7,81],KE:[0,38],GH:[8,-1],NL:[52,5],SE:[62,15],PL:[52,19],UA:[49,32],IR:[32,53],IQ:[33,44],QA:[25,51],KW:[29,47],OM:[21,57],NZ:[-42,174],IE:[53,-8],PT:[39,-8],CH:[47,8],BE:[50,4],AT:[47,14]};
+if(window.Chart){
+  var pts=obj2rows(D.scansByCountry).map(function(r){ var c=CC[r[0]]; if(!c)return null; return {x:c[1],y:c[0],r:Math.max(5,Math.min(26,Math.sqrt(r[1])*2)),cc:r[0],v:r[1]}; }).filter(Boolean);
+  mkChart(wmap,{type:'bubble',data:{datasets:[{data:pts,backgroundColor:'rgba(42,120,214,.55)',borderColor:PAL.blue,borderWidth:1}]},
+    options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:function(ctx){var p=ctx.raw;return p.cc+': '+fmt(p.v)+' scans';}}}},
+    scales:{x:{min:-170,max:180,display:false},y:{min:-60,max:80,display:false}}}});
+}
+
+// country depth table
+(function(){ var el=document.getElementById('coDeep'); var tot=D.total||1;
+  var rows=obj2rows(D.scansByCountry);
+  if(!rows.length){ el.innerHTML='<div style="color:var(--mut);font-size:12px">— data nahi —</div>'; return; }
+  var h='<table><tr><th>Desh</th><th>Users</th><th>Scans</th><th>/user</th><th>%</th></tr>';
+  rows.forEach(function(r){ var cc=r[0]; var u=(D.usersByCountry||{})[cc]||0; var pu=(D.perUserByCountry||{})[cc]||0; var pct=(100*r[1]/tot).toFixed(1);
+    h+='<tr><td>'+flag(cc)+' '+cc+'</td><td>'+u+'</td><td><b>'+fmt(r[1])+'</b></td><td>'+pu+'</td><td>'+pct+'%</td></tr>'; });
+  el.innerHTML=h+'</table>'; })();
+
+// most common setting + weekday/weekend
+(function(){ var el=document.getElementById('common');
+  function chip(l,v,c){ return '<div style="display:inline-block;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:8px 14px;margin:4px 6px 0 0"><div style="font-size:11px;color:var(--mut)">'+l+'</div><div style="font-size:16px;font-weight:800;color:'+c+'">'+v+'</div></div>'; }
+  el.innerHTML=chip('DPI',(D.topDpi&&D.topDpi[0])||'—',PAL.blue)+chip('Colour',(D.topColor&&D.topColor[0])||'—',PAL.aqua)+chip('Page size',(D.topSize&&D.topSize[0])||'—',PAL.violet); })();
+(function(){ var el=document.getElementById('wwe'); var wd=D.weekdayTotal||0, we=D.weekendTotal||0, t=wd+we||1;
+  el.innerHTML='<table>'+
+   '<tr><td style="width:120px">💼 Weekday (Mon–Fri)</td><td><div class="bar" style="width:'+Math.max(3,100*wd/t)+'%"></div></td><td style="width:60px;text-align:right"><b>'+fmt(wd)+'</b></td></tr>'+
+   '<tr><td>🏖 Weekend (Sat–Sun)</td><td><div class="bar" style="width:'+Math.max(3,100*we/t)+'%;background:'+PAL.orange+'"></div></td><td style="text-align:right"><b>'+fmt(we)+'</b></td></tr></table>'; })();
+
+// compare tool
+(function(){
+  var typeEl=document.getElementById('cmpType'), abEl=document.getElementById('cmpAB'), outEl=document.getElementById('cmpOut');
+  function opts(list){ return list.map(function(x){return '<option value="'+esc(x)+'">'+esc(x)+'</option>';}).join(''); }
+  function countries(){ return Object.keys(D.scansByCountry||{}); }
+  function versions(){ return Object.keys(D.versions||{}); }
+  function build(){
+    var t=typeEl.value;
+    if(t==='date'){
+      abEl.innerHTML='<input type="date" id="ca1"> → <input type="date" id="cb1"> &nbsp; vs &nbsp; <input type="date" id="ca2"> → <input type="date" id="cb2"> <button class="btn" onclick="cmpRun()">Compare</button>';
+    } else {
+      var list=(t==='country')?countries():versions();
+      abEl.innerHTML='<select id="cx">'+opts(list)+'</select> vs <select id="cy">'+opts(list)+'</select> <button class="btn" onclick="cmpRun()">Compare</button>';
+      var cy=document.getElementById('cy'); if(cy&&cy.options.length>1)cy.selectedIndex=1;
+    }
+    outEl.innerHTML='';
+  }
+  window.cmpRun=function(){
+    var t=typeEl.value, a,b,la,lb;
+    if(t==='date'){
+      var a1=document.getElementById('ca1').value,b1=document.getElementById('cb1').value,a2=document.getElementById('ca2').value,b2=document.getElementById('cb2').value;
+      function sum(x,y){var s=0;for(var k in D.daysMap){if(k>=x&&k<=y)s+=parseInt(D.daysMap[k])||0;}return s;}
+      a=sum(a1,b1); b=sum(a2,b2); la=a1+'…'+b1; lb=a2+'…'+b2;
+    } else if(t==='country'){
+      var x=document.getElementById('cx').value,y=document.getElementById('cy').value;
+      a=(D.scansByCountry||{})[x]||0; b=(D.scansByCountry||{})[y]||0; la=flag(x)+' '+x; lb=flag(y)+' '+y;
+    } else {
+      var vx=document.getElementById('cx').value,vy=document.getElementById('cy').value;
+      // version -> users count (versions holds user counts)
+      a=(D.versions||{})[vx]||0; b=(D.versions||{})[vy]||0; la='v'+vx; lb='v'+vy;
+    }
+    var mx=Math.max(a,b,1);
+    function row(l,v,c){ return '<tr><td style="width:130px">'+l+'</td><td><div class="bar" style="width:'+Math.max(3,100*v/mx)+'%;background:'+c+'"></div></td><td style="width:70px;text-align:right"><b>'+fmt(v)+'</b></td></tr>'; }
+    var diff=b-a, pct=a?Math.round(100*diff/a):(b?100:0);
+    outEl.innerHTML='<table>'+row(la,a,PAL.blue)+row(lb,b,PAL.orange)+'</table>'+
+      '<div style="margin-top:8px;font-size:13px">Antar: <b style="color:'+(diff>=0?PAL.aqua:PAL.red)+'">'+(diff>=0?'+':'')+fmt(diff)+' ('+(pct>=0?'+':'')+pct+'%)</b></div>';
+  };
+  typeEl.addEventListener('change',build); build();
+})();
+
 // auto-refresh 30s (agar koi modal/form khula nahi)
 setInterval(function(){ if(document.getElementById('umodal').style.display==='flex')return; if(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))return; location.reload(); },30000);
 </script>
@@ -893,6 +1142,12 @@ if ($action === 'scan') {
         if (isset($_REQUEST['col'])) bump($d['colors'],substr($_REQUEST['col'],0,10),1);
         if (isset($_REQUEST['sz']))  bump($d['sizes'], substr($_REQUEST['sz'],0,10),1);
         if (!empty($_REQUEST['sm']))  bump($d['scanners'], substr($_REQUEST['sm'],0,40),1);
+        // scan-event count (avg pages/scan ke liye) + live feed
+        $d['scanEvents'] = intval(isset($d['scanEvents'])?$d['scanEvents']:0) + 1;
+        if (!isset($d['recentScans'])) $d['recentScans'] = array();
+        $d['recentScans'][] = array('t'=>$now, 'name'=>substr(isset($_REQUEST['u'])?$_REQUEST['u']:'',0,40),
+            'cc'=>substr(isset($_REQUEST['c'])?$_REQUEST['c']:'',0,4), 'n'=>$n);
+        $d['recentScans'] = array_slice($d['recentScans'], -40);
         update_peak($d, $now, $today);
     }
 } else if ($action === 'ping') {
