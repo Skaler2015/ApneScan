@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "113"
+VERSION = "114"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -7005,19 +7005,19 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._apply_thumb_zoom(self._thumb_w * factor)
 
     # ================= Footer AD strip =================
-    # ApneSoftware.com ke ad ke rotating sandesh (har kuch second me badalte hain)
+    # ApneSoftware.com ke ad ke rotating sandesh — site ki asli content ke
+    # hisaab se (free online PDF/document tools, browser me hi, no signup)
     AD_LINES = [
-        ("hi", "✨ <b>ApneSoftware.com</b> — hospital &amp; office ke liye aur bhi "
-               "<b>FREE</b> software"),
-        ("hi", "🧰 ApneSoftware.com par aur tools — sab <b>saral, halke aur free</b>"),
-        ("hi", "🇮🇳 <b>ApneSoftware</b> — aapke kaam ke liye banaye gaye software"),
-        ("hi", "💙 ApneScan pasand aaya? <b>ApneSoftware.com</b> par aur bhi dekhiye"),
+        ("hi", "🧰 <b>ApneSoftware.com</b> — <b>FREE</b> online PDF &amp; document tools"),
+        ("hi", "🔒 PDF ki info, metadata &amp; links badlo — <b>100% private</b>, browser me hi"),
+        ("hi", "📄 PDF Info · Metadata Editor · Link Extractor aur bhi — <b>sab FREE</b>"),
+        ("hi", "☁ <b>Bina upload, bina signup</b> — sab kaam aapke browser me · ApneSoftware.com"),
     ]
     AD_LINES_EN = [
-        "✨ <b>ApneSoftware.com</b> — more <b>FREE</b> software for clinics &amp; offices",
-        "🧰 More tools at ApneSoftware.com — all <b>simple, light &amp; free</b>",
-        "🇮🇳 <b>ApneSoftware</b> — software crafted for your everyday work",
-        "💙 Love ApneScan? Discover more at <b>ApneSoftware.com</b>",
+        "🧰 <b>ApneSoftware.com</b> — <b>FREE</b> online PDF &amp; document tools",
+        "🔒 View &amp; edit PDF info, metadata &amp; links — <b>100% private</b>, in your browser",
+        "📄 PDF Info · Metadata Editor · Link Extractor &amp; more — <b>all FREE</b>",
+        "☁ <b>No upload, no signup</b> — everything runs in your browser · ApneSoftware.com",
     ]
 
     def _build_ad_footer(self):
@@ -7055,8 +7055,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ad_label = QtWidgets.QLabel("")
         self._ad_label.setTextFormat(QtCore.Qt.RichText)
         self._ad_label.setCursor(QtCore.Qt.PointingHandCursor)
-        self._ad_label.setToolTip(self.L("ApneSoftware.com kholo (banane wale ki website)",
-                                          "Open ApneSoftware.com (the maker's website)"))
+        self._ad_label.setToolTip(self.L(
+            "ApneSoftware.com kholo — free online PDF & document tools (browser me hi, no signup)",
+            "Open ApneSoftware.com — free online PDF & document tools (in-browser, no signup)"))
         self._ad_label.mousePressEvent = lambda _e: self._open_web(APNESOFT_URL)
         h.addWidget(self._ad_label)
 
