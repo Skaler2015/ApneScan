@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "122"
+VERSION = "123"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2049,6 +2049,23 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
         except Exception:
             pass
 
+    # --- Effective DPI: scanner jo resolution SUPPORT karta hai usi me se lo ---
+    # Warna un-supported DPI (jaise 1200 par ek 600-max scanner) par device job
+    # reject/atka deta hai aur 0 page aate the. ScannerCapabilities se supported
+    # resolutions padho aur maangi DPI ko sabse kareeb (<= maang) par snap karo.
+    eff_dpi = dpi
+    try:
+        _rc = _u.urlopen(base + "/ScannerCapabilities", timeout=8)
+        _capx = _rc.read().decode("utf-8", "ignore")
+        # sirf asli chun-ne-layak resolutions (<scan:XResolution>NNN</...>);
+        # 'MaxOpticalXResolution' jaisi jankari ko chhodo (: se pehle wala match).
+        _res = sorted(set(int(x) for x in re.findall(r":XResolution>\s*(\d+)", _capx)))
+        if _res and dpi not in _res:
+            _le = [r for r in _res if r <= dpi]
+            eff_dpi = _le[-1] if _le else min(_res)   # highest supported <= dpi
+    except Exception:
+        eff_dpi = dpi
+
     settings = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03"'
@@ -2066,7 +2083,7 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
         '<scan:YResolution>%d</scan:YResolution>\n'
         '<pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>\n'
         '</scan:ScanSettings>'
-    ) % (h, w, "true" if duplex else "false", cmode, dpi, dpi)
+    ) % (h, w, "true" if duplex else "false", cmode, eff_dpi, eff_dpi)
 
     # Before starting, clear any STUCK job (e.g. a "Processing" job left over from
     # an earlier interrupted scan). Such a job makes every new ScanJobs POST return
