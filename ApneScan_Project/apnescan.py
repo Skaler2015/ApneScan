@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "117"
+VERSION = "118"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6038,17 +6038,40 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._save_opts()
 
     def _toggle_profile_lock(self, on):
+        """Lock ON hone par SIRF 'Scanner badlo/dhoondo' khula rehta hai —
+        baaki har setting (profile chunna, ➕✏️📋, Paper source, Scan sides,
+        Page size, Resolution, Bit depth, Auto-fixes, 'Baad me:') lock ho
+        jaati hai taaki galti se kuch na badle. Lock/unlock button khud
+        hamesha khula rehta hai."""
         self._opts["profile_locked"] = bool(on)
         self._save_opts()
         try:
             self.btn_lock.setText("🔒" if on else "🔓")
+            # 1) profile chunna + profile edit-buttons
             self.cmb_profile.setEnabled(not on)
+            for b in getattr(self, "_profile_edit_btns", []):
+                b.setEnabled(not on)
+            # 2) advanced box (paper source / sides / page size / dpi / bit depth)
             if hasattr(self, "_adv_box"):
                 self._adv_box.setEnabled(not on)
+            # 3) advanced show/hide toggle bhi lock (setting na badle)
+            if hasattr(self, "btn_adv"):
+                self.btn_adv.setEnabled(not on)
+            # 4) Auto-fixes chips (Crop/Straight/Blank/Clean)
+            for _cb in (getattr(self, "_opt_chips", {}) or {}).values():
+                _cb.setEnabled(not on)
+            # 5) 'Baad me:' (After) dropdown
+            if hasattr(self, "cmb_after_scan"):
+                self.cmb_after_scan.setEnabled(not on)
+            # scanner change (btn_change_dev) aur lock-button JAAN-boojh kar
+            # khule rakhe jaate hain — inhe kabhi disable nahi karte.
         except Exception:
             pass
-        self.status.showMessage(self.L("Profile LOCK on" if on else "Profile lock off",
-                                       "Profile LOCKED" if on else "Profile unlocked"), 3000)
+        self.status.showMessage(
+            self.L("🔒 Lock ON — sirf scanner badla ja sakta hai" if on
+                   else "🔓 Lock off — sab settings khuli",
+                   "🔒 Locked — only the scanner can be changed" if on
+                   else "🔓 Unlocked — all settings editable"), 3500)
 
     def _refresh_adv_toggle_text(self):
         if not hasattr(self, "btn_adv"):
@@ -9870,6 +9893,8 @@ if the toggle is ticked).</p>
         bnew = QtWidgets.QPushButton("➕"); bnew.setFixedWidth(38); bnew.setToolTip(self.L("Naya profile", "New profile")); bnew.clicked.connect(self._quick_new_profile); prow.addWidget(bnew)
         bedit = QtWidgets.QPushButton("✏️"); bedit.setFixedWidth(38); bedit.setToolTip(self.L("Profile badlo", "Edit profile")); bedit.clicked.connect(self._quick_edit_profile); prow.addWidget(bedit)
         bdup = QtWidgets.QPushButton("📋"); bdup.setFixedWidth(38); bdup.setToolTip(self.L("Is profile ki nakal", "Duplicate this profile")); bdup.clicked.connect(self._duplicate_profile); prow.addWidget(bdup)
+        # lock hone par inhe bhi disable karna hai (sirf scanner-change khula rahe)
+        self._profile_edit_btns = [bnew, bedit, bdup]
         self.btn_lock = QtWidgets.QToolButton(); self.btn_lock.setCheckable(True); self.btn_lock.setFixedWidth(38)
         self.btn_lock.setText("🔓")
         self.btn_lock.setToolTip(self.L("Profile lock — galti se setting na badle",
