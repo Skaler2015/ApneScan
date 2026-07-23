@@ -85,8 +85,15 @@ function _getToday() {
   for (var i = 1; i < data.length; i++) {
     if (_cellDay(data[i][0]) === day) return { row: i + 1, count: Number(data[i][1]) || 0 };
   }
-  sh.appendRow([day, 0]);
-  return { row: sh.getLastRow(), count: 0 };
+  // Nayi row: date ko TEXT ke roop me likho. Warna Google "2026-07-23" ko
+  // apne aap DATE bana deta tha aur read-back par timezone ke hisaab se din
+  // shift ho jaata tha (isliye "Aaj" 0 dikhta tha). "@"=text format pehle
+  // laga kar likhne se din kabhi shift nahi hota.
+  var r = sh.getLastRow() + 1;
+  sh.getRange(r, 1).setNumberFormat("@");
+  sh.getRange(r, 1).setValue(day);
+  sh.getRange(r, 2).setValue(0);
+  return { row: r, count: 0 };
 }
 
 // Aaj ka TOTAL — purane bug ki wajah se ek hi din ki kai rows ban gayi hain,
