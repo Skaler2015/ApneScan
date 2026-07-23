@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "115"
+VERSION = "116"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -7148,16 +7148,21 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     # ================= ApneSoftware.com online tools =================
     def _tools_list(self):
-        """Built-in tools + (agar mila ho to) site se laayi nayi list."""
-        extra = self._config.get("apnesoft_tools_cache") or []
-        seen = set(); out = []
-        for t in (list(extra) + list(APNESOFT_TOOLS)):
-            tid = t.get("id") or t.get("url")
-            if not tid or tid in seen:
-                continue
+        """Built-in tools (rich descriptions) + site se laayi baaki saari tools.
+        'More tools' link hamesha sabse aakhir me rehti hai."""
+        builtin = [t for t in APNESOFT_TOOLS if t.get("id") != "more"]
+        more = [t for t in APNESOFT_TOOLS if t.get("id") == "more"]
+        ids = {t.get("id") for t in builtin}
+        urls = {t.get("url") for t in builtin}
+        out = list(builtin)
+        for t in (self._config.get("apnesoft_tools_cache") or []):
             if not t.get("url"):
                 continue
-            seen.add(tid); out.append(t)
+            if t.get("id") in ids or t.get("url") in urls:
+                continue
+            ids.add(t.get("id")); urls.add(t.get("url"))
+            out.append(t)
+        out += more
         return out
 
     def _tool_desc(self, t):
@@ -7218,13 +7223,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
             m.exec_(QtGui.QCursor.pos())
 
     def _tools_catalog_dialog(self):
-        """Sundar catalog — har tool ka card: naam, description, Open, Copy link,
-        QR aur ⭐ favourite."""
+        """Sundar catalog — upar search box, aur har tool ka card: naam,
+        description, Open, Copy link, QR aur ⭐ favourite. 'Refresh from website'
+        se site ke SAARE tools aa jaate hain."""
         L = self.L
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(L("🧰 ApneSoftware — Free Online Tools",
                              "🧰 ApneSoftware — Free Online Tools"))
-        dlg.resize(560, 560)
+        dlg.resize(580, 600)
         v = QtWidgets.QVBoxLayout(dlg)
         top = QtWidgets.QLabel(L(
             "<b>ApneSoftware.com</b> ke free online tools — sab browser me hi, "
@@ -7233,9 +7239,27 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "upload, no signup. Open a tool, then drop your PDF there."))
         top.setWordWrap(True); top.setStyleSheet("color:#475569;font-size:12px;")
         v.addWidget(top)
+
+        # ---- search + refresh row ----
+        srow = QtWidgets.QHBoxLayout(); srow.setSpacing(6)
+        search = QtWidgets.QLineEdit()
+        search.setPlaceholderText(L("🔍 Tool dhoondo… (naam se)", "🔍 Search tools… (by name)"))
+        search.setClearButtonEnabled(True)
+        srow.addWidget(search, 1)
+        btn_ref = QtWidgets.QToolButton()
+        btn_ref.setText("🔄"); btn_ref.setToolTip(L(
+            "Website se saari tools ki list dobara laao",
+            "Refresh the full tool list from the website"))
+        btn_ref.setCursor(QtCore.Qt.PointingHandCursor)
+        srow.addWidget(btn_ref)
+        v.addLayout(srow)
+        count_lbl = QtWidgets.QLabel(""); count_lbl.setStyleSheet("color:#94a3b8;font-size:11px;")
+        v.addWidget(count_lbl)
+
         scroll = QtWidgets.QScrollArea(); scroll.setWidgetResizable(True)
         inner = QtWidgets.QWidget(); iv = QtWidgets.QVBoxLayout(inner)
-        iv.setSpacing(8)
+        iv.setSpacing(8); iv.setContentsMargins(0, 0, 0, 0)
+        scroll.setWidget(inner); v.addWidget(scroll, 1)
 
         def make_card(t):
             card = QtWidgets.QFrame(); card.setObjectName("toolcard")
@@ -7278,10 +7302,47 @@ class ScannerWindow(QtWidgets.QMainWindow):
             cl.addWidget(op)
             return card
 
-        for t in self._tools_list():
-            iv.addWidget(make_card(t))
-        iv.addStretch(1)
-        scroll.setWidget(inner); v.addWidget(scroll, 1)
+        def rebuild():
+            # purane cards hatao
+            while iv.count():
+                it = iv.takeAt(0)
+                w = it.widget()
+                if w is not None:
+                    w.deleteLater()
+            q = (search.text() or "").strip().lower()
+            tools = self._tools_list()
+            shown = 0
+            for t in tools:
+                hay = (t.get("name", "") + " " + self._tool_desc(t) + " "
+                       + t.get("url", "")).lower()
+                if q and q not in hay:
+                    continue
+                iv.addWidget(make_card(t)); shown += 1
+            iv.addStretch(1)
+            if q:
+                count_lbl.setText(L("%d tool mile (kul %d me se)" % (shown, len(tools)),
+                                    "%d tools found (of %d)" % (shown, len(tools))))
+            else:
+                count_lbl.setText(L("%d tools" % len(tools), "%d tools" % len(tools)))
+
+        def do_refresh():
+            btn_ref.setEnabled(False)
+            count_lbl.setText(L("Website se laa rahe hain…", "Loading from website…"))
+            def done(_n):
+                try:
+                    btn_ref.setEnabled(True); rebuild()
+                except Exception:
+                    pass
+            self._run_bg_quiet(self._fetch_apnesoft_tools, done)
+
+        search.textChanged.connect(lambda _t: rebuild())
+        btn_ref.clicked.connect(do_refresh)
+        rebuild()
+        # agar abhi tak site se list nahi aayi (sirf built-in), to chupchaap ek
+        # baar refresh karke saare tools le aao
+        if not (self._config.get("apnesoft_tools_cache")):
+            QtCore.QTimer.singleShot(200, do_refresh)
+
         foot = QtWidgets.QHBoxLayout()
         foot.addWidget(QtWidgets.QLabel(L(
             "<span style='color:#94a3b8;font-size:11px'>Tip: yahi kaam App me bhi ho "
@@ -7468,26 +7529,103 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception as e:
             self._warn(str(e))
 
+    _ACRONYMS = {"pdf": "PDF", "ocr": "OCR", "qr": "QR", "id": "ID", "url": "URL",
+                 "csv": "CSV", "tsv": "TSV", "json": "JSON", "html": "HTML", "xml": "XML",
+                 "png": "PNG", "jpg": "JPG", "jpeg": "JPEG", "gif": "GIF", "svg": "SVG",
+                 "zip": "ZIP", "md": "MD", "ai": "AI", "3d": "3D", "utf8": "UTF-8",
+                 "epub": "EPUB", "docx": "DOCX", "xlsx": "XLSX", "pptx": "PPTX"}
+
+    def _apnesoft_slug_name(self, slug):
+        """'pdf-hyperlink-extractor' -> 'PDF Hyperlink Extractor'."""
+        parts = re.split(r"[-_]+", slug.strip())
+        out = []
+        for w in parts:
+            if not w:
+                continue
+            out.append(self._ACRONYMS.get(w.lower(), w[:1].upper() + w[1:]))
+        return " ".join(out) or slug
+
     def _fetch_apnesoft_tools(self):
-        """Best-effort: site se nayi tools-list laao (agar ho to). Fail ho to
-        chhoti si baat — built-in list waise hi chalti rahegi."""
+        """Site se ApneSoftware.com ke SAARE tools ki list le aata hai — user ke
+        PC par asli browser-jaisi request se (yahan CI/proxy par site block kar
+        sakti hai, par user ke computer par chalti hai). 3 tareeke, jo pehle
+        chale: (1) tools/tools.json  (2) sitemap.xml  (3) /tools/ index page.
+        Fail ho to built-in list waise hi chalti rahegi."""
+        import urllib.request as _u, json as _j
+        ua = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                             "AppleWebKit/537.36 (KHTML, like Gecko) "
+                             "Chrome/124.0 Safari/537.36 ApneScan/%s" % VERSION)}
+
+        def _get(url):
+            return _u.urlopen(_u.Request(url, headers=ua), timeout=8).read().decode("utf-8", "ignore")
+
+        def _tool_from_url(url):
+            slug = url.rstrip("/").split("/")[-1]
+            slug = re.sub(r"\.html?$", "", slug, flags=re.I)
+            if not slug or slug in ("index", "tools"):
+                return None
+            return {"id": slug, "icon": "🧰", "name": self._apnesoft_slug_name(slug),
+                    "en": "Free online tool at ApneSoftware.com",
+                    "hi": "ApneSoftware.com ka free online tool",
+                    "url": url}
+
+        found = []
+        # (1) tools.json — sabse achha (asli naam + description)
         try:
-            import urllib.request as _u, json as _j
-            req = _u.Request(APNESOFT_URL + "/tools/tools.json",
-                             headers={"User-Agent": "ApneScan/%s" % VERSION})
-            data = _u.urlopen(req, timeout=6).read().decode("utf-8", "ignore")
-            arr = _j.loads(data)
-            clean = []
+            arr = _j.loads(_get(APNESOFT_URL + "/tools/tools.json"))
             for t in arr if isinstance(arr, list) else []:
                 if isinstance(t, dict) and t.get("url") and t.get("name"):
-                    clean.append({"id": t.get("id") or t["url"], "icon": t.get("icon", "🧰"),
-                                  "name": t["name"], "en": t.get("en", ""), "hi": t.get("hi", ""),
-                                  "url": t["url"]})
-            if clean:
-                self._config["apnesoft_tools_cache"] = clean[:40]
-                save_config(self._config)
+                    u = t["url"]
+                    if u.startswith("/"):
+                        u = APNESOFT_URL + u
+                    found.append({"id": t.get("id") or u, "icon": t.get("icon", "🧰"),
+                                  "name": t["name"], "en": t.get("en", ""),
+                                  "hi": t.get("hi", ""), "url": u})
         except Exception:
             pass
+        # (2) sitemap.xml
+        if not found:
+            try:
+                xml = _get(APNESOFT_URL + "/sitemap.xml")
+                for loc in re.findall(r"<loc>\s*([^<\s]+?/tools/[^<\s]+?\.html?)\s*</loc>",
+                                      xml, re.I):
+                    t = _tool_from_url(loc)
+                    if t:
+                        found.append(t)
+            except Exception:
+                pass
+        # (3) /tools/ index page ke links
+        if not found:
+            try:
+                html = _get(APNESOFT_URL + "/tools/")
+                for href in re.findall(r'href=["\']([^"\']+?\.html?)["\']', html, re.I):
+                    if "/tools/" not in href and not href.startswith("tools/") \
+                            and not re.match(r"^[\w-]+\.html?$", href, re.I):
+                        continue
+                    url = href
+                    if url.startswith("//"):
+                        url = "https:" + url
+                    elif url.startswith("/"):
+                        url = APNESOFT_URL + url
+                    elif not url.startswith("http"):
+                        url = APNESOFT_URL + "/tools/" + url.split("/")[-1]
+                    if "/tools/" not in url:
+                        continue
+                    t = _tool_from_url(url)
+                    if t:
+                        found.append(t)
+            except Exception:
+                pass
+        # dedupe by url, saaf karke cache me daalo
+        seen = set(); clean = []
+        for t in found:
+            if t["url"] in seen:
+                continue
+            seen.add(t["url"]); clean.append(t)
+        if clean:
+            self._config["apnesoft_tools_cache"] = clean[:80]
+            save_config(self._config)
+        return len(clean)
 
     # ================= Pages Panel: control-bar + marks =================
     def _build_pages_bar(self):
