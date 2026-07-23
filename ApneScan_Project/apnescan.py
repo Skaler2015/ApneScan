@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "134"
+VERSION = "135"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -16966,8 +16966,9 @@ if the toggle is ticked).</p>
             pass
         ok = (dlg.exec_() == QtWidgets.QDialog.Accepted)
         val = dlg.textValue()
-        if ok:
+        if ok and val.strip():
             self._remember_name(val)
+            self._an_event("rename")      # worldwide analytics: rename ki ginti
         return val, ok
 
     def rename_current_page(self):
