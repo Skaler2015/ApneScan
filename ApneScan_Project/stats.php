@@ -630,6 +630,14 @@ if (isset($_GET['admin'])) {
   .iconbtn{width:32px;height:32px;border-radius:9px;border:none;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;transition:background .15s,transform .1s}
   .iconbtn:hover{background:rgba(255,255,255,.28)} .iconbtn:active{transform:scale(.93)}
   .iconbtn.logout{width:auto;padding:0 11px;gap:5px;font-size:11px;font-weight:700}
+  /* tab nav */
+  .tabs{position:sticky;top:0;z-index:19;display:flex;gap:4px;overflow-x:auto;padding:8px 16px;
+    background:var(--card);border-bottom:1px solid var(--line);box-shadow:0 2px 8px rgba(16,24,40,.05)}
+  .tabs::-webkit-scrollbar{height:0}
+  .tab{white-space:nowrap;border:1px solid transparent;background:transparent;color:var(--mut);
+    font-size:11.5px;font-weight:700;padding:7px 13px;border-radius:9px;cursor:pointer;transition:all .14s}
+  .tab:hover{background:var(--card2);color:var(--fg)}
+  .tab.active{background:var(--accent);color:#fff;box-shadow:var(--sh)}
   .wrap{max-width:none;margin:14px auto;padding:0 18px}
   /* section titles */
   .sec{display:flex;align-items:center;gap:10px;margin:22px 2px 11px;font-size:10px;font-weight:800;letter-spacing:.10em;text-transform:uppercase;color:var(--mut)}
@@ -683,7 +691,7 @@ if (isset($_GET['admin'])) {
   .tag{display:inline-block;background:rgba(42,120,214,.12);color:var(--accent);border-radius:20px;padding:1px 8px;font-size:9px;margin-right:3px;font-weight:700}
   .heat{display:grid;grid-template-columns:repeat(24,1fr);gap:3px}
   .heat div{height:26px;border-radius:5px;font-size:8px;color:#fff;text-align:center;line-height:26px;font-weight:600}
-  @media print{.toolbar,.btns,.no-print{display:none}.card{break-inside:avoid;box-shadow:none}}
+  @media print{.toolbar,.btns,.no-print{display:none}.card{break-inside:avoid;box-shadow:none}.page{display:block!important}}
 </style></head><body>
 <header>
   <div class="brand">
@@ -698,9 +706,19 @@ if (isset($_GET['admin'])) {
     <a class="iconbtn logout" href="?logout=1" title="Logout">🔓 Logout</a>
   </div>
 </header>
+<nav class="tabs no-print" id="tabs">
+  <button class="tab" data-p="overview">📊 Overview</button>
+  <button class="tab" data-p="trends">📈 Trends</button>
+  <button class="tab" data-p="growth">🔁 Growth &amp; Analytics</button>
+  <button class="tab" data-p="tools">🧰 Tools &amp; Impact</button>
+  <button class="tab" data-p="users">👤 Users</button>
+  <button class="tab" data-p="devices">🌍 Activity &amp; Devices</button>
+  <button class="tab" data-p="system">💬 Feedback &amp; System</button>
+</nav>
 <div class="wrap">
   <div id="banner" class="banner"></div>
 
+  <div class="page" data-p="overview">
   <div class="sec"><span class="em">📊</span> Overview</div>
   <div class="kpis" id="kpis"></div>
 
@@ -741,6 +759,9 @@ if (isset($_GET['admin'])) {
     <input type="date" id="df"> → <input type="date" id="dt"> <b id="drsum" style="margin-left:10px;color:var(--accent)"></b>
   </div>
 
+  </div><!-- /overview -->
+
+  <div class="page" data-p="trends">
   <div class="sec"><span class="em">📈</span> Trends</div>
   <div class="grid">
     <div class="card"><h3><span class="em">📊</span> Last 7 days</h3><canvas id="wk" height="150"></canvas></div>
@@ -751,6 +772,9 @@ if (isset($_GET['admin'])) {
     <div class="card"><h3><span class="em">👥</span> Total users (growth)</h3><canvas id="cu" height="150"></canvas></div>
   </div>
 
+  </div><!-- /trends -->
+
+  <div class="page" data-p="growth">
   <div class="sec"><span class="em">🔁</span> Growth &amp; Retention</div>
   <!-- retention + funnel + cohort -->
   <div class="grid3">
@@ -801,6 +825,9 @@ if (isset($_GET['admin'])) {
     <div id="cmpOut"></div>
   </div>
 
+  </div><!-- /growth -->
+
+  <div class="page" data-p="tools">
   <div class="sec"><span class="em">🧰</span> Tools &amp; Impact (scan ke alawa)</div>
   <div class="card"><h3><span class="em">🌍</span> Impact — ApneScan ne duniya me kya kiya</h3>
     <div class="kpis" id="impact"></div>
@@ -814,6 +841,9 @@ if (isset($_GET['admin'])) {
     <div class="card"><h3><span class="em">🎛</span> Mode pasand (Simple / Full)</h3><div id="modeP"></div></div>
   </div>
 
+  </div><!-- /tools -->
+
+  <div class="page" data-p="users">
   <div class="sec"><span class="em">👤</span> Users</div>
   <div class="card"><h3><span class="em">👤</span> Saare users (<span id="ucount"></span>) <span style="color:var(--mut);font-weight:500;font-size:11px">— header pe click = sort, naam pe click = details/manage</span></h3>
     <input id="usearch" class="no-print" placeholder="🔍 naam / desh / version / tag se dhoondo…" style="width:100%;margin-bottom:8px">
@@ -827,6 +857,9 @@ if (isset($_GET['admin'])) {
     </div>
   </div>
 
+  </div><!-- /users -->
+
+  <div class="page" data-p="devices">
   <div class="sec"><span class="em">🧰</span> Activity, Usage &amp; Devices</div>
   <div class="grid">
     <div class="card"><h3><span class="em">🟢</span> Abhi online (<span id="oncount"></span>)</h3><div id="onlist"></div></div>
@@ -841,6 +874,9 @@ if (isset($_GET['admin'])) {
     <div class="card"><h3><span class="em">🖨</span> Scan methods</h3><div id="me"></div></div>
   </div>
 
+  </div><!-- /devices -->
+
+  <div class="page" data-p="system">
   <div class="sec"><span class="em">💬</span> Quality, Feedback &amp; System</div>
   <div class="grid">
     <div class="card"><h3><span class="em">💬</span> Feedback (⭐ <span id="arate"></span>)</h3><div id="fb"></div></div>
@@ -860,6 +896,8 @@ if (isset($_GET['admin'])) {
     <form method="post" style="display:inline"><input type="hidden" name="act" value="clearfeedback"><button class="btn gray">Feedback clear</button></form>
     <div style="color:var(--mut);font-size:11px;margin-top:8px">Data file: <b><?php echo $S['fileKB']; ?> KB</b> · Backup: <b><?php echo $S['lastBackup']?date('d M H:i',$S['lastBackup']):'—'; ?></b> · Fail-logins: <b><?php echo $S['fails']; ?></b></div>
   </div>
+
+  </div><!-- /system -->
 
   <div class="foot">Server: PHP <?php echo htmlspecialchars($S['srv']); ?> · <?php echo htmlspecialchars($S['time']); ?> · ApneSoftware.com</div>
 </div>
@@ -1187,6 +1225,23 @@ if(window.Chart){
   var mfo=D.multiFeature||{}; var mk=['1','2','3','4+'];
   mkChart(document.getElementById('mfc'),{type:'bar',data:{labels:mk.map(function(k){return k+' tool';}),datasets:[{data:mk.map(function(k){return mfo[k]||0;}),backgroundColor:PAL.violet}]},options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false}},y:{beginAtZero:true,ticks:{precision:0},grid:{color:Chart.defaults.borderColor}}}}});
 }
+
+// ===== TABS — alag-alag pages (ek hi scroll nahi) =====
+(function(){
+  var pages=[].slice.call(document.querySelectorAll('.page'));
+  var tabs=[].slice.call(document.querySelectorAll('.tab'));
+  function resizeVisibleCharts(){ try{ if(window.Chart&&Chart.getChart){ document.querySelectorAll('.page canvas').forEach(function(cv){ if(cv.offsetParent!==null){ var ch=Chart.getChart(cv); if(ch) ch.resize(); } }); } }catch(e){} }
+  function show(p){
+    pages.forEach(function(el){ el.style.display=(el.getAttribute('data-p')===p)?'':'none'; });
+    tabs.forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-p')===p); });
+    try{ localStorage.setItem('anpage',p); }catch(e){}
+    resizeVisibleCharts();
+  }
+  tabs.forEach(function(b){ b.onclick=function(){ show(b.getAttribute('data-p')); window.scrollTo(0,0); }; });
+  var start='overview'; try{ var s=localStorage.getItem('anpage'); if(s) start=s; }catch(e){}
+  if(!document.querySelector('.tab[data-p="'+start+'"]')) start='overview';
+  show(start);
+})();
 
 // auto-refresh 30s (agar koi modal/form khula nahi)
 setInterval(function(){ if(document.getElementById('umodal').style.display==='flex')return; if(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))return; location.reload(); },30000);

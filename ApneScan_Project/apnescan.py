@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "135"
+VERSION = "136"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -12056,6 +12056,20 @@ if the toggle is ticked).</p>
         self._scan_place = None          # rescan/insert mode khatam
         if kept:
             self._pstats_bump(scan_ok=1)
+            # LIVE: scan poora hote hi worldwide scan-number TURANT badhao —
+            # server ke jawab ka intezaar nahi (jawab aane par asli ginti se
+            # apne aap theek ho jaata hai). Isse ginti "live" dikhti hai.
+            try:
+                w = getattr(self, "_an_world", None)
+                if isinstance(w, dict):
+                    w["total"] = int(w.get("total") or 0) + kept
+                    w["today"] = int(w.get("today") or 0) + kept
+            except Exception:
+                pass
+            try:
+                self._an_update_box()
+            except Exception:
+                pass
         if self._progress:
             self._progress.close(); self._progress = None
         self._scanning = False
@@ -12757,6 +12771,12 @@ if the toggle is ticked).</p>
         if pdfs:
             self._check_milestones()
         self._update_sidebar_stats()
+        # LIVE: koi bhi ginti badle to sidebar box turant taaza (server ka
+        # intezaar nahi) — Today/Week/Total/Streak foran update dikhe.
+        try:
+            self._an_update_box()
+        except Exception:
+            pass
 
     def _pstats_sum(self, days=7, key="pages"):
         st = self._pstats().get("days", {})
