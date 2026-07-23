@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "133"
+VERSION = "134"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1215,8 +1215,10 @@ class UpdateChecker(QtCore.QThread):
 
     def run(self):
         import urllib.request as U
+        import json as J
+        # 1) WEBSITE version.txt — sabse naya (har deploy par banta hai)
         try:
-            req = U.Request("https://apnescan.apnesoft.com/version.txt",
+            req = U.Request(WEBSITE_URL + "/version.txt",
                             headers={"User-Agent": "ApneScan"})
             tag = _urlopen_safe(req, timeout=10).read().decode("utf-8", "ignore").strip()[:20]
             if re.search(r"\d", tag or ""):
@@ -1224,14 +1226,30 @@ class UpdateChecker(QtCore.QThread):
                 return
         except Exception:
             pass
+        # 2) GitHub Releases (latest) — website down ho to bhi chale
         try:
-            import json as J
             req = U.Request(UPDATE_API, headers={"User-Agent": "ApneScan"})
             data = J.loads(_urlopen_safe(req, timeout=10).read().decode("utf-8", "ignore"))
-            self.result.emit(str(data.get("tag_name") or ""),
-                             str(data.get("html_url") or DOWNLOAD_PAGE))
+            tag = str(data.get("tag_name") or "")
+            if re.search(r"\d", tag):
+                self.result.emit(tag, str(data.get("html_url") or DOWNLOAD_PAGE))
+                return
         except Exception:
-            self.result.emit("", "")
+            pass
+        # 3) GitHub Releases list — 'latest' na mile (draft/prerelease) to bhi
+        try:
+            req = U.Request("https://api.github.com/repos/Skaler2015/ApneScan/releases?per_page=5",
+                            headers={"User-Agent": "ApneScan"})
+            arr = J.loads(_urlopen_safe(req, timeout=10).read().decode("utf-8", "ignore"))
+            if isinstance(arr, list):
+                for rel in arr:
+                    tag = str(rel.get("tag_name") or "")
+                    if re.search(r"\d", tag):
+                        self.result.emit(tag, str(rel.get("html_url") or DOWNLOAD_PAGE))
+                        return
+        except Exception:
+            pass
+        self.result.emit("", "")
 
 
 class ScannerFinder(QtCore.QThread):
@@ -8999,44 +9017,61 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
 
     def _start_self_update(self):
-        """Naya version website se download karke KHUD install karo (feature 36)."""
-        url = "https://apnescan.apnesoft.com/ApneScan.exe"
+        """Naya version download karke KHUD install karo (feature 36).
+        Pehle website se, na mile (website down/SSL) to GitHub Releases se —
+        taaki update kabhi na atke."""
+        urls = [
+            "https://apnescan.apnesoft.com/ApneScan.exe",                                   # website (sabse naya)
+            "https://github.com/Skaler2015/ApneScan/releases/latest/download/ApneScan.exe",  # GitHub backup
+        ]
 
         def job():
             import urllib.request as U
-            fd, tmp = tempfile.mkstemp(suffix=".exe")
-            os.close(fd)
-            req = U.Request(url, headers={"User-Agent": "ApneScan"})
-            expected = 0
-            with _urlopen_safe(req, timeout=300) as r, open(tmp, "wb") as fh:
+            last_err = None
+            for url in urls:
+                tmp = None
                 try:
-                    expected = int(r.headers.get("Content-Length") or 0)
-                except Exception:
+                    fd, tmp = tempfile.mkstemp(suffix=".exe")
+                    os.close(fd)
+                    req = U.Request(url, headers={"User-Agent": "ApneScan"})
                     expected = 0
-                shutil.copyfileobj(r, fh)
-            got = os.path.getsize(tmp)
-            # ADHOORA download hi asli dikkat thi: aadhi-likhi onefile exe
-            # 'python312.dll load fail' deti hai. Isliye pakka karo ki poori
-            # file aayi (Content-Length se), aur ye sach me ek Windows exe hai.
-            with open(tmp, "rb") as fh:
-                head = fh.read(2)
-            if head != b"MZ":
-                raise RuntimeError('The download was not a valid exe (the server may have sent the wrong file). Try from the website.')
-            if expected and got < expected:
-                raise RuntimeError('The download was incomplete (only %d of %d bytes). Check your internet and try again.'
-                                   % (expected, got))
-            if got < 20_000_000:
-                raise RuntimeError('The download did not complete (only %d bytes). Try again or get it from the website.' % got)
-            return tmp
+                    with _urlopen_safe(req, timeout=300) as r, open(tmp, "wb") as fh:
+                        try:
+                            expected = int(r.headers.get("Content-Length") or 0)
+                        except Exception:
+                            expected = 0
+                        shutil.copyfileobj(r, fh)
+                    got = os.path.getsize(tmp)
+                    # ADHOORA download hi asli dikkat thi: aadhi-likhi onefile exe
+                    # 'python312.dll load fail' deti hai. Isliye pakka karo ki poori
+                    # file aayi (Content-Length se), aur ye sach me ek Windows exe hai.
+                    with open(tmp, "rb") as fh:
+                        head = fh.read(2)
+                    if head != b"MZ":
+                        raise RuntimeError("server sent the wrong file")
+                    if expected and got < expected:
+                        raise RuntimeError("incomplete (%d of %d bytes)" % (got, expected))
+                    if got < 20_000_000:
+                        raise RuntimeError("did not complete (only %d bytes)" % got)
+                    return tmp                       # is source se poora exe mil gaya
+                except Exception as e:
+                    last_err = e
+                    try:
+                        if tmp and os.path.exists(tmp):
+                            os.remove(tmp)
+                    except Exception:
+                        pass
+                    continue                          # agla source aajmao
+            raise (last_err or RuntimeError("Download failed from all sources."))
 
         def done(res):
             if isinstance(res, Exception):
                 self._reset_update_banner()
                 self._warn("Could not download the update:\n%s\n\n"
-                           "Please download it yourself from the website: apnescan.apnesoft.com" % res)
+                           "Opening the download page — get it from GitHub or apnescan.apnesoft.com." % res)
                 try:
                     import webbrowser
-                    webbrowser.open(DOWNLOAD_PAGE)
+                    webbrowser.open(DOWNLOAD_PAGE)   # GitHub Releases page (hamesha chalta hai)
                 except Exception:
                     pass
                 return

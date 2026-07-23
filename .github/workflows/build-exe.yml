@@ -6,8 +6,6 @@ on:
     branches:
       - claude/content-review-jjokt7
       - main
-    tags:
-      - 'v*'
 
 jobs:
   build:
@@ -54,11 +52,18 @@ jobs:
           path: ApneScan_Project/Output/ApneScan-Setup.exe
           if-no-files-found: error
 
-      # Tag push (jaise v16) par exe seedha GitHub Releases page par chala jata
-      # hai — public download link, login ki zaroorat nahi.
-      - name: Create GitHub Release (tags only)
-        if: startsWith(github.ref, 'refs/tags/')
+      # Har build par exe GitHub Releases par bhi jaata hai (tag v<VERSION>) —
+      # yahi app ka backup download/update source hai jab website down/SSL ho.
+      - name: Read app version
+        id: ver
+        shell: bash
+        run: echo "v=$(grep -m1 -oP 'VERSION = \"\K[0-9]+' ApneScan_Project/apnescan.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release (latest exe backup)
+        if: steps.ver.outputs.v != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.ver.outputs.v }}
+          name: ApneScan v${{ steps.ver.outputs.v }}
           files: ApneScan_Project/dist/ApneScan.exe
           generate_release_notes: true
