@@ -172,11 +172,13 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "112"
+VERSION = "113"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
 WEBSITE_URL = "https://apnescan.apnesoft.com"
+# ApneSoftware — banane wale ki doosri website (footer ad me dikhti hai)
+APNESOFT_URL = "https://apnesoftware.com"
 GITHUB_URL = "https://github.com/Skaler2015/ApneScan"
 SHARE_TEXT = ("ApneScan — bilkul FREE document scanner software (Windows). "
               "Scan to PDF, Hindi+English OCR, PDF compress (200KB), WhatsApp share. "
@@ -439,6 +441,7 @@ DEFAULT_OPTIONS = {
     "files_panel_w": 250,         # daayan Meri Files panel width
     "preview_panel_w": 310,       # preview panel width
     "ui_filmstrip": True,         # preview panel me niche filmstrip
+    "show_ad_footer": True,       # sabse niche footer ad (official + ApneSoftware.com)
     "ui_analytics": True,         # sidebar me analytics card
     "ui_confirm_delete": True,    # delete se pehle pucho
     "footer_folder": True,        # status-bar: folder
@@ -7001,6 +7004,127 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _zoom_thumbs(self, factor):
         self._apply_thumb_zoom(self._thumb_w * factor)
 
+    # ================= Footer AD strip =================
+    # ApneSoftware.com ke ad ke rotating sandesh (har kuch second me badalte hain)
+    AD_LINES = [
+        ("hi", "✨ <b>ApneSoftware.com</b> — hospital &amp; office ke liye aur bhi "
+               "<b>FREE</b> software"),
+        ("hi", "🧰 ApneSoftware.com par aur tools — sab <b>saral, halke aur free</b>"),
+        ("hi", "🇮🇳 <b>ApneSoftware</b> — aapke kaam ke liye banaye gaye software"),
+        ("hi", "💙 ApneScan pasand aaya? <b>ApneSoftware.com</b> par aur bhi dekhiye"),
+    ]
+    AD_LINES_EN = [
+        "✨ <b>ApneSoftware.com</b> — more <b>FREE</b> software for clinics &amp; offices",
+        "🧰 More tools at ApneSoftware.com — all <b>simple, light &amp; free</b>",
+        "🇮🇳 <b>ApneSoftware</b> — software crafted for your everyday work",
+        "💙 Love ApneScan? Discover more at <b>ApneSoftware.com</b>",
+    ]
+
+    def _build_ad_footer(self):
+        """Sabse neeche ek patli 'ad' patti — baayen ApneScan ki official site,
+        daayen banane wale ki doosri website ApneSoftware.com ka ad (clickable)."""
+        w = QtWidgets.QWidget(); w.setObjectName("adfooter")
+        w.setStyleSheet(
+            "#adfooter{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "stop:0 #ecfdf5, stop:0.5 #eff6ff, stop:1 #eef2ff);"
+            "border-top:1px solid #d1e0d8;}"
+            "#adfooter QLabel{font-size:12px;color:#334155;}"
+            "#adBtn{background:#0f766e;color:#ffffff;border:none;border-radius:11px;"
+            "padding:3px 12px;font-size:12px;font-weight:700;}"
+            "#adBtn:hover{background:#0b5c55;}"
+            "#adClose{color:#94a3b8;border:none;background:transparent;font-size:14px;}"
+            "#adClose:hover{color:#475569;}")
+        h = QtWidgets.QHBoxLayout(w)
+        h.setContentsMargins(12, 3, 8, 3); h.setSpacing(10)
+
+        # ---- LEFT: ApneScan official site ----
+        left = QtWidgets.QLabel(
+            "🖨 <b>ApneScan</b> · <span style='color:#0f766e'>%s</span> · %s"
+            % (WEBSITE_URL.replace("https://", ""),
+               self.L("100% FREE", "100% FREE")))
+        left.setTextFormat(QtCore.Qt.RichText)
+        left.setCursor(QtCore.Qt.PointingHandCursor)
+        left.setToolTip(self.L("ApneScan ki official website kholo",
+                               "Open the official ApneScan website"))
+        left.mousePressEvent = lambda _e: self._open_web(WEBSITE_URL)
+        h.addWidget(left)
+
+        h.addStretch(1)
+
+        # ---- RIGHT: ApneSoftware.com ad (rotating message + Visit button) ----
+        self._ad_label = QtWidgets.QLabel("")
+        self._ad_label.setTextFormat(QtCore.Qt.RichText)
+        self._ad_label.setCursor(QtCore.Qt.PointingHandCursor)
+        self._ad_label.setToolTip(self.L("ApneSoftware.com kholo (banane wale ki website)",
+                                          "Open ApneSoftware.com (the maker's website)"))
+        self._ad_label.mousePressEvent = lambda _e: self._open_web(APNESOFT_URL)
+        h.addWidget(self._ad_label)
+
+        visit = QtWidgets.QPushButton(self.L("Visit  →", "Visit  →"))
+        visit.setObjectName("adBtn")
+        visit.setCursor(QtCore.Qt.PointingHandCursor)
+        visit.clicked.connect(lambda: self._open_web(APNESOFT_URL))
+        h.addWidget(visit)
+
+        # ---- close (hide) — setting me wapas on kar sakte hain ----
+        close = QtWidgets.QToolButton(); close.setObjectName("adClose")
+        close.setText("✕"); close.setCursor(QtCore.Qt.PointingHandCursor)
+        close.setToolTip(self.L("Ad-patti chhupao (Settings se wapas la sakte hain)",
+                                "Hide the ad strip (turn back on in Settings)"))
+        close.clicked.connect(self._hide_ad_footer)
+        h.addWidget(close)
+
+        # rotating ad text
+        self._ad_idx = 0
+        self._ad_set_text()
+        self._ad_timer = QtCore.QTimer(self)
+        self._ad_timer.setInterval(7000)
+        self._ad_timer.timeout.connect(self._ad_rotate)
+        self._ad_timer.start()
+        return w
+
+    def _ad_set_text(self):
+        try:
+            if self._lang == "en":
+                msg = self.AD_LINES_EN[self._ad_idx % len(self.AD_LINES_EN)]
+            else:
+                msg = self.AD_LINES[self._ad_idx % len(self.AD_LINES)][1]
+            self._ad_label.setText(msg)
+        except Exception:
+            pass
+
+    def _ad_rotate(self):
+        self._ad_idx += 1
+        self._ad_set_text()
+
+    def _open_web(self, url):
+        try:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
+        except Exception:
+            try:
+                import webbrowser
+                webbrowser.open(url)
+            except Exception:
+                pass
+
+    def _hide_ad_footer(self):
+        self._opts["show_ad_footer"] = False
+        self._save_opts()
+        if hasattr(self, "ad_footer"):
+            self.ad_footer.setVisible(False)
+        try:
+            self.status.showMessage(self.L(
+                "Ad-patti chhupa di — Settings me 'Footer ad dikhao' se wapas la sakte hain.",
+                "Ad strip hidden — turn it back on in Settings → 'Show footer ad'."), 6000)
+        except Exception:
+            pass
+
+    def _set_ad_footer_visible(self, on):
+        self._opts["show_ad_footer"] = bool(on)
+        self._save_opts()
+        if hasattr(self, "ad_footer"):
+            self.ad_footer.setVisible(bool(on))
+
     # ================= Pages Panel: control-bar + marks =================
     def _build_pages_bar(self):
         """Pages Panel ke upar ki chhoti control-patti: thumbnail size slider,
@@ -9778,6 +9902,11 @@ if the toggle is ticked).</p>
         self.pv_scroll.viewport().installEventFilter(self)   # Ctrl+scroll zoom
 
         outer.addLayout(body, 1)
+
+        # ---- Footer AD strip: official site + ApneSoftware.com ka ad ----
+        self.ad_footer = self._build_ad_footer()
+        outer.addWidget(self.ad_footer)
+        self.ad_footer.setVisible(bool(self._opts.get("show_ad_footer", True)))
 
         # ---- UI #8: Kiosk overlay (bade buttons — dukaan/touch) ----
         self.kiosk = QtWidgets.QWidget(self)
@@ -13549,6 +13678,11 @@ if the toggle is ticked).</p>
             self.pv_strip.setVisible(bool(o.get("ui_filmstrip", True)))
         except Exception:
             pass
+        # 9b) Footer ad-strip (official site + ApneSoftware.com)
+        try:
+            self.ad_footer.setVisible(bool(o.get("show_ad_footer", True)))
+        except Exception:
+            pass
         # 10) Status-bar footer ke hisse
         for attr, key in (("foot_folder", "footer_folder"), ("foot_pages", "footer_pages"),
                           ("foot_last", "footer_last"), ("foot_disk", "footer_disk"),
@@ -13958,6 +14092,8 @@ if the toggle is ticked).</p>
         _slider(f, L("  ↳ chaudai:", "  ↳ width:"), "preview_panel_w", 220, 480, 310, "px")
         _check(f, "ui_filmstrip", "Preview me niche filmstrip",
                "Filmstrip in preview panel", True)
+        _check(f, "show_ad_footer", "Sabse niche footer ad (official site + ApneSoftware.com)",
+               "Footer ad at the bottom (official site + ApneSoftware.com)", True)
         _check(f, "ui_graph", "Sidebar me 7-din ka graph",
                "7-day graph in the sidebar", True)
         _check(f, "ui_analytics", "Sidebar me analytics card",
