@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "120"
+VERSION = "121"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9265,14 +9265,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self, 'Which PDF to shrink?', start, "PDF (*.pdf)")
             if not src_pdf:
                 return
-        targets = ["200 KB (portal upload)", "500 KB", "1 MB", "2 MB",
-                   'Only reduce quality (no size limit)']
-        choice, ok = QtWidgets.QInputDialog.getItem(
-            self, "Compress PDF", "How small should the file be?", targets, 2, False)
-        if not ok:
+        limit = self._ask_compress_target(self.L("Compress PDF", "Compress PDF"))
+        if limit is False:      # cancel (None = 'sirf quality kam karo')
             return
-        idx = targets.index(choice)
-        limit = {0: 200 * 1024, 1: 500 * 1024, 2: 1024 * 1024, 3: 2 * 1024 * 1024}.get(idx)
         if src_pdf:
             pages = pdf_to_images(src_pdf, self._tmpdir)
             if not pages:
@@ -9353,6 +9348,107 @@ class ScannerWindow(QtWidgets.QMainWindow):
         with open(out, "wb") as fh:
             fh.write(data)
         return len(data)
+
+    def _ask_compress_target(self, title=None):
+        """Target size chuno — preset ya CUSTOM (KB/MB). Return:
+           int  = us size (bytes) tak chhota karo
+           None = sirf quality kam karo (koi size-limit nahi)
+           False = cancel."""
+        L = self.L
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(title or L("Compress — size chuno", "Compress — target size"))
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel(L("File kitni chhoti karni hai?",
+                                       "How small should the file be?")))
+        cmb = QtWidgets.QComboBox()
+        for val, txt in ((200 * 1024, "200 KB (portal upload)"), (500 * 1024, "500 KB"),
+                         (1024 * 1024, "1 MB"), (2 * 1024 * 1024, "2 MB"),
+                         ("custom", L("Custom… (apni size KB/MB)", "Custom… (your size KB/MB)")),
+                         ("none", L("Sirf quality kam karo (koi limit nahi)",
+                                    "Only reduce quality (no size limit)"))):
+            cmb.addItem(txt, val)
+        cmb.setCurrentIndex(2)
+        v.addWidget(cmb)
+        crow = QtWidgets.QHBoxLayout()
+        crow.addWidget(QtWidgets.QLabel(L("Size:", "Size:")))
+        spin = QtWidgets.QSpinBox(); spin.setRange(1, 999999); spin.setValue(300)
+        unit = QtWidgets.QComboBox(); unit.addItems(["KB", "MB"])
+        crow.addWidget(spin, 1); crow.addWidget(unit)
+        cw = QtWidgets.QWidget(); cw.setLayout(crow); v.addWidget(cw)
+        cw.setVisible(False)
+        cmb.currentIndexChanged.connect(lambda _i: cw.setVisible(cmb.currentData() == "custom"))
+        bb = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject); v.addWidget(bb)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return False
+        val = cmb.currentData()
+        if val == "custom":
+            mult = 1024 if unit.currentText() == "KB" else 1024 * 1024
+            return int(spin.value() * mult)
+        if val == "none":
+            return None
+        return int(val)
+
+    def _bulk_compress(self, files):
+        """Ek saath kai PDF ko chhota karo — har ek '<naam>_small.pdf' me.
+        Target size ek hi baar puchha jaata hai (sab par lagta hai)."""
+        L = self.L
+        pdfs = [f for f in (files or []) if f and f.lower().endswith(".pdf")]
+        if not pdfs:
+            self._warn(L("Compress ke liye ek ya zyada PDF chuno.",
+                         "Select one or more PDFs to compress.")); return
+        limit = self._ask_compress_target(
+            L("%d files compress" % len(pdfs), "Compress %d files" % len(pdfs)))
+        if limit is False:
+            return
+
+        def job():
+            results = []
+            for src in pdfs:
+                try:
+                    pages = pdf_to_images(src, self._tmpdir)
+                    if not pages:
+                        results.append((src, None, "no pages", 0)); continue
+                    out = os.path.splitext(src)[0] + "_small.pdf"
+                    size = self._write_compressed_pdf(pages, out, limit)
+                    try:
+                        saved = os.path.getsize(src) - size
+                    except Exception:
+                        saved = 0
+                    results.append((src, size, out, saved))
+                except Exception as e:
+                    results.append((src, None, str(e), 0))
+            return results
+
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn(L("Compress fail: ", "Compress failed: ") + str(res)); return
+            ok = [r for r in res if r[1] is not None]
+            fail = len(res) - len(ok)
+            totsaved = sum(r[3] for r in ok if r[3] > 0)
+            if totsaved > 0:
+                self._pstats_bump(saved_bytes=totsaved)
+            try:
+                self._refresh_files_root()     # panel taaza (naye _small.pdf dikhein)
+            except Exception:
+                pass
+            msg = L("✅ %d file compress ho gayi." % len(ok),
+                    "✅ %d files compressed." % len(ok))
+            if totsaved > 0:
+                msg += "\n" + L("Bachi jagah: ", "Space saved: ") + self._an_hsize(totsaved)
+            if limit:
+                over = [os.path.basename(r[0]) for r in ok if r[1] and r[1] > limit]
+                if over:
+                    msg += "\n\n" + L(
+                        "In files ko itna chhota nahi kar paye (pages zyada): ",
+                        "These couldn't get that small (too many pages): ") + ", ".join(over[:5])
+            if fail:
+                msg += "\n" + L("%d file nahi ho payi." % fail, "%d failed." % fail)
+            QtWidgets.QMessageBox.information(self, L("Compress", "Compress"), msg)
+
+        self._run_bg(job, done, L("%d files compress ho rahi hain…" % len(pdfs),
+                                  "Compressing %d files…" % len(pdfs)))
 
     def _run_wizard(self):
         wiz = SetupWizard(self, self._opts.get("language", "en"))
@@ -13055,6 +13151,11 @@ if the toggle is ticked).</p>
             menu.addAction(self.L("🧩 %d files → ek PDF…" % len(sel_files),
                                   "🧩 Merge %d files → one PDF…" % len(sel_files)),
                            lambda: self._bulk_merge(sel_files))
+            _npdf = len([f for f in sel_files if f.lower().endswith(".pdf")])
+            if _npdf:
+                menu.addAction(self.L("🗜 %d PDF ek saath compress… (custom size)" % _npdf,
+                                      "🗜 Compress %d PDFs together… (custom size)" % _npdf),
+                               lambda: self._bulk_compress(sel_files))
             menu.addAction(self.L("📁 Dusre folder me le jao…", "📁 Move to another folder…"),
                            lambda: self._bulk_move(sel_files, copy=False))
             menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
