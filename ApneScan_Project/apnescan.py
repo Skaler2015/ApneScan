@@ -172,7 +172,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "119"
+VERSION = "120"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5250,6 +5250,189 @@ class SparkBars(QtWidgets.QWidget):
             p.end()
 
 
+class LineSpark(QtWidgets.QWidget):
+    """Line chart (bina library) — trend (jaise 30-din) dikhane ke liye."""
+
+    def __init__(self, values, labels=None, color="#0f766e"):
+        super().__init__()
+        self.v = [float(x or 0) for x in (values or [0])]
+        self.labels = labels or []
+        self.c = QtGui.QColor(color)
+        self.setMinimumHeight(110)
+
+    def set_values(self, values, labels=None):
+        self.v = [float(x or 0) for x in (values or [0])]
+        if labels is not None:
+            self.labels = labels
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QtGui.QPainter(self)
+        try:
+            p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            W = self.width() - 8
+            H = self.height() - 20
+            mx = max(self.v) or 1
+            n = max(1, len(self.v))
+            step = W / max(1, (n - 1))
+            pts = []
+            for i, val in enumerate(self.v):
+                x = 4 + i * step
+                y = 4 + (H - 8) * (1 - val / mx)
+                pts.append(QtCore.QPointF(x, y))
+            # halka fill
+            if len(pts) > 1:
+                path = QtGui.QPainterPath(QtCore.QPointF(pts[0].x(), H))
+                for pt in pts:
+                    path.lineTo(pt)
+                path.lineTo(pts[-1].x(), H)
+                path.closeSubpath()
+                fill = QtGui.QColor(self.c); fill.setAlpha(40)
+                p.fillPath(path, fill)
+                p.setPen(QtGui.QPen(self.c, 2))
+                for i in range(1, len(pts)):
+                    p.drawLine(pts[i - 1], pts[i])
+                p.setBrush(self.c); p.setPen(QtCore.Qt.NoPen)
+                for pt in pts:
+                    p.drawEllipse(pt, 2.3, 2.3)
+            p.setPen(QtGui.QColor("#94a3b8"))
+            f = p.font(); f.setPointSize(7); p.setFont(f)
+            if self.labels:
+                p.drawText(2, H + 2, 60, 14, QtCore.Qt.AlignLeft, str(self.labels[0]))
+                p.drawText(W - 56, H + 2, 60, 14, QtCore.Qt.AlignRight, str(self.labels[-1]))
+        finally:
+            p.end()
+
+
+class PieMini(QtWidgets.QWidget):
+    """Chhota pie/donut chart — categories ka hissa dikhane ke liye.
+    parts: list of (label, value, '#color')."""
+
+    def __init__(self, parts):
+        super().__init__()
+        self.parts = parts or []
+        self.setMinimumHeight(150)
+
+    def set_parts(self, parts):
+        self.parts = parts or []
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QtGui.QPainter(self)
+        try:
+            p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            tot = sum(max(0, float(v)) for _l, v, _c in self.parts) or 1
+            side = min(self.width() - 130, self.height() - 8)
+            side = max(60, side)
+            rect = QtCore.QRectF(6, 6, side, side)
+            start = 90 * 16
+            for _l, v, c in self.parts:
+                span = -int(360 * 16 * (max(0, float(v)) / tot))
+                p.setBrush(QtGui.QColor(c)); p.setPen(QtGui.QPen(QtGui.QColor("#ffffff"), 1))
+                p.drawPie(rect, start, span)
+                start += span
+            # donut hole
+            p.setBrush(QtGui.QColor("#ffffff")); p.setPen(QtCore.Qt.NoPen)
+            hole = rect.adjusted(side * 0.28, side * 0.28, -side * 0.28, -side * 0.28)
+            p.drawEllipse(hole)
+            # legend
+            lx = side + 16; ly = 10
+            f = p.font(); f.setPointSize(8); p.setFont(f)
+            for _l, v, c in self.parts:
+                p.setBrush(QtGui.QColor(c)); p.setPen(QtCore.Qt.NoPen)
+                p.drawRect(lx, ly, 10, 10)
+                p.setPen(QtGui.QColor("#334155"))
+                pct = 100.0 * max(0, float(v)) / tot
+                p.drawText(lx + 15, ly + 9, "%s  %d (%.0f%%)" % (_l, int(v), pct))
+                ly += 18
+        finally:
+            p.end()
+
+
+class HeatMonth(QtWidgets.QWidget):
+    """Mahine ka heatmap — har din ek chhota box; zyada scan = gehra rang."""
+
+    def __init__(self, day_values, color="#0f766e"):
+        super().__init__()
+        self.dv = dict(day_values or {})     # {day-int: value}
+        self.c = QtGui.QColor(color)
+        self.setMinimumHeight(120)
+
+    def set_values(self, day_values):
+        self.dv = dict(day_values or {})
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QtGui.QPainter(self)
+        try:
+            mx = max(self.dv.values()) if self.dv else 1
+            mx = mx or 1
+            cols = 7
+            cell = min((self.width() - 8) / cols, 18)
+            gap = 3
+            f = p.font(); f.setPointSize(6); p.setFont(f)
+            for d in range(1, 32):
+                r = (d - 1) // cols
+                cc = (d - 1) % cols
+                x = 4 + cc * (cell + gap)
+                y = 4 + r * (cell + gap)
+                val = self.dv.get(d, 0)
+                if val > 0:
+                    col = QtGui.QColor(self.c)
+                    col.setAlpha(60 + int(180 * val / mx))
+                    p.setBrush(col)
+                else:
+                    p.setBrush(QtGui.QColor("#eef2f7"))
+                p.setPen(QtGui.QColor("#e2e8f0"))
+                p.drawRoundedRect(QtCore.QRectF(x, y, cell, cell), 3, 3)
+                p.setPen(QtGui.QColor("#94a3b8"))
+                p.drawText(QtCore.QRectF(x, y, cell, cell), QtCore.Qt.AlignCenter, str(d))
+        finally:
+            p.end()
+
+
+class HBars(QtWidgets.QWidget):
+    """Labelled horizontal bars — breakdown (country/version/type) ke liye.
+    rows: list of (label, value); sabse bada upar."""
+
+    def __init__(self, rows, color="#0f766e"):
+        super().__init__()
+        self.rows = rows or []
+        self.c = QtGui.QColor(color)
+        self._resize()
+
+    def set_rows(self, rows):
+        self.rows = rows or []
+        self._resize(); self.update()
+
+    def _resize(self):
+        self.setMinimumHeight(max(30, 22 * max(1, len(self.rows)) + 6))
+
+    def paintEvent(self, _e):
+        p = QtGui.QPainter(self)
+        try:
+            p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            mx = max((v for _l, v in self.rows), default=1) or 1
+            W = self.width()
+            labelW = 120
+            barW = max(40, W - labelW - 60)
+            f = p.font(); f.setPointSize(8); p.setFont(f)
+            y = 4
+            for lbl, val in self.rows:
+                p.setPen(QtGui.QColor("#334155"))
+                p.drawText(QtCore.QRectF(2, y, labelW - 6, 18),
+                           QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, str(lbl)[:18])
+                bw = int(barW * (float(val) / mx))
+                p.setPen(QtCore.Qt.NoPen); p.setBrush(self.c)
+                p.drawRoundedRect(QtCore.QRectF(labelW, y + 2, max(2, bw), 13), 3, 3)
+                p.setPen(QtGui.QColor("#64748b"))
+                p.drawText(QtCore.QRectF(labelW + bw + 4, y, 54, 18),
+                           QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, str(int(val)))
+                y += 22
+        finally:
+            p.end()
+
+
 class LibraryModel(QtWidgets.QFileSystemModel):
     """'Meri Files' panel ka model — AAJ banayi files hari dikhti hain, aur
     har file ke naam ke aage () me uska size bhi dikhta hai."""
@@ -6627,8 +6810,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._an_update_box()
 
     def _an_refresh(self):
-        """Worldwide numbers laao + sidebar/box taaza karo."""
-        self._an_fetch({"action": "stats"}, self._an_apply)
+        """Worldwide numbers laao + sidebar/box taaza karo. client bhejte hain
+        taaki server rank/myscans bhi laut aaye."""
+        self._an_fetch({"action": "stats", "client": self._get_client_id()}, self._an_apply)
 
     def _an_report(self, action, n=0, imp=0, prt=0):
         """scan / ping / event (import-print) server ko bhejo + display taaza."""
@@ -6668,73 +6852,557 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
 
+    # ===================== ANALYTICS — helper data =====================
+    def _an_series(self, n, key="pages"):
+        """Pichhle n din ki values (purane→naye) + chhote labels."""
+        days = self._pstats().get("days", {})
+        now = datetime.datetime.now()
+        vals = []; labs = []
+        for i in range(n - 1, -1, -1):
+            d = now - datetime.timedelta(days=i)
+            vals.append(int((days.get(d.strftime("%Y-%m-%d")) or {}).get(key, 0)))
+            labs.append(d.strftime("%d/%m"))
+        return vals, labs
+
+    def _an_range_sum(self, start_off, count, key="pages"):
+        """start_off din pehle se count din tak ka jod (aaj = 0)."""
+        days = self._pstats().get("days", {})
+        now = datetime.datetime.now()
+        tot = 0
+        for i in range(start_off, start_off + count):
+            d = now - datetime.timedelta(days=i)
+            tot += int((days.get(d.strftime("%Y-%m-%d")) or {}).get(key, 0))
+        return tot
+
+    def _an_month_daymap(self, key="pages"):
+        days = self._pstats().get("days", {})
+        now = datetime.datetime.now()
+        pref = now.strftime("%Y-%m-")
+        out = {}
+        for ds, dd in days.items():
+            if ds.startswith(pref):
+                try:
+                    out[int(ds[8:10])] = int(dd.get(key, 0))
+                except Exception:
+                    pass
+        return out
+
+    def _an_hours24(self):
+        """Aapka time-pattern: har ghante (0-23) me kul kitne pages (all-time)."""
+        hh = self._pstats().get("hours", {})
+        return [int(hh.get("%02d" % h, 0)) for h in range(24)]
+
+    def _an_busiest(self):
+        days = self._pstats().get("days", {})
+        wd = [0] * 7
+        for ds, dd in days.items():
+            try:
+                w = datetime.datetime.strptime(ds, "%Y-%m-%d").weekday()
+                wd[w] += int(dd.get("pages", 0))
+            except Exception:
+                pass
+        names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        bd = names[wd.index(max(wd))] if any(wd) else "—"
+        h24 = self._an_hours24()
+        bh = ("%02d:00" % h24.index(max(h24))) if any(h24) else "—"
+        weekend = wd[5] + wd[6]; weekday = sum(wd[:5])
+        return bd, bh, weekday, weekend
+
+    def _an_longest_streak(self):
+        days = self._pstats().get("days", {})
+        got = sorted(ds for ds, dd in days.items() if int(dd.get("pages", 0)) > 0)
+        best = cur = 0; prev = None
+        for ds in got:
+            try:
+                d = datetime.datetime.strptime(ds, "%Y-%m-%d").date()
+            except Exception:
+                continue
+            if prev is not None and (d - prev).days == 1:
+                cur += 1
+            else:
+                cur = 1
+            best = max(best, cur); prev = d
+        return best
+
+    def _an_first_day(self):
+        days = self._pstats().get("days", {})
+        ks = sorted(k for k, dd in days.items() if int(dd.get("pages", 0)) > 0)
+        return ks[0] if ks else None
+
+    def _an_achievements(self):
+        t = self._pstats().get("totals", {})
+        pg = t.get("pages", 0); pdf = t.get("pdfs", 0)
+        stk = self._an_longest_streak()
+        shd = t.get("shared", 0); imp = t.get("imports", 0); prt = t.get("prints", 0)
+        L = self.L
+        defs = [
+            ("🥉", L("Pehla scan", "First scan"), pg >= 1),
+            ("📄", L("100 pages", "100 pages"), pg >= 100),
+            ("📚", L("1,000 pages", "1,000 pages"), pg >= 1000),
+            ("🏆", L("10,000 pages", "10,000 pages"), pg >= 10000),
+            ("📕", L("100 PDF", "100 PDFs"), pdf >= 100),
+            ("🔥", L("7-din streak", "7-day streak"), stk >= 7),
+            ("🔥", L("30-din streak", "30-day streak"), stk >= 30),
+            ("📤", L("50 share", "50 shares"), shd >= 50),
+            ("📥", L("100 import", "100 imports"), imp >= 100),
+            ("🖨", L("100 print", "100 prints"), prt >= 100),
+        ]
+        return defs
+
+    def _an_storage_stats(self, cap=6000):
+        """Save-folder me files ki ginti + size + top-5 badi. (bounded)"""
+        root = self._files_root()
+        nfiles = 0; total = 0; big = []
+        try:
+            for dirpath, _dn, fn in os.walk(root):
+                for f in fn:
+                    try:
+                        fp = os.path.join(dirpath, f)
+                        sz = os.path.getsize(fp)
+                    except Exception:
+                        continue
+                    nfiles += 1; total += sz
+                    big.append((sz, f))
+                    if nfiles >= cap:
+                        break
+                if nfiles >= cap:
+                    break
+        except Exception:
+            pass
+        big.sort(reverse=True); big = big[:5]
+        free = 0
+        try:
+            free = shutil.disk_usage(root).free
+        except Exception:
+            pass
+        # aaj ka backup folder count
+        bcount = 0
+        try:
+            bcount = len([1 for f in os.listdir(self._daily_backup_dir_today())
+                          if f.lower().endswith((".jpg", ".jpeg"))])
+        except Exception:
+            pass
+        return nfiles, total, big, free, bcount
+
+    @staticmethod
+    def _an_hsize(n):
+        try:
+            n = float(n)
+        except Exception:
+            return "-"
+        for u in ("B", "KB", "MB", "GB", "TB"):
+            if n < 1024 or u == "TB":
+                return ("%.0f %s" % (n, u)) if u in ("B", "KB") else ("%.1f %s" % (n, u))
+            n /= 1024.0
+
     def show_analytics(self):
-        """Poora analytics — personal + worldwide (naya, saaf)."""
+        """Poora Analytics — charts, trends, worldwide, goals, report.
+        Data: local (_pstats) + server (_an_world)."""
         self._an_refresh()
+        L = self.L
         st = self._pstats()
         t = st.get("totals", {})
-        w = getattr(self, "_an_world", {}) or {}
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle(self.L("📊 Analytics", "📊 Analytics"))
-        dlg.resize(480, 520)
-        v = QtWidgets.QVBoxLayout(dlg)
+        dlg.setWindowTitle(L("📊 Analytics", "📊 Analytics"))
+        dlg.resize(640, 640)
+        top = QtWidgets.QVBoxLayout(dlg)
 
-        def _card(title, rows):
-            box = QtWidgets.QGroupBox(title)
-            gl = QtWidgets.QVBoxLayout(box)
-            lbl = QtWidgets.QLabel("<br>".join(rows))
-            lbl.setTextFormat(QtCore.Qt.RichText); lbl.setWordWrap(True)
-            gl.addWidget(lbl)
-            return box, lbl
+        # ---- alert banner (unusual / milestone / reminder) ----
+        self._an_banner = QtWidgets.QLabel("")
+        self._an_banner.setTextFormat(QtCore.Qt.RichText); self._an_banner.setWordWrap(True)
+        self._an_banner.setStyleSheet("QLabel{background:#fef9c3;border:1px solid #fde68a;"
+                                       "border-radius:8px;padding:6px 10px;font-size:12px;}")
+        self._an_banner.hide()
+        top.addWidget(self._an_banner)
 
-        day = (st.get("days") or {}).get(datetime.datetime.now().strftime("%Y-%m-%d"), {})
-        my_rows = [
-            self.L("📄 Aaj: <b>%d</b> pages · <b>%d</b> PDF", "📄 Today: <b>%d</b> pages · <b>%d</b> PDF")
+        tabs = QtWidgets.QTabWidget(); top.addWidget(tabs, 1)
+        self._an_world_widgets = []     # refresh par bharne ke liye
+
+        def tab(title):
+            sc = QtWidgets.QScrollArea(); sc.setWidgetResizable(True)
+            inner = QtWidgets.QWidget(); lay = QtWidgets.QVBoxLayout(inner)
+            lay.setSpacing(8); sc.setWidget(inner); tabs.addTab(sc, title)
+            return lay
+
+        def grp(lay, title, widget=None, rows=None):
+            box = QtWidgets.QGroupBox(title); gl = QtWidgets.QVBoxLayout(box)
+            if rows is not None:
+                lbl = QtWidgets.QLabel("<br>".join(rows))
+                lbl.setTextFormat(QtCore.Qt.RichText); lbl.setWordWrap(True)
+                gl.addWidget(lbl); box._lbl = lbl
+            if widget is not None:
+                gl.addWidget(widget)
+            lay.addWidget(box)
+            return box
+
+        now = datetime.datetime.now()
+        day = (st.get("days") or {}).get(now.strftime("%Y-%m-%d"), {})
+
+        # ================= TAB 1: Overview =================
+        ov = tab(L("📊 Aaj", "📊 Overview"))
+        grp(ov, L("🙋 Meri stats", "🙋 My stats"), rows=[
+            L("📄 Aaj: <b>%d</b> pages · <b>%d</b> PDF", "📄 Today: <b>%d</b> pages · <b>%d</b> PDF")
             % (day.get("pages", 0), day.get("pdfs", 0)),
-            self.L("🗓 Is hafte: <b>%d</b> pages", "🗓 This week: <b>%d</b> pages") % self._pstats_sum(7, "pages"),
-            self.L("📚 Kul: <b>%s</b> pages · <b>%s</b> PDF", "📚 Total: <b>%s</b> pages · <b>%s</b> PDF")
-            % ("{:,}".format(t.get("pages", 0)), "{:,}".format(t.get("pdfs", 0))),
-            self.L("📥 Import: <b>%s</b> · 🖨 Print: <b>%s</b>", "📥 Imports: <b>%s</b> · 🖨 Prints: <b>%s</b>")
-            % ("{:,}".format(t.get("imports", 0)), "{:,}".format(t.get("prints", 0))),
-            self.L("📤 Share: <b>%d</b> · 🔥 Streak: <b>%d din</b>", "📤 Shared: <b>%d</b> · 🔥 Streak: <b>%d days</b>")
-            % (t.get("shared", 0), self._pstats_streak()),
+            L("🗓 Hafta: <b>%d</b> · 📆 Mahina: <b>%d</b> · 📚 Kul: <b>%s</b> pages",
+              "🗓 Week: <b>%d</b> · 📆 Month: <b>%d</b> · 📚 Total: <b>%s</b> pages")
+            % (self._pstats_sum(7), self._an_range_sum(0, 30), "{:,}".format(t.get("pages", 0))),
+            L("📥 Import: <b>%s</b> · 🖨 Print: <b>%s</b> · 📤 Share: <b>%s</b> · 🔥 Streak: <b>%d din</b>",
+              "📥 Imports: <b>%s</b> · 🖨 Prints: <b>%s</b> · 📤 Shares: <b>%s</b> · 🔥 Streak: <b>%d days</b>")
+            % ("{:,}".format(t.get("imports", 0)), "{:,}".format(t.get("prints", 0)),
+               "{:,}".format(t.get("shared", 0)), self._pstats_streak()),
+        ])
+        # daily goal progress
+        target = int(self._opts.get("analytics_daily_target", 50) or 50)
+        gbox = QtWidgets.QGroupBox(L("🎯 Aaj ka lakshya", "🎯 Today's goal"))
+        gv = QtWidgets.QVBoxLayout(gbox)
+        prog = QtWidgets.QProgressBar(); prog.setMaximum(max(1, target))
+        prog.setValue(min(target, day.get("pages", 0)))
+        prog.setFormat("%d / %d pages" % (day.get("pages", 0), target))
+        gv.addWidget(prog); ov.addWidget(gbox)
+        # 7-day bar + 14-day line
+        w7, l7 = self._an_series(7)
+        grp(ov, L("📊 7-din (pages)", "📊 Last 7 days (pages)"), widget=SparkBars(w7, l7))
+        w14, l14 = self._an_series(14)
+        grp(ov, L("📈 14-din trend", "📈 14-day trend"),
+            widget=LineSpark(w14, [l14[0], l14[-1]]))
+        ov.addStretch(1)
+
+        # ================= TAB 2: Trends =================
+        tr = tab(L("📈 Rujhan", "📈 Trends"))
+        tw, lw = self._pstats_sum(7), self._an_range_sum(7, 7)
+        tm, lm = self._an_range_sum(0, 30), self._an_range_sum(30, 30)
+
+        def pct(cur, prev):
+            if not prev:
+                return "—"
+            d = 100.0 * (cur - prev) / prev
+            return ("↑ %.0f%%" % d) if d >= 0 else ("↓ %.0f%%" % -d)
+        bd, bh, wkday, wkend = self._an_busiest()
+        grp(tr, L("🔁 Tulna", "🔁 Comparisons"), rows=[
+            L("🗓 Is hafte <b>%d</b> vs pichhle <b>%d</b>  (%s)",
+              "🗓 This week <b>%d</b> vs last <b>%d</b>  (%s)") % (tw, lw, pct(tw, lw)),
+            L("📆 Is mahine <b>%d</b> vs pichhle <b>%d</b>  (%s)",
+              "📆 This month <b>%d</b> vs last <b>%d</b>  (%s)") % (tm, lm, pct(tm, lm)),
+            L("📊 Roz average (30 din): <b>%.1f</b> pages",
+              "📊 Daily average (30d): <b>%.1f</b> pages") % (tm / 30.0),
+            L("🏅 Sabse busy din: <b>%s</b> · ghanta: <b>%s</b>",
+              "🏅 Busiest day: <b>%s</b> · hour: <b>%s</b>") % (bd, bh),
+            L("🗓 Weekday: <b>%d</b> · 🌴 Weekend: <b>%d</b>",
+              "🗓 Weekday: <b>%d</b> · 🌴 Weekend: <b>%d</b>") % (wkday, wkend),
+        ])
+        grp(tr, L("⏰ Aapka time-pattern (ghante-war)", "⏰ Your hourly pattern"),
+            widget=SparkBars(self._an_hours24(),
+                             [str(h) if h % 3 == 0 else "" for h in range(24)]))
+        w30, l30 = self._an_series(30)
+        grp(tr, L("📈 30-din trend", "📈 30-day trend"),
+            widget=LineSpark(w30, [l30[0], l30[-1]]))
+        tr.addStretch(1)
+
+        # ================= TAB 3: Breakdown =================
+        bk = tab(L("🥧 Bantwara", "🥧 Breakdown"))
+        parts = [
+            (L("PDF", "PDF"), t.get("pdfs", 0), "#0f766e"),
+            (L("Import", "Import"), t.get("imports", 0), "#2563eb"),
+            (L("Print", "Print"), t.get("prints", 0), "#d97706"),
+            (L("Share", "Share"), t.get("shared", 0), "#7c3aed"),
         ]
-        box1, _ = _card(self.L("🙋 Meri stats (is PC par)", "🙋 My stats (this PC)"), my_rows)
-        v.addWidget(box1)
+        grp(bk, L("🥧 Kaam ka mix", "🥧 Activity mix"), widget=PieMini(parts))
+        grp(bk, L("🗓 Is mahine ka heatmap (pages/din)", "🗓 This month heatmap (pages/day)"),
+            widget=HeatMonth(self._an_month_daymap()))
+        types = st.get("types", {})
+        if types:
+            rows = sorted(types.items(), key=lambda kv: -kv[1])[:8]
+            grp(bk, L("🏷 Doc-type", "🏷 Doc types"), widget=HBars(rows))
+        bk.addStretch(1)
 
-        wbox, wlbl = _card(self.L("🌍 Worldwide (sab users)", "🌍 Worldwide (all users)"), ["…"])
-        v.addWidget(wbox)
+        # ================= TAB 4: Storage =================
+        stg = tab(L("🗂 Storage", "🗂 Storage"))
+        nf, tot, big, free, bcnt = self._an_storage_stats()
+        grp(stg, L("🗂 Save-folder", "🗂 Save folder"), rows=[
+            L("📁 Files: <b>%s</b> · 💾 Size: <b>%s</b>", "📁 Files: <b>%s</b> · 💾 Size: <b>%s</b>")
+            % ("{:,}".format(nf), self._an_hsize(tot)),
+            L("💽 Drive par bacha: <b>%s</b>", "💽 Free on drive: <b>%s</b>") % self._an_hsize(free),
+            L("🖼 Aaj ka backup: <b>%d</b> JPEG", "🖼 Today's backup: <b>%d</b> JPEGs") % bcnt,
+        ])
+        if big:
+            grp(stg, L("📦 Sabse badi files", "📦 Biggest files"),
+                widget=HBars([(f, sz) for sz, f in big]))
+        bdup = QtWidgets.QPushButton(L("🔁 Duplicate files dhoondo…", "🔁 Find duplicate files…"))
+        bdup.clicked.connect(lambda: (dlg.accept(), self._find_duplicates()))
+        stg.addWidget(bdup); stg.addStretch(1)
 
+        # ================= TAB 5: World =================
+        wl = tab(L("🌍 Duniya", "🌍 World"))
+        wg = grp(wl, L("🌍 Worldwide", "🌍 Worldwide"), rows=["…"])
+        self._an_world_widgets.append(("main", wg._lbl))
+        w24 = SparkBars((self._an_world or {}).get("todayHours") or [0] * 24,
+                        [str(h) if h % 3 == 0 else "" for h in range(24)])
+        grp(wl, L("🌍 Aaj (duniya) — 24 ghante", "🌍 Today (world) — 24 hours"), widget=w24)
+        self._an_world_widgets.append(("hours24", w24))
+        cbox = grp(wl, L("🗺 Desh", "🗺 Countries"), widget=HBars([]))
+        vbox = grp(wl, L("🔢 App version", "🔢 App versions"), widget=HBars([]))
+        self._an_world_widgets.append(("countries", cbox.findChild(HBars)))
+        self._an_world_widgets.append(("versions", vbox.findChild(HBars)))
+        wl.addStretch(1)
+
+        # ================= TAB 6: Goals =================
+        gl6 = tab(L("🏆 Lakshya", "🏆 Goals"))
+        tgrow = QtWidgets.QGroupBox(L("🎯 Roz ka target", "🎯 Daily target"))
+        tgl = QtWidgets.QHBoxLayout(tgrow)
+        spin = QtWidgets.QSpinBox(); spin.setRange(1, 5000); spin.setValue(target)
+        spin.setSuffix(L(" pages/din", " pages/day"))
+        spin.valueChanged.connect(lambda v: (self._opts.__setitem__("analytics_daily_target", int(v)),
+                                             self._save_opts(),
+                                             prog.setMaximum(max(1, int(v))),
+                                             prog.setFormat("%d / %d pages" % (day.get("pages", 0), int(v)))))
+        tgl.addWidget(spin); tgl.addStretch(1); gl6.addWidget(tgrow)
+        fday = self._an_first_day()
+        try:
+            udays = (now.date() - datetime.datetime.strptime(fday, "%Y-%m-%d").date()).days if fday else 0
+        except Exception:
+            udays = 0
+        saved_hr = t.get("pages", 0) * 30 / 3600.0    # ~30 sec/page bachaya
+        grp(gl6, L("📌 Record", "📌 Records"), rows=[
+            L("🔥 Abhi ka streak: <b>%d</b> · sabse lamba: <b>%d din</b>",
+              "🔥 Current streak: <b>%d</b> · longest: <b>%d days</b>")
+            % (self._pstats_streak(), self._an_longest_streak()),
+            L("📅 Pehli scan: <b>%s</b> (<b>%d</b> din se saath)",
+              "📅 First scan: <b>%s</b> (with you <b>%d</b> days)") % (fday or "—", udays),
+            L("⏱ Bachaya samay: <b>~%.1f</b> ghante", "⏱ Time saved: <b>~%.1f</b> hours") % saved_hr,
+        ])
+        grp(gl6, L("🔥 Streak calendar (is mahina)", "🔥 Streak calendar (this month)"),
+            widget=HeatMonth(self._an_month_daymap(), color="#ea580c"))
+        # achievements
+        abox = QtWidgets.QGroupBox(L("🏅 Uplabdhiyan", "🏅 Achievements"))
+        agrid = QtWidgets.QGridLayout(abox)
+        for i, (emo, txt, ok) in enumerate(self._an_achievements()):
+            lab = QtWidgets.QLabel("%s %s" % (emo, txt))
+            lab.setStyleSheet("font-size:12px;" + ("" if ok else "color:#cbd5e1;"))
+            if ok:
+                lab.setStyleSheet(lab.styleSheet() + "font-weight:600;")
+            agrid.addWidget(lab, i // 2, i % 2)
+        gl6.addWidget(abox); gl6.addStretch(1)
+
+        # ================= TAB 7: Report =================
+        rp = tab(L("📤 Report", "📤 Report"))
+        grp(rp, L("📄 Report banao / bhejo", "📄 Make / send report"), rows=[
+            L("Aaj-tak ke aankdo ki ek report — PDF/Excel me save, print ya WhatsApp.",
+              "A report of your stats — save as PDF/Excel, print or share on WhatsApp.")])
+        for txt_hi, txt_en, fn in (
+            ("📄 Report PDF save", "📄 Save report PDF", self._analytics_report_pdf),
+            ("📊 Excel (CSV) save", "📊 Save Excel (CSV)", self._analytics_report_xlsx),
+            ("🖨 Report print", "🖨 Print report", self._analytics_print_report),
+            ("🟢 WhatsApp par bhejo", "🟢 Send on WhatsApp", self._analytics_share_report),
+            ("📋 Aaj ka summary (copy)", "📋 Today's summary (copy)", self._analytics_daily_summary),
+        ):
+            b = QtWidgets.QPushButton(L(txt_hi, txt_en)); b.clicked.connect(fn)
+            rp.addWidget(b)
+        # date-range quick sum
+        drow = QtWidgets.QGroupBox(L("🔍 Range ka jod", "🔍 Range total"))
+        dl = QtWidgets.QHBoxLayout(drow)
+        d_from = QtWidgets.QDateEdit(QtCore.QDate.currentDate().addDays(-7)); d_from.setCalendarPopup(True)
+        d_to = QtWidgets.QDateEdit(QtCore.QDate.currentDate()); d_to.setCalendarPopup(True)
+        d_res = QtWidgets.QLabel("—")
+        def _drange():
+            days = self._pstats().get("days", {})
+            a = d_from.date().toPyDate(); b2 = d_to.date().toPyDate()
+            s = 0; dd = a
+            while dd <= b2:
+                s += int((days.get(dd.strftime("%Y-%m-%d")) or {}).get("pages", 0))
+                dd += datetime.timedelta(days=1)
+            d_res.setText(L("<b>%d</b> pages", "<b>%d</b> pages") % s)
+        d_from.dateChanged.connect(lambda _x: _drange()); d_to.dateChanged.connect(lambda _x: _drange())
+        dl.addWidget(d_from); dl.addWidget(QtWidgets.QLabel("→")); dl.addWidget(d_to); dl.addWidget(d_res, 1)
+        rp.addWidget(drow); _drange()
+        rp.addStretch(1)
+
+        # ---- worldwide refresh + banner filler ----
         def _wfill():
-            w2 = getattr(self, "_an_world", {}) or {}
-            rows = [
-                "🌍 Total scans: <b>%s</b>" % self._an_wv("total"),
-                "📅 Aaj: <b>%s</b> · 🟢 Online: <b>%s</b>" % (self._an_wv("today"), self._an_wv("online")),
-                "👥 Users: <b>%s</b>" % self._an_wv("users"),
-                "📥 Import: <b>%s</b> · 🖨 Print: <b>%s</b>" % (self._an_wv("imports"), self._an_wv("prints")),
-            ]
-            wlbl.setText("<br>".join(rows))
+            w2 = self._an_world or {}
+            for kind, wid in self._an_world_widgets:
+                try:
+                    if kind == "main":
+                        rank = w2.get("rank"); rline = ""
+                        if rank:
+                            rline = L("<br>🏅 Aapki rank: <b>#%s</b> / %s",
+                                      "<br>🏅 Your rank: <b>#%s</b> / %s") % (rank, self._an_wv("users"))
+                        wid.setText(
+                            "🌍 Total: <b>%s</b><br>📅 Aaj: <b>%s</b> · 🟢 Online: <b>%s</b><br>"
+                            "👥 Users: <b>%s</b><br>📥 Import: <b>%s</b> · 🖨 Print: <b>%s</b>%s"
+                            % (self._an_wv("total"), self._an_wv("today"), self._an_wv("online"),
+                               self._an_wv("users"), self._an_wv("imports"), self._an_wv("prints"), rline))
+                    elif kind == "hours24" and wid is not None:
+                        wid.set_values(w2.get("todayHours") or [0] * 24)
+                    elif kind == "countries" and wid is not None:
+                        wid.set_rows(sorted((w2.get("countries") or {}).items(),
+                                            key=lambda kv: -kv[1])[:8])
+                    elif kind == "versions" and wid is not None:
+                        wid.set_rows(sorted((w2.get("versions") or {}).items(),
+                                            key=lambda kv: -kv[1])[:8])
+                except Exception:
+                    pass
+            self._an_update_banner()
         _wfill()
 
-        note = QtWidgets.QLabel(self.L(
-            "<span style='color:#64748b;font-size:11px;'>Privacy: server par sirf GINTI jaati hai — "
-            "kabhi koi document/naam/file nahi.</span>",
-            "<span style='color:#64748b;font-size:11px;'>Privacy: only counts are sent — "
-            "never any document, name or file.</span>"))
-        note.setTextFormat(QtCore.Qt.RichText); note.setWordWrap(True)
-        v.addWidget(note)
-        v.addStretch(1)
-        row = QtWidgets.QHBoxLayout()
-        bref = QtWidgets.QPushButton(self.L("🔄 Refresh", "🔄 Refresh"))
-        bref.clicked.connect(lambda: (self._an_fetch({"action": "stats"},
-                                                     lambda d: (self._an_apply(d), _wfill()))))
+        # ---- footer: auto-refresh + refresh + OK ----
+        foot = QtWidgets.QHBoxLayout()
+        chk = QtWidgets.QCheckBox(L("Auto-refresh", "Auto-refresh"))
+        chk.setChecked(bool(self._opts.get("analytics_autorefresh", False)))
+        _timer = QtCore.QTimer(dlg); _timer.setInterval(15000)
+        _timer.timeout.connect(lambda: self._an_fetch(
+            {"action": "stats", "client": self._get_client_id()},
+            lambda d: (self._an_apply(d), _wfill())))
+        if chk.isChecked():
+            _timer.start()
+        chk.toggled.connect(lambda on: (self._opts.__setitem__("analytics_autorefresh", bool(on)),
+                                        self._save_opts(), _timer.start() if on else _timer.stop()))
+        bref = QtWidgets.QPushButton(L("🔄 Refresh", "🔄 Refresh"))
+        bref.clicked.connect(lambda: self._an_fetch(
+            {"action": "stats", "client": self._get_client_id()},
+            lambda d: (self._an_apply(d), _wfill())))
         bok = QtWidgets.QPushButton("OK"); bok.clicked.connect(dlg.accept)
-        row.addWidget(bref); row.addStretch(1); row.addWidget(bok)
-        v.addLayout(row)
-        # thodi der baad worldwide bhar do (fetch aane par)
-        QtCore.QTimer.singleShot(1500, _wfill)
-        QtCore.QTimer.singleShot(3500, _wfill)
+        foot.addWidget(chk); foot.addStretch(1); foot.addWidget(bref); foot.addWidget(bok)
+        top.addLayout(foot)
+        note = QtWidgets.QLabel(L(
+            "<span style='color:#94a3b8;font-size:11px;'>Privacy: server par sirf GINTI — koi document/naam nahi.</span>",
+            "<span style='color:#94a3b8;font-size:11px;'>Privacy: only counts are sent — no document/name.</span>"))
+        note.setTextFormat(QtCore.Qt.RichText); top.addWidget(note)
+        for ms in (1500, 3500):
+            QtCore.QTimer.singleShot(ms, _wfill)
         dlg.exec_()
+
+    def _an_update_banner(self):
+        """Alert banner: milestone / aaj-zyada-kaam / streak-reminder."""
+        if not hasattr(self, "_an_banner"):
+            return
+        L = self.L
+        t = self._pstats().get("totals", {})
+        pg = t.get("pages", 0)
+        today = (self._pstats().get("days", {}).get(
+            datetime.datetime.now().strftime("%Y-%m-%d")) or {}).get("pages", 0)
+        avg = self._an_range_sum(1, 30) / 30.0
+        msg = None
+        # milestone (personal round number)
+        for m in (100000, 50000, 10000, 5000, 1000, 500, 100):
+            if pg >= m and pg - today < m:
+                msg = L("🎉 Badhai! Aapne <b>%s</b> pages ka aankda paar kar liya!",
+                        "🎉 Congrats! You just crossed <b>%s</b> pages!") % "{:,}".format(m)
+                break
+        # worldwide milestone
+        wt = int((self._an_world or {}).get("total", 0) or 0)
+        if not msg and wt:
+            for m in (1000000, 500000, 100000, 50000, 10000):
+                if wt >= m and wt - m < 50:
+                    msg = L("🌍 Duniya bhar me <b>%s</b> scan pure!",
+                            "🌍 <b>%s</b> worldwide scans reached!") % "{:,}".format(m)
+                    break
+        # unusual (aaj normal se bahut zyada)
+        if not msg and avg >= 3 and today >= 3 * avg:
+            msg = L("🚀 Aaj normal se <b>~%.0f×</b> zyada kaam ho raha hai!",
+                    "🚀 Today is <b>~%.0f×</b> busier than usual!") % (today / max(1.0, avg))
+        # streak reminder
+        if not msg and today == 0 and self._pstats_streak() >= 2:
+            msg = L("🔥 Aaj abhi tak scan nahi hua — streak (%d din) bachane ke liye ek scan karein!",
+                    "🔥 No scan yet today — scan once to keep your %d-day streak!") % self._pstats_streak()
+        if msg:
+            self._an_banner.setText(msg); self._an_banner.show()
+        else:
+            self._an_banner.hide()
+
+    # ---- Analytics report: text + export ----
+    def _an_report_lines(self):
+        L = self.L
+        st = self._pstats(); t = st.get("totals", {})
+        now = datetime.datetime.now()
+        day = (st.get("days") or {}).get(now.strftime("%Y-%m-%d"), {})
+        bd, bh, wkday, wkend = self._an_busiest()
+        return [
+            "ApneScan — %s" % now.strftime("%d %b %Y, %I:%M %p"),
+            "",
+            L("Aaj: %d pages, %d PDF", "Today: %d pages, %d PDF") % (day.get("pages", 0), day.get("pdfs", 0)),
+            L("Is hafte: %d pages", "This week: %d pages") % self._pstats_sum(7),
+            L("Is mahine: %d pages", "This month: %d pages") % self._an_range_sum(0, 30),
+            L("Kul: %s pages, %s PDF", "Total: %s pages, %s PDF")
+            % ("{:,}".format(t.get("pages", 0)), "{:,}".format(t.get("pdfs", 0))),
+            L("Import: %s, Print: %s, Share: %s",
+              "Imports: %s, Prints: %s, Shares: %s")
+            % (t.get("imports", 0), t.get("prints", 0), t.get("shared", 0)),
+            L("Streak: %d din (sabse lamba %d)", "Streak: %d days (longest %d)")
+            % (self._pstats_streak(), self._an_longest_streak()),
+            L("Sabse busy: %s, %s", "Busiest: %s, %s") % (bd, bh),
+        ]
+
+    def _analytics_daily_summary(self):
+        txt = "\n".join(self._an_report_lines())
+        QtWidgets.QApplication.clipboard().setText(txt)
+        self.status.showMessage(self.L("📋 Summary copy ho gaya", "📋 Summary copied"), 4000)
+        QtWidgets.QMessageBox.information(self, self.L("Aaj ka summary", "Today's summary"), txt)
+
+    def _an_report_pdf_path(self):
+        """Report ko ek A4 PDF (image) me banakar path do."""
+        img = Image.new("RGB", (1240, 1754), "white")
+        d = ImageDraw.Draw(img)
+        try:
+            f_big = ImageFont.truetype("arialbd.ttf", 54)
+            f = ImageFont.truetype("arial.ttf", 34)
+        except Exception:
+            f_big = ImageFont.load_default(); f = f_big
+        d.rectangle([0, 0, 1240, 120], fill=(15, 118, 110))
+        d.text((50, 34), "ApneScan — Analytics", fill="white", font=f_big)
+        y = 180
+        for line in self._an_report_lines()[2:]:
+            d.text((60, y), line, fill=(30, 41, 59), font=f); y += 64
+        fd, out = tempfile.mkstemp(suffix=".pdf", dir=self._tmpdir); os.close(fd)
+        img.save(out, "PDF", resolution=150.0)
+        return out
+
+    def _analytics_report_pdf(self):
+        try:
+            tmp = self._an_report_pdf_path()
+        except Exception as e:
+            self._warn(str(e)); return
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("Report PDF save", "Save report PDF"),
+            os.path.join(self._files_root(), "ApneScan_Report.pdf"), "PDF (*.pdf)")
+        if not out:
+            return
+        try:
+            shutil.copyfile(tmp, out)
+            self.status.showMessage(self.L("📄 Report save: ", "📄 Report saved: ") + os.path.basename(out), 6000)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _analytics_report_xlsx(self):
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("Excel/CSV save", "Save Excel/CSV"),
+            os.path.join(self._files_root(), "ApneScan_Stats.csv"), "CSV (*.csv)")
+        if not out:
+            return
+        try:
+            days = self._pstats().get("days", {})
+            import csv
+            with open(out, "w", newline="", encoding="utf-8") as fh:
+                wcsv = csv.writer(fh)
+                wcsv.writerow(["date", "pages", "pdfs", "imports", "prints", "shared"])
+                for ds in sorted(days.keys()):
+                    dd = days[ds]
+                    wcsv.writerow([ds, dd.get("pages", 0), dd.get("pdfs", 0),
+                                   dd.get("imports", 0), dd.get("prints", 0), dd.get("shared", 0)])
+            self.status.showMessage(self.L("📊 Save ho gaya: ", "📊 Saved: ") + os.path.basename(out), 6000)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _analytics_print_report(self):
+        try:
+            self._do_print([self._an_report_pdf_path()], per_page=1)
+        except Exception as e:
+            self._warn(str(e))
+
+    def _analytics_share_report(self):
+        try:
+            self.share_whatsapp(self._an_report_pdf_path())
+        except Exception as e:
+            self._warn(str(e))
 
     def _stats_nam(self):
         """Qt ka apna network manager (main event-loop par — koi thread nahi).

@@ -153,9 +153,10 @@ function _onlineCount() {
 }
 
 // ---- v22 extras: users/version/desh (sirf GINTI — kabhi koi document nahi) ----
-function _touchClient(clientId, ver, country) {
+// col 6 = us client ke kul scans (rank ke liye).
+function _touchClient(clientId, ver, country, n) {
   if (!clientId) return;
-  var sh = _sheet("clients", ["client", "first_seen", "last_seen", "version", "country"]);
+  var sh = _sheet("clients", ["client", "first_seen", "last_seen", "version", "country", "scans"]);
   var data = sh.getDataRange().getValues();
   var now = new Date().getTime();
   for (var i = 1; i < data.length; i++) {
@@ -163,10 +164,44 @@ function _touchClient(clientId, ver, country) {
       sh.getRange(i + 1, 3).setValue(now);
       if (ver) sh.getRange(i + 1, 4).setValue(ver);
       if (country) sh.getRange(i + 1, 5).setValue(country);
+      if (n) sh.getRange(i + 1, 6).setValue((Number(data[i][5]) || 0) + n);
       return;
     }
   }
-  sh.appendRow([clientId, now, now, ver || "", country || ""]);
+  sh.appendRow([clientId, now, now, ver || "", country || "", n || 0]);
+}
+
+// Kisi client ka rank (kul scans ke hisaab se, 1 = sabse zyada) + uske scans
+function _rankOf(clientId) {
+  if (!clientId) return { rank: 0, myscans: 0 };
+  var sh = _sheet("clients", ["client", "first_seen", "last_seen", "version", "country", "scans"]);
+  var data = sh.getDataRange().getValues();
+  var mine = 0;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(clientId)) { mine = Number(data[i][5]) || 0; break; }
+  }
+  var rank = 1;
+  for (var j = 1; j < data.length; j++) {
+    if ((Number(data[j][5]) || 0) > mine) rank++;
+  }
+  return { rank: rank, myscans: mine };
+}
+
+// Aaj ke 24 ghanton ka worldwide array (0..23) — hourly sheet se
+function _todayHours() {
+  var sh = _sheet("hourly", ["hour", "count"]);
+  var data = sh.getDataRange().getValues();
+  var day = _today();
+  var out = [];
+  for (var h = 0; h < 24; h++) out.push(0);
+  for (var i = 1; i < data.length; i++) {
+    var key = String(data[i][0] || "");
+    if (key.indexOf(day + "-") === 0) {
+      var hh = parseInt(key.slice(day.length + 1), 10);
+      if (hh >= 0 && hh < 24) out[hh] = Number(data[i][1]) || 0;
+    }
+  }
+  return out;
 }
 
 function _usersCount() {
@@ -249,23 +284,27 @@ function _bumpCounter(key, n) {
   return c.val + n;
 }
 
-function _stats() {
+function _stats(client) {
   var online = _onlineCount();
+  var rk = _rankOf(client || "");
   return {
     ok: true,
-    srv: 3,                 // server code version — redeploy check ke liye
+    srv: 4,                 // server code version — redeploy check ke liye
     today_key: _dayKey(),   // konsi key gini ja rahi hai (diagnosis)
     total: _getTotal(),
     today: _todayCount(),
     online: online,
     users: _usersCount(),
     week: _week(),
+    todayHours: _todayHours(),
     peak: _bumpPeak(online),
     hour: _hourCount(),
     imports: _getCounter("imports").val,
     prints: _getCounter("prints").val,
     versions: _breakdown(4),
-    countries: _breakdown(5)
+    countries: _breakdown(5),
+    rank: rk.rank,
+    myscans: rk.myscans
   };
 }
 
@@ -301,17 +340,17 @@ function _handle(e) {
         _addToday(n);
         _bumpHour(n);
         _touchOnline(client);
-        _touchClient(client, p.v || "", p.c || "");
+        _touchClient(client, p.v || "", p.c || "", n);
       } else if (action === "ping") {
         _touchOnline(client);
-        _touchClient(client, p.v || "", p.c || "");
+        _touchClient(client, p.v || "", p.c || "", 0);
       }
       // import/print ki ginti — kisi bhi action ke saath aa sakti hai
       var imp = Math.max(0, Math.min(500, parseInt(p.imp || "0", 10) || 0));
       var prt = Math.max(0, Math.min(500, parseInt(p.prt || "0", 10) || 0));
       if (imp) _bumpCounter("imports", imp);
       if (prt) _bumpCounter("prints", prt);
-      out = _stats();
+      out = _stats(client);
     } finally {
       lock.releaseLock();
     }
