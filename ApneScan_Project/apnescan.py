@@ -176,7 +176,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "151"
+VERSION = "152"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -19160,6 +19160,26 @@ if the toggle is ticked).</p>
             return None
 
     def _ai_prepare_save(self, paths, default):
+        """Prepare the Save dialog. IMPORTANT: the filename the user sees at save
+        time ALWAYS matches the name shown on the page thumbnail. The AI may still
+        pick the FOLDER, recognise a known document, or — only when a page has no
+        name yet — suggest a name. But it never shows a DIFFERENT visible name than
+        the thumbnail. Returns {'default':path, 'auto':bool, 'path':path_or_None}."""
+        res = self._ai_prepare_save_inner(paths, default)
+        # Guarantee: jo naam THUMBNAIL par dikh raha hai, save karte waqt WAHI naam
+        # aaye. AI sirf FOLDER suggest kar sakti hai — dikhne wala NAAM nahi badalti.
+        try:
+            thumb = self._suggested_save_name(paths)   # thumbnail title (underscored)
+            if thumb:
+                fold = os.path.dirname(res.get("default") or default)
+                res["default"] = os.path.join(fold, thumb + ".pdf")
+                if res.get("auto") and res.get("path"):
+                    res["path"] = os.path.join(os.path.dirname(res["path"]), thumb + ".pdf")
+        except Exception:
+            pass
+        return res
+
+    def _ai_prepare_save_inner(self, paths, default):
         """Before the Save dialog: recognise the document and, per settings,
         pre-fill the latest name+folder, silently auto-save, or show Similar
         Documents. Returns {'default':path, 'auto':bool, 'path':path_or_None}."""
