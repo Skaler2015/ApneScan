@@ -1173,6 +1173,10 @@ if (isset($_GET['admin'])) {
         </body></html><?php exit;
     }
 
+    // admin-only extras (app API me nahi jaate — sirf is page ka $J):
+    $S['recentScans300']=array_reverse(array_slice(isset($d['recentScans'])?$d['recentScans']:array(),-300));
+    if (!empty($GLOBALS['HAS_STORAGE'])) { $S['health']=storageHealth($DATA_FILE); }
+    $S['adminLoginsFull']=array_reverse(array_slice(isset($d['adminLogins'])?$d['adminLogins']:array(),-20));
     $J=json_encode($S);
     ?><!doctype html>
 <html lang="hi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1324,6 +1328,22 @@ if (isset($_GET['admin'])) {
     #burger{display:inline-flex}
     .gsrch{max-width:none}
   }
+  /* ---------- skeleton shimmer ---------- */
+  .skel:empty{min-height:90px;border-radius:10px;background:linear-gradient(100deg,var(--card2) 40%,rgba(148,163,184,.14) 50%,var(--card2) 60%);background-size:200% 100%;animation:skel 1.2s infinite}
+  @keyframes skel{to{background-position:-200% 0}}
+  /* ---------- command palette ---------- */
+  #cpal{position:fixed;inset:0;background:rgba(2,6,23,.6);backdrop-filter:blur(6px);z-index:120;display:none;align-items:flex-start;justify-content:center;padding-top:12vh}
+  #cpal.open{display:flex}
+  #cpal .box{width:min(560px,92vw);background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--sh2);overflow:hidden;animation:pop .18s ease}
+  #cpal input{width:100%;border:none;border-bottom:1px solid var(--line);border-radius:0;padding:14px 16px;font-size:14px;background:transparent}
+  #cpal .res{max-height:320px;overflow:auto;padding:6px}
+  #cpal .ri{display:flex;gap:10px;align-items:center;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:12px}
+  #cpal .ri:hover,#cpal .ri.sel{background:var(--card2)}
+  #cpal .ri .k{margin-left:auto;color:var(--mut);font-size:9.5px}
+  /* ---------- toasts ---------- */
+  #toasts{position:fixed;right:18px;top:70px;display:flex;flex-direction:column;gap:8px;z-index:130}
+  .toast{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent2);border-radius:12px;padding:10px 14px;box-shadow:var(--sh2);font-size:11.5px;font-weight:600;animation:fadeUp .25s ease;max-width:320px}
+  .toast.ok{border-left-color:var(--ok)} .toast.bad{border-left-color:var(--bad)}
   @media print{.toolbar,.btns,.no-print,aside.sb,#fabTop,.gsrch{display:none}.shell{display:block}.card{break-inside:avoid;box-shadow:none}.page{display:block!important}}
 </style></head><body>
 <div class="shell">
@@ -1333,21 +1353,29 @@ if (isset($_GET['admin'])) {
     <div class="logo">📊</div>
     <div>ApneScan <small>Admin Center</small></div>
   </div>
-  <div class="nlab">Navigation</div>
+  <div class="nlab">Portal</div>
   <button class="tab" data-p="overview"><span class="tic">🏠</span> Dashboard</button>
-  <button class="tab" data-p="trends"><span class="tic">📈</span> Analytics</button>
-  <button class="tab" data-p="growth"><span class="tic">🔁</span> Growth</button>
+  <button class="tab" data-p="live"><span class="tic">🟢</span> Live Monitoring</button>
   <button class="tab" data-p="users"><span class="tic">👥</span> Users</button>
-  <button class="tab" data-p="devices"><span class="tic">🖨</span> Recent Scans</button>
-  <button class="tab" data-p="tools"><span class="tic">🧰</span> Tools &amp; Impact</button>
-  <button class="tab" data-p="ideas"><span class="tic">💡</span> Suggestions</button>
-  <button class="tab" data-p="system"><span class="tic">🖥</span> System</button>
-  <div class="nlab">Quick actions</div>
-  <button class="tab jump" onclick="jumpTo('overview','cardBroadcast')"><span class="tic">📣</span> Broadcast</button>
-  <button class="tab jump" onclick="jumpTo('system','cardFeedback')"><span class="tic">💬</span> Feedback</button>
-  <button class="tab jump" onclick="jumpTo('system','cardCrashes')"><span class="tic">💥</span> Crash Reports</button>
-  <button class="tab jump" onclick="jumpTo('system','cardStorage')"><span class="tic">🗄️</span> Backup &amp; Storage</button>
-  <button class="tab jump" onclick="jumpTo('system','cardUpdate')"><span class="tic">⚙️</span> Settings &amp; Update</button>
+  <button class="tab" data-p="hw"><span class="tic">🖨</span> Devices</button>
+  <button class="tab" data-p="scans"><span class="tic">📄</span> Scans</button>
+  <button class="tab" data-p="trends"><span class="tic">📈</span> Analytics</button>
+  <div class="nlab">Engage</div>
+  <button class="tab jump" onclick="jumpTo('overview','cardBroadcast')"><span class="tic">📣</span> Broadcast Center</button>
+  <button class="tab jump" onclick="jumpTo('system','cardFeedback')"><span class="tic">💬</span> Feedback Center</button>
+  <button class="tab jump" onclick="jumpTo('system','cardCrashes')"><span class="tic">💥</span> Crash Center</button>
+  <div class="nlab">Operations</div>
+  <button class="tab" data-p="reports"><span class="tic">📑</span> Reports</button>
+  <button class="tab jump" onclick="jumpTo('system','cardStorage')"><span class="tic">🗄️</span> Backup Manager</button>
+  <button class="tab jump" onclick="jumpTo('system','cardUpdate')"><span class="tic">⚙️</span> Settings</button>
+  <button class="tab" data-p="health"><span class="tic">❤️</span> System Health</button>
+  <button class="tab" data-p="logs"><span class="tic">🧾</span> Activity Logs</button>
+  <div class="nlab">More analytics</div>
+  <button class="tab jump2" data-p="growth"><span class="tic">🔁</span> Growth</button>
+  <button class="tab jump2" data-p="devices"><span class="tic">🌍</span> Activity Feed</button>
+  <button class="tab jump2" data-p="tools"><span class="tic">🧰</span> Tools &amp; Impact</button>
+  <button class="tab jump2" data-p="ideas"><span class="tic">💡</span> Suggestions</button>
+  <button class="tab jump2" data-p="system"><span class="tic">🖥</span> System</button>
   <div class="sfoot">🟢 JSON storage · flock + backups<br>ApneSoftware.com</div>
 </aside>
 <div id="sbOverlay" onclick="sbToggle(false)"></div>
@@ -1549,7 +1577,8 @@ if (isset($_GET['admin'])) {
     <div style="overflow:auto;max-height:460px"><table id="utable"></table></div>
   </div>
 
-  <div id="umodal" class="no-print" onclick="if(event.target===this)closeUser()" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99;align-items:center;justify-content:center">
+  
+<div id="umodal" class="no-print" onclick="if(event.target===this)closeUser()" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99;align-items:center;justify-content:center">
     <div style="background:var(--card);color:var(--fg);border-radius:14px;max-width:460px;width:94%;max-height:90vh;overflow:auto;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.3);position:relative">
       <button onclick="closeUser()" style="position:absolute;top:12px;right:14px;border:none;background:var(--line);border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:16px">✕</button>
       <div id="umbody"></div>
@@ -1734,6 +1763,64 @@ if (isset($_GET['admin'])) {
 
   </div><!-- /system -->
 
+  <!-- ===== NEW PORTAL MODULES (client-side, D data se — backend untouched) ===== -->
+  <div class="page" data-p="live">
+    <div class="sec"><span class="em">🟢</span> Live Monitoring <span style="text-transform:none;letter-spacing:0;font-weight:600">(har 30s khud refresh)</span></div>
+    <div class="kpis" id="liveKpis" style="margin-bottom:13px"></div>
+    <div class="card"><h3><span class="em">🟢</span> Abhi online</h3><div id="liveOn" class="skel"></div></div>
+    <div class="card"><h3><span class="em">⚪</span> Baaki users (offline)</h3><div id="liveOff" class="skel"></div></div>
+  </div>
+  <div class="page" data-p="hw">
+    <div class="sec"><span class="em">🖨</span> Devices — scanner ke hisaab se</div>
+    <div class="kpis" id="hwKpis" style="margin-bottom:13px"></div>
+    <div id="hwCards" class="grid skel"></div>
+  </div>
+  <div class="page" data-p="scans">
+    <div class="sec"><span class="em">📄</span> Scans — data grid (last 300)</div>
+    <div class="card">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:9px;align-items:center">
+        <input id="sgQ" placeholder="🔍 user / country se dhoondo…" style="flex:1;min-width:160px">
+        <select id="sgRange"><option value="0">Sab</option><option value="1">Aaj</option><option value="7">7 din</option><option value="30">30 din</option></select>
+        <button class="btn gray" onclick="sgCSV()">⬇ CSV</button>
+      </div>
+      <div id="sgGrid" class="skel"></div>
+      <div id="sgPag" style="margin-top:9px;display:flex;gap:6px;align-items:center;justify-content:center"></div>
+    </div>
+  </div>
+  <div class="page" data-p="reports">
+    <div class="sec"><span class="em">📑</span> Reports &amp; Export</div>
+    <div class="grid">
+      <div class="card"><h3><span class="em">📄</span> Branded report (PDF)</h3>
+        <div style="color:var(--mut);margin-bottom:8px">Ek-page ka summary — print dialog se "Save as PDF".</div>
+        <a class="btn" href="?admin=1&report=1" target="_blank">📄 Report kholo / PDF banao</a></div>
+      <div class="card"><h3><span class="em">📊</span> CSV / JSON export</h3>
+        <div style="color:var(--mut);margin-bottom:8px">Excel me kholne layak CSV, ya poora JSON backup.</div>
+        <a class="rbtn d" href="?admin=1&export=days">Daily CSV</a>
+        <a class="rbtn d" href="?admin=1&export=users">Users CSV</a>
+        <a class="rbtn d" href="?admin=1&export=json">Backup (JSON)</a>
+        <a class="rbtn d" href="?admin=1&dl=data">stats.json (dated)</a></div>
+      <div class="card"><h3><span class="em">🖨</span> Print dashboard</h3>
+        <div style="color:var(--mut);margin-bottom:8px">Poora dashboard printer/PDF par.</div>
+        <button class="btn" onclick="window.print()">🖨 Print</button></div>
+      <div class="card"><h3><span class="em">📄</span> Scan grid CSV</h3>
+        <div style="color:var(--mut);margin-bottom:8px">"Scans" module ki filtered list CSV me.</div>
+        <button class="btn" onclick="jumpToPage('scans');setTimeout(sgCSV,300)">⬇ Scans CSV</button></div>
+    </div>
+  </div>
+  <div class="page" data-p="health">
+    <div class="sec"><span class="em">❤️</span> System Health</div>
+    <div class="kpis" id="healthKpis" style="margin-bottom:13px"></div>
+    <div class="card"><h3><span class="em">🗄️</span> JSON storage layer</h3><div id="healthStore" class="skel"></div></div>
+  </div>
+  <div class="page" data-p="logs">
+    <div class="sec"><span class="em">🧾</span> Activity Logs</div>
+    <div class="grid">
+      <div class="card"><h3><span class="em">🔐</span> Admin logins</h3><div id="logLogins" class="skel"></div></div>
+      <div class="card"><h3><span class="em">🛠</span> Admin actions (audit)</h3><div id="logAudit" class="skel"></div></div>
+    </div>
+  </div>
+
+  
   <div class="foot">Server: PHP <?php echo htmlspecialchars($S['srv']); ?> · <?php echo htmlspecialchars($S['time']); ?> · ApneSoftware.com</div>
 </div>
 <script>
@@ -2242,7 +2329,7 @@ if(window.Chart){
     resizeVisibleCharts();
   }
   tabs.forEach(function(b){ b.onclick=function(){ show(b.getAttribute('data-p')); window.scrollTo(0,0); }; });
-  var start='overview'; try{ var s=localStorage.getItem('anpage'); if(s) start=s; }catch(e){}
+  var start='overview'; try{ var s=localStorage.getItem('anpage'); if(s) start=s; }catch(e){} try{ var qp=new URLSearchParams(location.search).get('p'); if(qp) start=qp; }catch(e){}
   if(!document.querySelector('.tab[data-p="'+start+'"]')) start='overview';
   show(start);
 })();
@@ -2298,6 +2385,141 @@ function jumpTo(page,cardId){ sbToggle(false);
       if(p<1)requestAnimationFrame(tick); else el.textContent=txt; }
     requestAnimationFrame(tick); });
 })();
+// ================= PORTAL MODULES (naye pages — sab D data se) =================
+function jumpToPage(p){ var t=document.querySelector('.sb .tab[data-p='+p+']'); if(t)t.click(); }
+function _tbl(rows,heads){ return '<div style="max-height:420px;overflow:auto"><table><thead><tr>'+heads.map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>'; }
+function _kpi(cls,ic,n,l){ return '<div class="kpi '+cls+'"><div class="ic">'+ic+'</div><div class="tx"><div class="n">'+n+'</div><div class="l">'+l+'</div></div></div>'; }
+// ---- LIVE MONITORING ----
+(function(){ var U=D.userList||[]; var on=U.filter(function(u){return u.online&&!u.blocked;});
+  var off=U.filter(function(u){return !u.online&&!u.blocked;}).sort(function(a,b){return (b.last||0)-(a.last||0);}).slice(0,50);
+  var el=document.getElementById('liveKpis'); if(!el)return;
+  el.innerHTML=_kpi('g','🟢',on.length,'Online abhi')+_kpi('','👥',U.length,'Total users')+_kpi('p','🖨',(D.lastHour||0),'Scans — is ghante')+_kpi('y','⚡',(D.last24h||0),'Scans — 24h');
+  function row(u){ return '<tr onclick="openUser&&openUser(\''+esc(u.id)+'\')" style="cursor:pointer"><td>'+(u.online?'🟢':'⚪')+' <b>'+esc(u.name)+'</b></td><td>'+flag(u.country)+' '+esc(u.country||'—')+(u.region?' · '+esc(u.region):'')+'</td><td>'+esc(u.model||'—')+'</td><td>v'+esc(u.version||'?')+'</td><td>'+esc(u.ip||'—')+'</td><td style="text-align:right;color:var(--mut)">'+ago(u.last)+'</td><td style="text-align:right"><b>'+fmt(u.scans)+'</b></td></tr>'; }
+  document.getElementById('liveOn').innerHTML = on.length? _tbl(on.map(row),['User','Location','Scanner','Ver','IP','Heartbeat','Scans']) : '<div style="color:var(--mut)">— abhi koi online nahi —</div>';
+  document.getElementById('liveOff').innerHTML = off.length? _tbl(off.map(row),['User','Location','Scanner','Ver','IP','Last seen','Scans']) : '<div style="color:var(--mut)">—</div>';
+})();
+// ---- DEVICES (scanner-wise) ----
+(function(){ var U=D.userList||[]; var g={};
+  U.forEach(function(u){ var k=(u.model||'').trim()||'(Scanner naam nahi mila)';
+    if(!g[k])g[k]={n:0,scans:0,last:0,vers:{},on:0,method:{}};
+    g[k].n++; g[k].scans+=u.scans||0; g[k].last=Math.max(g[k].last,u.last||0);
+    if(u.online)g[k].on++; if(u.version)g[k].vers[u.version]=1; if(u.method)g[k].method[u.method]=1; });
+  var keys=Object.keys(g).sort(function(a,b){return g[b].scans-g[a].scans;});
+  var kp=document.getElementById('hwKpis'); if(!kp)return;
+  kp.innerHTML=_kpi('','🖨',keys.length,'Scanner models')+_kpi('g','🟢',keys.reduce(function(a,k){return a+g[k].on;},0),'Online devices')+_kpi('p','📄',fmt(keys.reduce(function(a,k){return a+g[k].scans;},0)),'Total scans');
+  document.getElementById('hwCards').innerHTML = keys.length? keys.map(function(k){ var d=g[k];
+    return '<div class="card" style="margin-bottom:0"><h3><span class="em">🖨</span> '+esc(k)+'</h3>'
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;font-size:11px">'
+      +'<div>👥 PCs<br><b>'+d.n+'</b></div><div>🟢 Online<br><b>'+d.on+'</b></div>'
+      +'<div>📄 Scans<br><b>'+fmt(d.scans)+'</b></div><div>🕘 Last online<br><b>'+ago(d.last)+'</b></div>'
+      +'<div>🔢 Versions<br><b>'+esc(Object.keys(d.vers).sort().map(function(v){return 'v'+v;}).join(', ')||'—')+'</b></div>'
+      +'<div>🔌 Method<br><b>'+esc(Object.keys(d.method).join(', ')||'—')+'</b></div>'
+      +'</div></div>'; }).join('') : '<div class="card" style="color:var(--mut)">— data nahi —</div>';
+})();
+// ---- SCANS grid: search + range + sort + pagination + CSV ----
+var _sg={page:1,per:25,sort:'t',dir:-1};
+function _sgData(){ var rows=(D.recentScans300||D.recentScans||[]).slice();
+  var q=(document.getElementById('sgQ').value||'').toLowerCase();
+  var r=parseInt(document.getElementById('sgRange').value||'0');
+  var cut=r? (Math.floor(Date.now()/1000)-r*86400):0;
+  rows=rows.filter(function(x){ if(cut&&(x.t||0)<cut)return false;
+    if(q&&((x.name||'')+' '+(x.cc||'')).toLowerCase().indexOf(q)<0)return false; return true;});
+  rows.sort(function(a,b){ var k=_sg.sort,va=a[k]||0,vb=b[k]||0;
+    if(typeof va==='string'){va=va.toLowerCase();vb=(vb||'').toLowerCase();}
+    return (va<vb?-1:va>vb?1:0)*_sg.dir;});
+  return rows; }
+function sgRender(){ var el=document.getElementById('sgGrid'); if(!el)return;
+  var rows=_sgData(); var tp=Math.max(1,Math.ceil(rows.length/_sg.per));
+  if(_sg.page>tp)_sg.page=tp;
+  var pg=rows.slice((_sg.page-1)*_sg.per,_sg.page*_sg.per);
+  function th(label,key){ var a=_sg.sort===key?(_sg.dir<0?' ↓':' ↑'):''; return '<th onclick="_sg.sort=\''+key+'\';_sg.dir=(_sg.sort===\''+key+'\'?-_sg.dir:-1);sgRender()">'+label+a+'</th>'; }
+  el.innerHTML='<div style="max-height:440px;overflow:auto"><table><thead><tr>'+th('Date/Time','t')+th('User','name')+th('Country','cc')+th('Pages','n')+'</tr></thead><tbody>'
+    +(pg.length?pg.map(function(x){ var d=new Date((x.t||0)*1000);
+      return '<tr><td style="white-space:nowrap">'+d.toLocaleDateString()+' '+d.toLocaleTimeString()+'</td><td><b>'+esc(x.name||'—')+'</b></td><td>'+flag(x.cc)+' '+esc(x.cc||'—')+'</td><td><span class="tag">'+(x.n||0)+' pages</span></td></tr>';}).join('')
+      :'<tr><td colspan="4" style="color:var(--mut);text-align:center;padding:20px">— koi scan nahi mila —</td></tr>')
+    +'</tbody></table></div>';
+  var pag=document.getElementById('sgPag');
+  pag.innerHTML='<button class="btn gray" '+(_sg.page<=1?'disabled':'')+' onclick="_sg.page--;sgRender()">←</button>'
+    +'<span style="color:var(--mut)">Page '+_sg.page+' / '+tp+' · '+fmt(rows.length)+' scans</span>'
+    +'<button class="btn gray" '+(_sg.page>=tp?'disabled':'')+' onclick="_sg.page++;sgRender()">→</button>'; }
+function sgCSV(){ var rows=_sgData();
+  var csv='date,time,user,country,pages\n'+rows.map(function(x){ var d=new Date((x.t||0)*1000);
+    return d.toLocaleDateString()+','+d.toLocaleTimeString()+',"'+String(x.name||'').replace(/"/g,'""')+'",'+(x.cc||'')+','+(x.n||0);}).join('\n');
+  var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='apnescan-scans.csv'; a.click();
+  showToast('⬇ Scans CSV download ho gayi','ok'); }
+(function(){ var q=document.getElementById('sgQ'); if(!q)return;
+  q.addEventListener('input',function(){_sg.page=1;sgRender();});
+  document.getElementById('sgRange').addEventListener('change',function(){_sg.page=1;sgRender();});
+  sgRender(); })();
+// ---- SYSTEM HEALTH ----
+(function(){ var el=document.getElementById('healthKpis'); if(!el)return;
+  var H=D.health||{};
+  el.innerHTML=_kpi('g','🌐','OK','Server — PHP '+esc(D.srv||'?'))
+    +_kpi('','⚡',(D.respMs||0)+' ms','API response')
+    +_kpi('p','📄',(D.fileKB||0)+' KB','stats.json size')
+    +_kpi('y','🗂',(H.backupKB||0)+' KB','Backups size')
+    +_kpi('','🧠',(H.memMB||0)+' MB','Memory (peak)')
+    +_kpi('g','🧾',fmt(H.records||0),'Total records');
+  document.getElementById('healthStore').innerHTML = D.health?
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;font-size:11.5px">'
+    +'<div>💾 Last save<br><b>'+(H.lastSave?new Date(H.lastSave*1000).toLocaleString():'—')+'</b></div>'
+    +'<div>🛟 Last backup<br><b>'+(H.lastBackup?new Date(H.lastBackup*1000).toLocaleString():'—')+'</b></div>'
+    +'<div>♻️ Last recovery<br><b>'+(H.lastRecovery?new Date(H.lastRecovery*1000).toLocaleString():'kabhi zaroorat nahi ✅')+'</b></div>'
+    +'<div>⏱ Load / Save<br><b>'+(H.loadMs||0)+' / '+(H.saveMs||0)+' ms</b></div>'
+    +'<div>🔒 Locking<br><b>flock (exclusive RMW)</b></div>'
+    +'<div>🗄️ Backups<br><b>.bak ×5 + daily ×14</b></div></div>'
+    : '<div style="color:var(--mut)">json_storage.php upload karke poori health dekho (System page → Storage module)</div>';
+})();
+// ---- ACTIVITY LOGS ----
+(function(){ var el=document.getElementById('logLogins'); if(!el)return;
+  var L=D.adminLoginsFull||D.adminLogins||[];
+  el.innerHTML = L.length? _tbl(L.map(function(x){ var t=x.t?new Date(x.t*1000).toLocaleString():(x[0]||'—'); var ip=x.ip||x[1]||'?';
+    return '<tr><td>🔐 Login</td><td>'+esc(''+ip)+'</td><td style="text-align:right;color:var(--mut)">'+esc(''+t)+'</td></tr>';}),['Event','IP','Time'])
+    : '<div style="color:var(--mut)">—</div>';
+  var A=D.auditLog||[];
+  document.getElementById('logAudit').innerHTML = A.length? _tbl(A.map(function(a){
+    return '<tr><td><b>'+esc(a.act)+'</b>'+(a.det?' <span style="color:var(--mut)">'+esc(a.det)+'</span>':'')+'</td><td>'+esc(a.ip||'?')+'</td><td style="text-align:right;color:var(--mut)">'+ago(a.t)+'</td></tr>';}),['Action','IP','When'])
+    : '<div style="color:var(--mut)">— abhi koi admin action nahi —</div>';
+})();
+// ================= COMMAND PALETTE (Ctrl+K) =================
+(function(){ var pal=document.createElement('div'); pal.id='cpal';
+  pal.innerHTML='<div class="box"><input id="cpq" placeholder="Module ya user ka naam type karo…"><div class="res" id="cpres"></div></div>';
+  document.body.appendChild(pal);
+  var MODS=[['🏠','Dashboard','overview'],['🟢','Live Monitoring','live'],['👥','Users','users'],['🖨','Devices','hw'],
+    ['📄','Scans','scans'],['📈','Analytics','trends'],['📑','Reports','reports'],['❤️','System Health','health'],
+    ['🧾','Activity Logs','logs'],['🔁','Growth','growth'],['🧰','Tools & Impact','tools'],['💡','Suggestions','ideas'],['🖥','System','system']];
+  var q=document.getElementById('cpq'),res=document.getElementById('cpres'),sel=0,items=[];
+  function build(){ var v=(q.value||'').toLowerCase(); items=[];
+    MODS.forEach(function(m){ if(!v||m[1].toLowerCase().indexOf(v)>-1) items.push({ic:m[0],t:m[1],k:'Module',fn:(function(p){return function(){jumpToPage(p);};})(m[2])}); });
+    if(v.length>=2)(D.userList||[]).forEach(function(u){ if((u.name||'').toLowerCase().indexOf(v)>-1&&items.length<14)
+      items.push({ic:u.online?'🟢':'👤',t:u.name+' · '+fmt(u.scans)+' scans',k:'User',fn:(function(id){return function(){ jumpToPage('users'); if(window.openUser)setTimeout(function(){openUser(id);},200);};})(u.id)}); });
+    sel=0; render(); }
+  function render(){ res.innerHTML=items.map(function(i,ix){ return '<div class="ri'+(ix===sel?' sel':'')+'" onclick="void(0)" data-ix="'+ix+'"><span>'+i.ic+'</span> '+esc(i.t)+'<span class="k">'+i.k+'</span></div>'; }).join('')||'<div class="ri" style="color:var(--mut)">— kuch nahi mila —</div>';
+    [].slice.call(res.children).forEach(function(el){ el.addEventListener('click',function(){ var i=items[parseInt(el.getAttribute('data-ix')||'-1')]; if(i){close();i.fn();} }); }); }
+  function open(){ pal.classList.add('open'); q.value=''; build(); setTimeout(function(){q.focus();},30); }
+  function close(){ pal.classList.remove('open'); }
+  window.cpalOpen=open;
+  q.addEventListener('input',build);
+  q.addEventListener('keydown',function(e){ if(e.key==='ArrowDown'){sel=Math.min(sel+1,items.length-1);render();e.preventDefault();}
+    else if(e.key==='ArrowUp'){sel=Math.max(sel-1,0);render();e.preventDefault();}
+    else if(e.key==='Enter'){ if(items[sel]){close();items[sel].fn();} }
+    else if(e.key==='Escape')close(); });
+  pal.addEventListener('click',function(e){ if(e.target===pal)close(); });
+  document.addEventListener('keydown',function(e){ if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){ e.preventDefault(); open(); } });
+})();
+// ================= TOASTS + FULLSCREEN =================
+function showToast(msg,cls){ var c=document.getElementById('toasts');
+  if(!c){ c=document.createElement('div'); c.id='toasts'; document.body.appendChild(c); }
+  var t=document.createElement('div'); t.className='toast '+(cls||''); t.textContent=msg; c.appendChild(t);
+  setTimeout(function(){ t.style.opacity='0'; t.style.transition='opacity .4s'; setTimeout(function(){t.remove();},420); },3800); }
+(function(){ var tb=document.querySelector('header .toolbar'); if(!tb)return;
+  var fs=document.createElement('button'); fs.className='iconbtn'; fs.title='Full screen'; fs.textContent='⛶';
+  fs.onclick=function(){ if(document.fullscreenElement)document.exitFullscreen(); else document.documentElement.requestFullscreen(); };
+  tb.insertBefore(fs,tb.querySelector('.prof')); })();
+// SU message ko toast me bhi dikhao
+(function(){ var b=document.querySelector('.wrap > div[style*="border-radius:10px"]');
+  if(b&&/✅|❌|↩/.test(b.textContent)) showToast(b.textContent.slice(0,90), /✅|↩/.test(b.textContent)?'ok':'bad'); })();
+
 // ---- back-to-top FAB ----
 (function(){ var f=document.createElement('button'); f.id='fabTop'; f.textContent='↑'; f.title='Top';
   f.onclick=function(){ scrollTo({top:0,behavior:'smooth'}); }; document.body.appendChild(f);
