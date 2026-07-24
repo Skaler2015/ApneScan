@@ -176,7 +176,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "149"
+VERSION = "150"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -427,8 +427,12 @@ DEFAULT_OPTIONS = {
     "scanner_method": "twain",   # "twain" ya "wia"
     "twain_file_xfer": False,    # experimental: continuous ADF feed (TWAIN file transfer)
     "auto_orient": True,         # Always Auto Rotate — har page apne aap seedha (default ON)
-    "auto_orient_mode": "accurate",  # "accurate" (OSD + layout fallback) ya "fast"
+    "auto_orient_mode": "accurate",  # "accurate" (OSD + text + layout) ya "fast" (OSD only)
     "auto_orient_deskew": False, # halka tirchapan bhi seedha karo (thoda resample)
+    "auto_orient_conf": 80,      # confidence threshold % — itne se zyada par hi ghumao
+    "auto_orient_ocr": True,     # METHOD 1: Tesseract OSD
+    "auto_orient_cv": True,      # METHOD 2: text-line (OpenCV-style, numpy) analysis
+    "auto_orient_layout": True,  # METHOD 3: layout / white-space analysis
     "enhance_mode": "original",  # F5: original / white / enhanced / high_contrast
     "noise_removal": False,      # F8: dust/speck/noise hatao (median)
     "smart_scan": False,         # F15: ek-click auto cleanup (crop+deskew+edges+enhance+denoise)
@@ -892,6 +896,10 @@ def _orient_osd(img):
         if m > 1000:                      # detect small, rotate original -> fast + lossless
             s = 1000.0 / m
             rgb = rgb.resize((max(1, int(w * s)), max(1, int(h * s))))
+        try:                              # boost contrast on the small copy so OSD copes
+            rgb = ImageOps.autocontrast(rgb, cutoff=2)   # with dark/light/old docs
+        except Exception:
+            pass
         try:
             from pytesseract import Output as _Out
             d = pytesseract.image_to_osd(rgb, output_type=_Out.DICT)
@@ -907,61 +915,158 @@ def _orient_osd(img):
         return (0, 0.0, "")
 
 
-def _orient_layout(img):
-    """OCR-free fallback: guess upright-vs-sideways from text-line projection
-    profiles. Returns (rotate, confidence). Cannot tell up/down, so it only ever
-    suggests a 90° fix and keeps confidence modest (won't override a good OSD)."""
-    if not HAS_NUMPY:
-        return (0, 0.0)
+def _orient_osd_pct(raw):
+    """Map Tesseract OSD's raw orientation_conf (~0..15) to a 0-100% scale for
+    the threshold + logging. raw ~2.7 -> ~80%."""
     try:
-        g = img.convert("L").resize((300, 300))
-        a = np.asarray(g, dtype=np.float32)
-        ink = (a < 128).astype(np.float32)
-        if ink.sum() < 50:                # nearly blank -> no signal
-            return (0, 0.0)
-        rv = float(np.var(np.diff(ink.sum(axis=1))))   # variance of per-row ink
-        cv = float(np.var(np.diff(ink.sum(axis=0))))   # variance of per-col ink
-        if rv <= 0 and cv <= 0:
-            return (0, 0.0)
-        if cv > rv * 1.8:                 # columns vary more -> lines are vertical -> sideways
-            return (90, min(3.0, (cv / (rv + 1e-6)) - 1.0))
-        return (0, min(2.0, rv / (cv + 1e-6)))
+        return int(min(99, max(0, round(float(raw) * 28 + 5))))
     except Exception:
-        return (0, 0.0)
+        return 0
+
+
+def _orient_text(img):
+    """METHOD 2 — text-line structure analysis (OpenCV-style, done with numpy so
+    no cv2 dependency). Counts horizontal vs vertical text 'bands' in the ink
+    projection profiles to tell an UPRIGHT/upside-down page (0/180 axis) from a
+    SIDEWAYS one (90/270). Returns (axis_angle 0|90, confidence%). It cannot tell
+    up-from-down, so 90 here just means 'a quarter-turn is needed'."""
+    if not HAS_NUMPY:
+        return (0, 0)
+    try:
+        g = img.convert("L").resize((400, 400))
+        a = np.asarray(g, dtype=np.float32)
+        thr = max(60.0, a.mean() - 0.5 * a.std())      # adaptive ink threshold
+        ink = (a < thr).astype(np.float32)
+        if ink.sum() < 120:                            # too little text -> no signal
+            return (0, 0)
+
+        def bands(p):                                  # how many text/gap alternations
+            p = p - p.mean()
+            return int(np.count_nonzero(np.diff(np.sign(p)) != 0))
+        rb = bands(ink.sum(axis=1))                    # rows oscillate -> horizontal lines
+        cb = bands(ink.sum(axis=0))                    # cols oscillate -> vertical lines
+        tot = rb + cb
+        if tot < 6:
+            return (0, 0)
+        if rb >= cb:                                   # horizontal text -> upright axis
+            return (0, int(min(72, round(60.0 * rb / tot))))
+        return (90, int(min(72, round(60.0 * cb / tot))))   # vertical text -> sideways
+    except Exception:
+        return (0, 0)
+
+
+def _orient_layout(img):
+    """METHOD 3 — document layout (margin / white-space distribution). A weaker
+    tie-breaker: strong ink imbalance across one axis suggests the page is
+    sideways. Returns (angle 0|90, confidence%)."""
+    if not HAS_NUMPY:
+        return (0, 0)
+    try:
+        g = np.asarray(img.convert("L").resize((240, 240)), dtype=np.float32)
+        ink = (g < 150).astype(np.float32)
+        if ink.sum() < 60:
+            return (0, 0)
+        rv = float(np.var(ink.sum(axis=1)))            # per-row ink variance
+        cv = float(np.var(ink.sum(axis=0)))            # per-col ink variance
+        if rv <= 0 and cv <= 0:
+            return (0, 0)
+        if cv > rv * 1.7:
+            return (90, int(min(50, round(28 * cv / (rv + 1e-6)))))
+        return (0, int(min(40, round(18 * rv / (cv + 1e-6)))))
+    except Exception:
+        return (0, 0)
+
+
+def detect_orientation(img, use_ocr=True, use_text=True, use_layout=True, threshold=80):
+    """Smart multi-method orientation detection (offline, priority-ordered).
+    Returns {'angle':0/90/180/270, 'conf':0-100, 'method':'osd'/'text'/'layout'/'none',
+    'decision':'rotate'/'keep'}. Rotates ONLY when confidence >= threshold, so an
+    uncertain page is never turned the wrong way."""
+    res = {"angle": 0, "conf": 0, "method": "none", "decision": "keep"}
+    # METHOD 1 — Tesseract OSD (only one that resolves full 0/90/180/270 + up/down)
+    if use_ocr and tesseract_available():
+        try:
+            rot, raw, _script = _orient_osd(img)
+            res = {"angle": (rot if rot in (90, 180, 270) else 0),
+                   "conf": _orient_osd_pct(raw), "method": "osd", "decision": "keep"}
+        except Exception:
+            pass
+    # METHODS 2 & 3 — fallbacks when OSD is unavailable or not confident enough
+    if res["method"] == "none" or res["conf"] < threshold:
+        for use, fn, name in ((use_text, _orient_text, "text"),
+                              (use_layout, _orient_layout, "layout")):
+            if not use:
+                continue
+            try:
+                a, c = fn(img)
+            except Exception:
+                a, c = 0, 0
+            if a in (90,) and c > res["conf"]:
+                res = {"angle": a, "conf": c, "method": name, "decision": "keep"}
+    # METHOD 4 — smart decision: only rotate when reliably confident
+    res["decision"] = "rotate" if (res["angle"] in (90, 180, 270) and res["conf"] >= threshold) else "keep"
+    return res
+
+
+ORIENT_LOG = os.path.join(os.path.expanduser("~"), ".apnescan_orient.log")
+
+
+def _orient_log(label, res):
+    """Log one orientation decision (page, angle, confidence, method, decision).
+    Self-capping file; never raises."""
+    try:
+        line = "%s\t%s\tangle=%s conf=%s%% method=%s -> %s\n" % (
+            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), (label or "page"),
+            res.get("angle"), res.get("conf"), res.get("method"), res.get("decision"))
+        if os.path.exists(ORIENT_LOG) and os.path.getsize(ORIENT_LOG) > 300000:
+            try:
+                with open(ORIENT_LOG, "r", encoding="utf-8") as f:
+                    tail = f.readlines()[-1500:]
+                with open(ORIENT_LOG, "w", encoding="utf-8") as f:
+                    f.writelines(tail)
+            except Exception:
+                pass
+        with open(ORIENT_LOG, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception:
+        pass
 
 
 def auto_orient(img, mode="accurate", ocr_based=True, layout_based=True,
-                deskew_small=False, min_conf=None):
-    """Intelligent 'Always Auto Rotate' engine (offline). Detects the correct
-    0/90/180/270 orientation from the page's text (Tesseract OSD — works for
-    English, Hindi and mixed) with an OCR-free layout fallback, and returns an
-    UPRIGHT image. 90°-steps are lossless (no resize/recompress); DPI + colour
-    depth are preserved. If confidence is very low the ORIGINAL is kept so a
-    correct page is never rotated wrongly. Blank pages skip OCR.
+                deskew_small=False, min_conf=None, threshold=None,
+                text_based=None, page_label=""):
+    """Intelligent Smart-Orientation engine (offline). Detects the correct
+    0/90/180/270 orientation via Tesseract OSD (English/Hindi/mixed) with numpy
+    text-line + layout fallbacks, and returns an UPRIGHT image. 90° turns are
+    lossless (no resize/recompress); DPI + colour depth preserved. Low confidence
+    -> ORIGINAL kept (never a wrong rotation). Blank pages skip OCR. Every decision
+    is logged. Backward compatible: auto_orient(img) still works.
 
-    Backward compatible: auto_orient(img) behaves like before, only smarter."""
+    'mode' fast = OSD only (quickest); accurate = OSD + text + layout."""
     try:
         orig = img
-        if min_conf is None:
-            min_conf = 2.0 if mode == "fast" else 1.0
-        # blank page -> no reliable text/layout signal; keep as-is
+        if threshold is None:                          # legacy min_conf -> %; else default 80
+            threshold = 80
+        if text_based is None:
+            text_based = (mode != "fast")
+        if mode == "fast":
+            layout_based = False                       # keep fast mode lean
+        # blank page -> no reliable signal; keep as-is
         try:
             if is_blank_page(orig.convert("RGB"), 0.0008):
+                if page_label:
+                    _orient_log(page_label, {"angle": 0, "conf": 0, "method": "blank", "decision": "keep"})
                 return orig
         except Exception:
             pass
-        rot, conf = 0, 0.0
-        if ocr_based and tesseract_available():
-            rot, conf, _script = _orient_osd(orig)
-        if conf < min_conf and layout_based:      # OSD unsure -> try layout
-            lrot, lconf = _orient_layout(orig)
-            if lconf > conf:
-                rot, conf = lrot, lconf
+        res = detect_orientation(orig, use_ocr=ocr_based, use_text=text_based,
+                                 use_layout=layout_based, threshold=int(threshold))
         out = orig
-        if rot in (90, 180, 270) and conf >= min_conf:
-            out = orig.rotate(-rot, expand=True)  # lossless quarter-turn
-        if deskew_small:                          # optional slight-tilt straighten
+        if res["decision"] == "rotate" and res["angle"] in (90, 180, 270):
+            out = orig.rotate(-res["angle"], expand=True)   # lossless quarter-turn
+        if deskew_small:
             out = deskew(out)
+        _orient_log(page_label, res)
         return _orient_keep_dpi(orig, out)
     except Exception:
         return img
@@ -2876,6 +2981,18 @@ class ScanWorker(QtCore.QThread):
                     # size me sheet chhoti ho to backing dikhti hai; print me
                     # kala bilkul nahi aana chahiye.
                     img = whiten_dark_background(img)
+                    # ---- Smart Orientation = FIRST processing stage (spec) ----
+                    # Har page ko sabse pehle seedha karo taaki aage ke sab stage
+                    # (crop/deskew/enhance) + thumbnail/OCR/PDF sahi orientation par chalein.
+                    if self.opts.get("auto_orient", True):
+                        img = auto_orient(
+                            img, mode=self.opts.get("auto_orient_mode", "accurate"),
+                            deskew_small=bool(self.opts.get("auto_orient_deskew")),
+                            threshold=int(self.opts.get("auto_orient_conf", 80) or 80),
+                            ocr_based=bool(self.opts.get("auto_orient_ocr", True)),
+                            text_based=bool(self.opts.get("auto_orient_cv", True)),
+                            layout_based=bool(self.opts.get("auto_orient_layout", True)),
+                            page_label="page %d" % (self.kept + 1))
                     # F15 Smart Scan: one toggle turns on the recommended cleanup set
                     _smart = bool(self.opts.get("smart_scan"))
                     if self.opts.get("clean_edges") or _smart:
@@ -2895,11 +3012,6 @@ class ScanWorker(QtCore.QThread):
                         img = apply_enhance_mode(img, _mode)
                     if self.opts.get("noise_removal") or _smart:   # F8 denoise
                         img = denoise(img)
-                    # Always Auto Rotate — har page apne aap seedha (background thread me,
-                    # thumbnail/preview/OCR/PDF/save sabse pehle; kam confidence par original).
-                    if self.opts.get("auto_orient", True):
-                        img = auto_orient(img, mode=self.opts.get("auto_orient_mode", "accurate"),
-                                          deskew_small=bool(self.opts.get("auto_orient_deskew")))
                     # Rang-heen page ko gray bana do (chhoti file) — sirf colour
                     # scan me, aur sirf jab option ON ho.
                     if (self.opts.get("auto_colour") and self.pixel_type == "color"
@@ -3262,7 +3374,26 @@ class OptionsDialog(QtWidgets.QDialog):
         self.cmb_orient_mode = QtWidgets.QComboBox()
         self.cmb_orient_mode.addItems(["High accuracy (OCR + layout)", "Fast (only very sure)"])
         self.cmb_orient_mode.setCurrentIndex(1 if self.opts.get("auto_orient_mode") == "fast" else 0)
-        form.addRow(lblhelp("     ↳ Auto-rotate mode", 'हिन्दी: High accuracy = OCR + layout दोनों से पहचान (सबसे सही)। Fast = सिर्फ़ पक्के मामलों में घुमाए (सबसे तेज़)।\nEnglish: High accuracy = OCR + layout (most correct). Fast = only rotate when very sure (quickest).'), self.cmb_orient_mode)
+        form.addRow(lblhelp("     ↳ Auto-rotate mode", 'हिन्दी: High accuracy = OCR + text + layout तीनों से पहचान (सबसे सही)। Fast = सिर्फ़ OCR (OSD), सबसे तेज़।\nEnglish: High accuracy = OCR + text + layout (most correct). Fast = OCR (OSD) only, quickest.'), self.cmb_orient_mode)
+        _ocrow = QtWidgets.QHBoxLayout()
+        _ocrow.addWidget(QtWidgets.QLabel("     ↳ Confidence threshold"))
+        self.sl_orient_conf = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.sl_orient_conf.setMinimum(50); self.sl_orient_conf.setMaximum(99)
+        self.sl_orient_conf.setValue(int(self.opts.get("auto_orient_conf", 80) or 80))
+        _oclbl = QtWidgets.QLabel("%d%%" % self.sl_orient_conf.value())
+        self.sl_orient_conf.valueChanged.connect(lambda x: _oclbl.setText("%d%%" % x))
+        _ocrow.addWidget(self.sl_orient_conf, 1); _ocrow.addWidget(_oclbl)
+        _ocw = QtWidgets.QWidget(); _ocw.setLayout(_ocrow)
+        form.addRow(lblhelp("", 'हिन्दी: इतने भरोसे से ज़्यादा होने पर ही पेज घुमाया जाता है (default 80%)। ज़्यादा = सिर्फ़ पक्के मामले घूमेंगे (कम गलती), कम = ज़्यादा पेज घूमेंगे।\nEnglish: A page is only rotated when confidence is at least this (default 80%). Higher = only very sure pages rotate (fewer mistakes); lower = more pages rotate.'), _ocw)
+        self.chk_o_ocr = QtWidgets.QCheckBox("     ↳ Method: OCR (Tesseract OSD)")
+        self.chk_o_ocr.setChecked(bool(self.opts.get("auto_orient_ocr", True)))
+        form.addRow(chkrow(self.chk_o_ocr, 'हिन्दी: OCR (OSD) से orientation पहचान — सबसे सही (English/Hindi/mixed)।\nEnglish: Detect orientation via OCR (OSD) — the most accurate method.'))
+        self.chk_o_cv = QtWidgets.QCheckBox("     ↳ Method: Text analysis (OpenCV-style)")
+        self.chk_o_cv.setChecked(bool(self.opts.get("auto_orient_cv", True)))
+        form.addRow(chkrow(self.chk_o_cv, 'हिन्दी: text-lines से orientation अंदाज़ा (जब OCR unsure हो) — fallback।\nEnglish: Estimate orientation from text lines when OCR is unsure — a fallback.'))
+        self.chk_o_layout = QtWidgets.QCheckBox("     ↳ Method: Layout / white-space")
+        self.chk_o_layout.setChecked(bool(self.opts.get("auto_orient_layout", True)))
+        form.addRow(chkrow(self.chk_o_layout, 'हिन्दी: margins/खाली जगह से orientation अंदाज़ा — सबसे हल्का fallback।\nEnglish: Estimate from margins/white-space — the lightest fallback.'))
         self.chk_smart = QtWidgets.QCheckBox("✨ Smart Scan — auto clean-up (Recommended)")
         self.chk_smart.setChecked(bool(self.opts.get("smart_scan")))
         form.addRow(chkrow(self.chk_smart, 'हिन्दी: एक क्लिक में पूरा auto-cleanup: किनारे साफ़, auto-crop, सीधा (deskew), background enhance और dust हटाना — सब अपने-आप। (Fast mode में बंद रहता है।)\nEnglish: One toggle for the whole cleanup: clean edges, auto-crop, deskew, background enhance and dust removal — all automatic. (Disabled in Fast mode.)'))
@@ -3383,6 +3514,10 @@ class OptionsDialog(QtWidgets.QDialog):
         o["auto_orient"] = self.chk_orient.isChecked()
         o["auto_orient_deskew"] = self.chk_orient_deskew.isChecked()
         o["auto_orient_mode"] = "fast" if self.cmb_orient_mode.currentIndex() == 1 else "accurate"
+        o["auto_orient_conf"] = int(self.sl_orient_conf.value())
+        o["auto_orient_ocr"] = self.chk_o_ocr.isChecked()
+        o["auto_orient_cv"] = self.chk_o_cv.isChecked()
+        o["auto_orient_layout"] = self.chk_o_layout.isChecked()
         o["smart_scan"] = self.chk_smart.isChecked()
         o["enhance_mode"] = ["original", "white", "enhanced", "high_contrast"][self.cmb_enhmode.currentIndex()]
         o["noise_removal"] = self.chk_denoise.isChecked()
