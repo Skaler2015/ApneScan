@@ -89,7 +89,9 @@ body{font-family:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;backgroun
 img,svg{max-width:100%}
 a{color:inherit;text-decoration:none}
 :focus-visible{outline:3px solid var(--acc);outline-offset:2px;border-radius:6px}
-.wrap{max-width:1180px;margin:0 auto;padding:0 22px}
+[hidden]{display:none!important}
+/* FULL-WIDTH layout: content poori screen istemaal kare (halka sa kinara bhar) */
+.wrap{max-width:none;margin:0 auto;padding:0 clamp(22px,3.2vw,72px)}
 section{padding:84px 0;position:relative}
 h2.sec{font-size:clamp(1.7rem,3.4vw,2.5rem);font-weight:800;letter-spacing:-.02em;text-align:center}
 p.sub{color:var(--mut);text-align:center;max-width:640px;margin:12px auto 0;font-size:1.04rem}
@@ -102,7 +104,7 @@ html[data-theme="dark"] .kick{color:var(--acc)}
 
 /* ============ NAV ============ */
 nav{position:fixed;top:0;left:0;right:0;z-index:1000;background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line);transition:all var(--tr)}
-nav .in{max-width:1180px;margin:0 auto;padding:0 22px;display:flex;align-items:center;gap:26px;height:72px;transition:height var(--tr)}
+nav .in{max-width:none;margin:0 auto;padding:0 clamp(22px,3.2vw,72px);display:flex;align-items:center;gap:26px;height:72px;transition:height var(--tr)}
 nav.small .in{height:58px}
 .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.2rem;letter-spacing:-.02em}
 .logo img{width:34px;height:34px;border-radius:9px}
@@ -210,7 +212,7 @@ html[data-theme="dark"] .brand:hover{color:var(--acc)}
 .fcard span{color:var(--mut);font-size:.84rem;line-height:1.5}
 
 /* ============ SEARCH DEMO ============ */
-#searchdemo .demo{max-width:640px;margin:46px auto 0;background:var(--card);border:1px solid var(--line);border-radius:var(--r2);box-shadow:var(--shadow2);overflow:hidden}
+#searchdemo .demo{max-width:820px;margin:46px auto 0;background:var(--card);border:1px solid var(--line);border-radius:var(--r2);box-shadow:var(--shadow2);overflow:hidden}
 .demo .dh{background:linear-gradient(135deg,var(--p),var(--p2));color:#fff;padding:14px 20px;font-weight:700;display:flex;gap:8px;align-items:center;font-size:.95rem}
 .demo .dbody{padding:22px;position:relative}
 .sbox{display:flex;align-items:center;gap:10px;border:2px solid var(--p);border-radius:13px;padding:13px 16px;font-size:1.05rem;background:var(--bg);cursor:text}
@@ -226,7 +228,7 @@ html[data-theme="dark"] .brand:hover{color:var(--acc)}
 .dnote{margin-top:14px;color:var(--mut);font-size:.85rem;text-align:center}
 
 /* ============ BEFORE / AFTER ============ */
-.ba{max-width:820px;margin:46px auto 0;position:relative;border-radius:var(--r2);overflow:hidden;box-shadow:var(--shadow2);border:1px solid var(--line);user-select:none}
+.ba{max-width:1080px;margin:46px auto 0;position:relative;border-radius:var(--r2);overflow:hidden;box-shadow:var(--shadow2);border:1px solid var(--line);user-select:none}
 .ba .pane{padding:34px;display:grid;place-items:center;background:#3b4a52}
 .ba .doc{width:min(420px,72vw);height:250px;background:#fdfdf8;border-radius:4px;padding:26px 30px;display:flex;flex-direction:column;gap:9px;box-shadow:0 14px 34px rgba(0,0,0,.35)}
 .ba .doc i{height:6px;background:#b9c4c1;border-radius:3px;display:block}
@@ -246,7 +248,7 @@ html[data-theme="dark"] .brand:hover{color:var(--acc)}
 .fixchips span::before{content:"✓ ";color:var(--ok);font-weight:800}
 
 /* ============ OCR DEMO ============ */
-.ocrflow{display:grid;grid-template-columns:1fr auto 1fr;gap:22px;align-items:stretch;max-width:900px;margin:46px auto 0}
+.ocrflow{display:grid;grid-template-columns:1fr auto 1fr;gap:22px;align-items:stretch;max-width:1180px;margin:46px auto 0}
 .ocrpane{background:var(--card);border:1px solid var(--line);border-radius:var(--r2);padding:22px;box-shadow:var(--shadow)}
 .ocrpane h3{font-size:.95rem;margin-bottom:14px;display:flex;gap:8px;align-items:center}
 .ocrimg{background:#fdfdf8;border-radius:8px;padding:18px;position:relative;overflow:hidden;border:1px solid var(--line)}
@@ -282,7 +284,7 @@ html[data-theme="dark"] .ocrarrow{color:var(--acc)}
 html[data-theme="dark"] .minigrid i{background:#dfe9e7}
 
 /* ============ VIDEO / TOUR ============ */
-#video .tour{max-width:760px;margin:46px auto 0;background:linear-gradient(135deg,var(--p),var(--p2));border-radius:var(--r2);padding:4px;box-shadow:var(--shadow2)}
+#video .tour{max-width:920px;margin:46px auto 0;background:linear-gradient(135deg,var(--p),var(--p2));border-radius:var(--r2);padding:4px;box-shadow:var(--shadow2)}
 #video .tin{background:var(--card);border-radius:calc(var(--r2) - 4px);padding:38px 30px;text-align:center}
 .playbtn{width:88px;height:88px;border-radius:50%;background:linear-gradient(135deg,var(--p),var(--p2));display:grid;place-items:center;margin:0 auto 20px;color:#fff;font-size:2rem;cursor:pointer;border:0;box-shadow:0 14px 34px -8px rgba(15,118,110,.6);transition:transform var(--tr);position:relative;text-decoration:none}
 .playbtn::after{content:"";position:absolute;inset:-10px;border-radius:50%;border:2px solid color-mix(in srgb,var(--p) 45%,transparent);animation:pulse 2s ease-out infinite}
@@ -331,7 +333,7 @@ html[data-theme="dark"] .price .amt{color:var(--acc)}
 .price li::before{content:"✓  ";color:var(--ok);font-weight:800}
 
 /* ============ DOWNLOAD ============ */
-#download .dl{max-width:820px;margin:46px auto 0;background:linear-gradient(135deg,var(--p),var(--p2));border-radius:var(--r2);padding:44px 38px;color:#fff;box-shadow:var(--shadow2);position:relative;overflow:hidden}
+#download .dl{max-width:1080px;margin:46px auto 0;background:linear-gradient(135deg,var(--p),var(--p2));border-radius:var(--r2);padding:44px 38px;color:#fff;box-shadow:var(--shadow2);position:relative;overflow:hidden}
 #download .dl::before{content:"";position:absolute;width:340px;height:340px;border-radius:50%;background:rgba(94,234,212,.18);top:-160px;right:-120px}
 .dlgrid{display:grid;grid-template-columns:1.2fr 1fr;gap:34px;align-items:center;position:relative}
 .dlmeta{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:20px;font-size:.85rem}
@@ -345,7 +347,7 @@ html[data-theme="dark"] .price .amt{color:var(--acc)}
 .dlnote{font-size:.78rem;opacity:.85;text-align:center}
 
 /* ============ FAQ ============ */
-.faq{max-width:780px;margin:46px auto 0;display:flex;flex-direction:column;gap:10px}
+.faq{max-width:980px;margin:46px auto 0;display:flex;flex-direction:column;gap:10px}
 .faq details{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;transition:box-shadow var(--tr)}
 .faq details[open]{box-shadow:var(--shadow);border-color:color-mix(in srgb,var(--p) 35%,var(--line))}
 .faq summary{padding:17px 20px;font-weight:700;font-size:.96rem;cursor:pointer;list-style:none;display:flex;justify-content:space-between;gap:14px;align-items:center}
@@ -380,6 +382,10 @@ html[data-theme="dark"] .fgrid2 a:hover{color:var(--acc)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.rv{opacity:1;transform:none}}
 
 /* ============ RESPONSIVE ============ */
+@media(min-width:1500px){
+  .fgrid{grid-template-columns:repeat(6,1fr)}
+  .ba .doc{width:min(560px,60vw);height:300px}
+}
 @media(max-width:1020px){
   .hgrid{grid-template-columns:1fr;gap:44px}
   .hgrid>*{min-width:0}
