@@ -18,9 +18,13 @@ import os
 import re
 import sys
 import json
+import time
 import shutil
 import socket
+import sqlite3
+import hashlib
 import tempfile
+import threading
 import traceback
 import datetime
 
@@ -172,7 +176,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "140"
+VERSION = "141"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -222,6 +226,9 @@ CONFIG_PATH = (os.path.join(_PORTABLE, "apnescan_config.json") if _PORTABLE
 CRASH_PATH = os.path.join(os.path.expanduser("~"), "apnescan_crash.txt")
 TRASH_DIR = os.path.join(os.path.expanduser("~"), ".apnescan_trash")   # Recycle Bin
 PSTATS_PATH = os.path.join(os.path.expanduser("~"), ".apnescan_pstats.json")
+# AI Document Memory (offline SQLite learning DB) — next to config, portable-aware
+MEMORY_DB = (os.path.join(_PORTABLE, "apnescan_memory.db") if _PORTABLE
+             else os.path.join(os.path.expanduser("~"), ".apnescan_memory.db"))
 _OLD_CONFIG = os.path.join(os.path.expanduser("~"), ".noble_doc_scanner.json")
 if not os.path.exists(CONFIG_PATH) and os.path.exists(_OLD_CONFIG):
     try:
@@ -381,6 +388,13 @@ SHORTCUTS = [
 
 DEFAULT_OPTIONS = {
     "auto_save": False,
+    # --- AI Document Memory (offline learning) ---
+    "ai_memory": True,          # master switch — remember & recognise documents
+    "ai_threshold": 90,         # confidence % to auto-suggest the latest name/folder
+    "ai_auto_rename": True,     # pre-fill the recognised (latest) filename
+    "ai_auto_save": False,      # save silently (no dialog) when confidence is high
+    "ai_folder_suggest": True,  # also suggest the previously-used folder
+    "ai_learning": True,        # silently learn new names the user chooses
     "save_folder": os.path.join(os.path.expanduser("~"), "Documents", "NobleScans"),
     "filename_template": "{claim}_{date}_{seq}",
     "make_claim_folder": False,
@@ -5889,6 +5903,629 @@ class PhoneServer(QtCore.QObject):
         self._httpd = None
 
 
+# ============================================================================
+#  AI DOCUMENT MEMORY (offline)  —  SQLite-backed learning system
+#  Upgrade of the older JSON name-memory. 100% on-device: no cloud, no
+#  internet, no external AI. Remembers every scanned document (OCR text,
+#  image fingerprints, barcode/QR, keywords, folder, full name history) and
+#  matches new scans to auto-suggest the LATEST filename + folder. Scales to
+#  1M+ documents; a match normally completes in a few milliseconds.
+# ============================================================================
+
+_DM_STOP = set((
+    "the a an of to in on for and or is are was at by be with from as it this that "
+    "ka ki ke ko hai ho na ne me se aur ya ek do par bhi "
+).split())
+_DM_WORD = re.compile(r"[A-Za-z0-9ऀ-ॿ]+")
+_DM_DCT_CACHE = {}
+
+
+def _dm_norm(t):
+    """Lowercase, keep alnum + Devanagari, collapse to single spaces."""
+    if not t:
+        return ""
+    return " ".join(_DM_WORD.findall(t.lower()))
+
+
+def _dm_tokens(t):
+    return [w for w in _dm_norm(t).split() if len(w) >= 2]
+
+
+def _dm_keywords(t, k=18):
+    """Top keywords by frequency (stopwords removed, len >= 3)."""
+    freq = {}
+    for w in _dm_tokens(t):
+        if len(w) < 3 or w in _DM_STOP:
+            continue
+        freq[w] = freq.get(w, 0) + 1
+    top = sorted(freq.items(), key=lambda x: (-x[1], x[0]))[:k]
+    return [w for w, _ in top]
+
+
+def _dm_text_hash(t):
+    n = _dm_norm(t)
+    return hashlib.sha1(n.encode("utf-8")).hexdigest()[:16] if n else ""
+
+
+def _dm_jaccard(a, b):
+    if not a or not b:
+        return 0.0
+    sa, sb = set(a), set(b)
+    u = sa | sb
+    return (len(sa & sb) / float(len(u))) if u else 0.0
+
+
+def _dm_text_sim(a, b):
+    """0..100 similarity of two OCR texts (token Jaccard + bigram shingles).
+    Robust to OCR noise / word reordering. Inputs capped to ~500 tokens."""
+    ta, tb = _dm_tokens(a)[:500], _dm_tokens(b)[:500]
+    if not ta or not tb:
+        return 0.0
+    jac = _dm_jaccard(ta, tb)
+    ba, bb = set(zip(ta, ta[1:])), set(zip(tb, tb[1:]))
+    shin = _dm_jaccard(ba, bb) if (ba and bb) else jac
+    return round(100.0 * (0.6 * jac + 0.4 * shin), 1)
+
+
+def _dm_gray(img, size):
+    rs = getattr(Image, "LANCZOS", getattr(Image, "BILINEAR", 2))
+    return np.asarray(img.convert("L").resize((size, size), rs), dtype=np.float64)
+
+
+def _dm_bits_to_hex(bits):
+    v = 0
+    for b in bits:
+        v = (v << 1) | (1 if b else 0)
+    return "%016x" % v
+
+
+def _dm_ahash(img):
+    """Average hash (64-bit / 16 hex)."""
+    if not HAS_NUMPY:
+        return ""
+    try:
+        a = _dm_gray(img, 8)
+        return _dm_bits_to_hex((a > a.mean()).flatten())
+    except Exception:
+        return ""
+
+
+def _dm_dhash(img):
+    """Difference hash (horizontal gradient, 64-bit)."""
+    if not HAS_NUMPY:
+        return ""
+    try:
+        rs = getattr(Image, "LANCZOS", getattr(Image, "BILINEAR", 2))
+        a = np.asarray(img.convert("L").resize((9, 8), rs), dtype=np.int32)
+        return _dm_bits_to_hex((a[:, 1:] > a[:, :-1]).flatten())
+    except Exception:
+        return ""
+
+
+def _dm_dct_matrix(N):
+    m = _DM_DCT_CACHE.get(N)
+    if m is not None:
+        return m
+    n = np.arange(N)
+    k = n.reshape(-1, 1)
+    M = np.cos(np.pi * (2 * n + 1) * k / (2.0 * N))
+    M[0, :] *= 1.0 / np.sqrt(2)
+    M *= np.sqrt(2.0 / N)
+    _DM_DCT_CACHE[N] = M
+    return M
+
+
+def _dm_phash(img):
+    """Perceptual hash: 2D-DCT of a 32x32 image, low-freq 8x8 block (64-bit)."""
+    if not HAS_NUMPY:
+        return ""
+    try:
+        a = _dm_gray(img, 32)
+        M = _dm_dct_matrix(32)
+        d = M.dot(a).dot(M.T)
+        low = d[:8, :8].copy()
+        low[0, 0] = 0.0
+        return _dm_bits_to_hex((low > np.median(low)).flatten())
+    except Exception:
+        return ""
+
+
+def _dm_hamming(h1, h2):
+    if not h1 or not h2 or len(h1) != len(h2):
+        return 64
+    try:
+        return bin(int(h1, 16) ^ int(h2, 16)).count("1")
+    except Exception:
+        return 64
+
+
+def _dm_hash_sim(h1, h2):
+    """0..100 similarity for 64-bit hex hashes."""
+    if not h1 or not h2:
+        return 0.0
+    return round(100.0 * (1.0 - _dm_hamming(h1, h2) / 64.0), 1)
+
+
+def _dm_decode_codes(img):
+    """Return (barcode, qrcode) text if present. Best-effort (needs pyzbar).
+    Never raises."""
+    if not HAS_ZBAR:
+        return "", ""
+    bc, qr = "", ""
+    try:
+        for r in _zbar_decode(img):
+            try:
+                data = r.data.decode("utf-8", "ignore")
+            except Exception:
+                data = str(r.data)
+            if not data:
+                continue
+            if getattr(r, "type", "") == "QRCODE":
+                qr = qr or data[:200]
+            else:
+                bc = bc or data[:200]
+    except Exception:
+        pass
+    return bc, qr
+
+
+class DocMemory(object):
+    """Offline learning memory. Thread-safe. See module banner above."""
+
+    def __init__(self, path):
+        self.path = path
+        self._lock = threading.RLock()
+        self._db = None
+        self.fts = False
+        self._open()
+
+    # --- lifecycle ---
+    def _open(self):
+        try:
+            self._db = sqlite3.connect(self.path, check_same_thread=False, timeout=8)
+            self._db.row_factory = sqlite3.Row
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("PRAGMA synchronous=NORMAL")
+            self._db.execute("PRAGMA temp_store=MEMORY")
+            self._init_schema()
+        except Exception:
+            self._db = None
+
+    def ok(self):
+        return self._db is not None
+
+    def close(self):
+        with self._lock:
+            try:
+                if self._db:
+                    self._db.close()
+            except Exception:
+                pass
+            self._db = None
+
+    def _init_schema(self):
+        c = self._db
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS docs(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ocr_text TEXT DEFAULT '', ocr_hash TEXT DEFAULT '',
+          phash TEXT DEFAULT '', dhash TEXT DEFAULT '', ahash TEXT DEFAULT '',
+          doc_type TEXT DEFAULT '', filename TEXT DEFAULT '', folder TEXT DEFAULT '',
+          scan_date INTEGER DEFAULT 0, modified_date INTEGER DEFAULT 0,
+          last_used INTEGER DEFAULT 0, usage_count INTEGER DEFAULT 1,
+          ocr_conf REAL DEFAULT 0, barcode TEXT DEFAULT '', qrcode TEXT DEFAULT '',
+          keywords TEXT DEFAULT '', tags TEXT DEFAULT '',
+          file_size INTEGER DEFAULT 0, page_count INTEGER DEFAULT 0,
+          scanner_model TEXT DEFAULT '', resolution TEXT DEFAULT '', color_mode TEXT DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS ix_docs_phash ON docs(phash);
+        CREATE INDEX IF NOT EXISTS ix_docs_dhash ON docs(dhash);
+        CREATE INDEX IF NOT EXISTS ix_docs_ocrhash ON docs(ocr_hash);
+        CREATE INDEX IF NOT EXISTS ix_docs_barcode ON docs(barcode);
+        CREATE INDEX IF NOT EXISTS ix_docs_qrcode ON docs(qrcode);
+        CREATE INDEX IF NOT EXISTS ix_docs_type ON docs(doc_type);
+        CREATE INDEX IF NOT EXISTS ix_docs_last ON docs(last_used);
+        CREATE TABLE IF NOT EXISTS names(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          doc_id INTEGER, filename TEXT, folder TEXT DEFAULT '',
+          created INTEGER DEFAULT 0, last_used INTEGER DEFAULT 0, usage_count INTEGER DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS ix_names_doc ON names(doc_id);
+        CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+        """)
+        try:
+            c.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS search USING fts5(
+                ocr_text, filename, keywords, barcode, qrcode, folder, tags, doc_type)""")
+            self.fts = True
+        except Exception:
+            self.fts = False
+        c.commit()
+
+    # --- meta ---
+    def _mget(self, k, d=None):
+        try:
+            r = self._db.execute("SELECT v FROM meta WHERE k=?", (k,)).fetchone()
+            return r["v"] if r else d
+        except Exception:
+            return d
+
+    def _mset(self, k, v):
+        try:
+            self._db.execute("INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=?", (k, str(v), str(v)))
+        except Exception:
+            pass
+
+    # --- write path ---
+    def remember(self, f):
+        """Insert or update a document from a features dict. Dedupes by strong
+        indexed signals. Returns (doc_id, is_new). Never raises."""
+        if not self.ok():
+            return (None, False)
+        with self._lock:
+            try:
+                now = int(time.time())
+                same = self._find_same(f)
+                if same:
+                    self._touch_update(same["id"], f, now)
+                    return (same["id"], False)
+                kw = f.get("keywords")
+                if isinstance(kw, (list, tuple)):
+                    kw = " ".join(str(x) for x in kw)
+                if not kw:
+                    kw = " ".join(_dm_keywords(f.get("ocr_text", "")))
+                cur = self._db.execute(
+                    """INSERT INTO docs(ocr_text,ocr_hash,phash,dhash,ahash,doc_type,filename,folder,
+                       scan_date,modified_date,last_used,usage_count,ocr_conf,barcode,qrcode,keywords,tags,
+                       file_size,page_count,scanner_model,resolution,color_mode)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (f.get("ocr_text", "")[:20000], f.get("ocr_hash", "") or _dm_text_hash(f.get("ocr_text", "")),
+                     f.get("phash", ""), f.get("dhash", ""), f.get("ahash", ""), f.get("doc_type", ""),
+                     f.get("filename", ""), f.get("folder", ""), now, now, now, 1,
+                     float(f.get("ocr_conf", 0) or 0), f.get("barcode", ""), f.get("qrcode", ""),
+                     kw, f.get("tags", ""), int(f.get("file_size", 0) or 0), int(f.get("page_count", 0) or 0),
+                     f.get("scanner_model", ""), f.get("resolution", ""), f.get("color_mode", "")))
+                did = cur.lastrowid
+                if f.get("filename"):
+                    self._db.execute("INSERT INTO names(doc_id,filename,folder,created,last_used,usage_count) VALUES(?,?,?,?,?,1)",
+                                     (did, f.get("filename"), f.get("folder", ""), now, now))
+                self._reindex_row(did)
+                self._db.commit()
+                return (did, True)
+            except Exception:
+                return (None, False)
+
+    def _find_same(self, f):
+        """Same-document dedup using only INDEXED exact signals (O(log N))."""
+        db = self._db
+        oh = f.get("ocr_hash", "") or _dm_text_hash(f.get("ocr_text", ""))
+        for col, val in (("barcode", f.get("barcode", "")), ("qrcode", f.get("qrcode", "")),
+                         ("ocr_hash", oh), ("phash", f.get("phash", ""))):
+            if val:
+                r = db.execute("SELECT * FROM docs WHERE %s=? LIMIT 1" % col, (val,)).fetchone()
+                if r:
+                    return r
+        return None
+
+    def _touch_update(self, did, f, now):
+        self._db.execute("UPDATE docs SET last_used=?, usage_count=usage_count+1 WHERE id=?", (now, did))
+        for col in ("phash", "dhash", "ahash", "barcode", "qrcode"):
+            val = f.get(col, "")
+            if val:
+                self._db.execute("UPDATE docs SET %s=? WHERE id=? AND (%s='' OR %s IS NULL)" % (col, col, col), (val, did))
+        self._reindex_row(did)
+        self._db.commit()
+
+    # --- learning (silent rename) ---
+    def learn_rename(self, doc_id, new_name, folder=None):
+        """User changed the name -> learn it as the LATEST. Never deletes history."""
+        if not self.ok() or not doc_id or not new_name:
+            return
+        with self._lock:
+            try:
+                now = int(time.time())
+                row = self._db.execute("SELECT id FROM names WHERE doc_id=? AND filename=? ORDER BY id DESC LIMIT 1",
+                                       (doc_id, new_name)).fetchone()
+                if row:
+                    self._db.execute("UPDATE names SET last_used=?, usage_count=usage_count+1 WHERE id=?", (now, row["id"]))
+                else:
+                    self._db.execute("INSERT INTO names(doc_id,filename,folder,created,last_used,usage_count) VALUES(?,?,?,?,?,1)",
+                                     (doc_id, new_name, folder or "", now, now))
+                if folder:
+                    self._db.execute("UPDATE docs SET filename=?, folder=?, modified_date=?, last_used=? WHERE id=?",
+                                     (new_name, folder, now, now, doc_id))
+                else:
+                    self._db.execute("UPDATE docs SET filename=?, modified_date=?, last_used=? WHERE id=?",
+                                     (new_name, now, now, doc_id))
+                self._reindex_row(doc_id)
+                self._db.commit()
+            except Exception:
+                pass
+
+    # --- matching ---
+    def match(self, f, limit=6):
+        """Return {'best':row,'confidence':0..100,'similar':[...]}. Combines
+        OCR/image/keyword/barcode/QR/layout signals into one score."""
+        out = {"best": None, "confidence": 0, "similar": []}
+        if not self.ok():
+            return out
+        with self._lock:
+            try:
+                scored = []
+                for r in self._candidates(f):
+                    sc, parts = self._score(f, r)
+                    if sc > 0:
+                        scored.append((sc, r, parts))
+                scored.sort(key=lambda x: -x[0])
+                if scored:
+                    out["best"] = scored[0][1]
+                    out["confidence"] = scored[0][0]
+                    out["similar"] = [{"id": r["id"], "name": self.latest_name(r["id"]) or r["filename"],
+                                       "folder": r["folder"], "confidence": sc, "parts": parts,
+                                       "doc_type": r["doc_type"], "last_used": r["last_used"]}
+                                      for sc, r, parts in scored[:limit]]
+                return out
+            except Exception:
+                return out
+
+    def _candidates(self, f, cap=250):
+        db = self._db
+        seen, cands = set(), []
+
+        def _add(rows):
+            for r in rows:
+                if r["id"] not in seen:
+                    seen.add(r["id"])
+                    cands.append(r)
+
+        if f.get("barcode"):
+            _add(db.execute("SELECT * FROM docs WHERE barcode=?", (f.get("barcode"),)).fetchall())
+        if f.get("qrcode"):
+            _add(db.execute("SELECT * FROM docs WHERE qrcode=?", (f.get("qrcode"),)).fetchall())
+        kw = f.get("keywords") or _dm_keywords(f.get("ocr_text", ""))
+        if isinstance(kw, str):
+            kw = kw.split()
+        if self.fts and kw:
+            q = " OR ".join(re.sub(r'[^A-Za-z0-9ऀ-ॿ]', '', w) for w in kw[:10] if len(w) >= 3)
+            if q.strip(" OR"):
+                try:
+                    _add(db.execute("SELECT d.* FROM search s JOIN docs d ON d.id=s.rowid WHERE search MATCH ? LIMIT ?",
+                                    (q, cap)).fetchall())
+                except Exception:
+                    pass
+        if len(cands) < cap and f.get("doc_type"):
+            _add(db.execute("SELECT * FROM docs WHERE doc_type=? ORDER BY last_used DESC LIMIT ?",
+                            (f.get("doc_type"), cap - len(cands))).fetchall())
+        if len(cands) < 60:
+            _add(db.execute("SELECT * FROM docs ORDER BY last_used DESC LIMIT 60").fetchall())
+        return cands[:cap]
+
+    def _score(self, f, r):
+        """Content signals -> weighted average; unique codes -> identity lift.
+        Exact barcode/QR match is near-proof (spec: 92 ocr + 95 img + 100 bc -> 97)."""
+        parts, wsum, acc = {}, 0.0, 0.0
+
+        def add(name, val, w):
+            nonlocal wsum, acc
+            parts[name] = round(val, 1)
+            acc += val * w
+            wsum += w
+
+        ph = _dm_hash_sim(f.get("phash", ""), r["phash"]) if (f.get("phash") and r["phash"]) else None
+        dh = _dm_hash_sim(f.get("dhash", ""), r["dhash"]) if (f.get("dhash") and r["dhash"]) else None
+        if ph is not None or dh is not None:
+            add("image", max([x for x in (ph, dh) if x is not None]), 3.0)
+        if f.get("ahash") and r["ahash"]:
+            add("layout", _dm_hash_sim(f.get("ahash", ""), r["ahash"]), 1.0)
+        if f.get("ocr_text") and r["ocr_text"]:
+            add("ocr", _dm_text_sim(f.get("ocr_text", ""), r["ocr_text"]), 3.0)
+        kwf = f.get("keywords") or _dm_keywords(f.get("ocr_text", ""))
+        if isinstance(kwf, str):
+            kwf = kwf.split()
+        kwr = (r["keywords"] or "").split()
+        if kwf and kwr:
+            add("keyword", 100.0 * _dm_jaccard(kwf, kwr), 1.0)
+        content = (acc / wsum) if wsum > 0 else 0.0
+
+        code_match = code_mismatch = False
+        if f.get("barcode") and r["barcode"]:
+            eq = (f.get("barcode") == r["barcode"])
+            parts["barcode"] = 100.0 if eq else 0.0
+            code_match = code_match or eq
+            code_mismatch = code_mismatch or (not eq)
+        if f.get("qrcode") and r["qrcode"]:
+            eq = (f.get("qrcode") == r["qrcode"])
+            parts["qr"] = 100.0 if eq else 0.0
+            code_match = code_match or eq
+            code_mismatch = code_mismatch or (not eq)
+
+        if wsum <= 0 and not code_match:
+            return (0, parts)
+        if code_match:
+            final = 0.65 * 100.0 + 0.35 * content
+        elif code_mismatch:
+            final = content * 0.4
+        else:
+            final = content
+        return (int(round(min(100.0, final))), parts)
+
+    # --- name history / timeline ---
+    def latest_name(self, doc_id):
+        r = self._db.execute("SELECT filename FROM names WHERE doc_id=? ORDER BY last_used DESC, id DESC LIMIT 1",
+                             (doc_id,)).fetchone()
+        return r["filename"] if r else None
+
+    def names(self, doc_id):
+        return [dict(r) for r in self._db.execute(
+            "SELECT filename,folder,created,last_used,usage_count FROM names WHERE doc_id=? ORDER BY last_used DESC, id DESC",
+            (doc_id,)).fetchall()]
+
+    def latest_folder(self, doc_id):
+        r = self._db.execute("SELECT folder FROM docs WHERE id=?", (doc_id,)).fetchone()
+        return r["folder"] if r else None
+
+    def doc(self, doc_id):
+        r = self._db.execute("SELECT * FROM docs WHERE id=?", (doc_id,)).fetchone()
+        return dict(r) if r else None
+
+    # --- search ---
+    def _reindex_row(self, did):
+        if not self.fts:
+            return
+        try:
+            self._db.execute("DELETE FROM search WHERE rowid=?", (did,))
+            r = self._db.execute("SELECT ocr_text,filename,keywords,barcode,qrcode,folder,tags,doc_type FROM docs WHERE id=?", (did,)).fetchone()
+            if r:
+                self._db.execute("INSERT INTO search(rowid,ocr_text,filename,keywords,barcode,qrcode,folder,tags,doc_type) "
+                                 "VALUES(?,?,?,?,?,?,?,?,?)", (did, r["ocr_text"], r["filename"], r["keywords"],
+                                 r["barcode"], r["qrcode"], r["folder"], r["tags"], r["doc_type"]))
+        except Exception:
+            pass
+
+    def search(self, query, limit=60):
+        if not self.ok() or not query:
+            return []
+        with self._lock:
+            try:
+                if self.fts:
+                    q = " ".join(re.sub(r'[^A-Za-z0-9ऀ-ॿ]', '', w) + "*" for w in query.split() if w.strip())
+                    if not q.strip("* "):
+                        return []
+                    rows = self._db.execute("SELECT d.* FROM search s JOIN docs d ON d.id=s.rowid WHERE search MATCH ? "
+                                            "ORDER BY d.last_used DESC LIMIT ?", (q, limit)).fetchall()
+                    return [dict(r) for r in rows]
+                like = "%" + query + "%"
+                rows = self._db.execute("SELECT * FROM docs WHERE ocr_text LIKE ? OR filename LIKE ? OR keywords LIKE ? "
+                                        "OR barcode LIKE ? OR qrcode LIKE ? OR folder LIKE ? OR tags LIKE ? "
+                                        "ORDER BY last_used DESC LIMIT ?",
+                                        (like, like, like, like, like, like, like, limit)).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    # --- maintenance ---
+    def stats(self):
+        try:
+            n = self._db.execute("SELECT COUNT(*) c FROM docs").fetchone()["c"]
+            nm = self._db.execute("SELECT COUNT(*) c FROM names").fetchone()["c"]
+            sz = os.path.getsize(self.path) if os.path.exists(self.path) else 0
+            return {"docs": n, "names": nm, "bytes": sz, "fts": self.fts}
+        except Exception:
+            return {"docs": 0, "names": 0, "bytes": 0, "fts": self.fts}
+
+    def integrity_ok(self):
+        try:
+            r = self._db.execute("PRAGMA integrity_check").fetchone()
+            return bool(r) and (r[0] == "ok")
+        except Exception:
+            return False
+
+    def optimize(self):
+        if not self.ok():
+            return False
+        with self._lock:
+            try:
+                if self.fts:
+                    try:
+                        self._db.execute("INSERT INTO search(search) VALUES('optimize')")
+                    except Exception:
+                        pass
+                self._db.execute("ANALYZE")
+                self._db.commit()
+                self._db.execute("VACUUM")
+                self._mset("last_optimize", int(time.time()))
+                self._db.commit()
+                return True
+            except Exception:
+                return False
+
+    def maybe_optimize(self, every_days=7):
+        """Run weekly optimize in a daemon thread (non-blocking)."""
+        try:
+            last = int(self._mget("last_optimize", "0") or "0")
+        except Exception:
+            last = 0
+        if int(time.time()) - last < every_days * 86400:
+            return
+        try:
+            threading.Thread(target=self.optimize, daemon=True).start()
+        except Exception:
+            pass
+
+    def rebuild_index(self):
+        if not self.ok() or not self.fts:
+            return False
+        with self._lock:
+            try:
+                self._db.execute("DELETE FROM search")
+                for r in self._db.execute("SELECT id FROM docs").fetchall():
+                    self._reindex_row(r["id"])
+                self._db.commit()
+                return True
+            except Exception:
+                return False
+
+    def repair(self):
+        if self.integrity_ok():
+            return True
+        try:
+            self.rebuild_index()
+            return self.integrity_ok()
+        except Exception:
+            return False
+
+    def clear(self):
+        with self._lock:
+            try:
+                self._db.executescript("DELETE FROM docs; DELETE FROM names;")
+                if self.fts:
+                    self._db.execute("DELETE FROM search")
+                self._db.commit()
+                self._db.execute("VACUUM")
+                self._db.commit()
+                return True
+            except Exception:
+                return False
+
+    def export(self, path):
+        if not self.ok():
+            return False
+        with self._lock:
+            try:
+                self._db.commit()
+                dst = sqlite3.connect(path)
+                self._db.backup(dst)
+                dst.close()
+                return True
+            except Exception:
+                return False
+
+    def import_from(self, path):
+        if not self.ok() or not os.path.exists(path):
+            return 0
+        added = 0
+        with self._lock:
+            try:
+                src = sqlite3.connect(path)
+                src.row_factory = sqlite3.Row
+                for r in src.execute("SELECT * FROM docs").fetchall():
+                    f = {kk: r[kk] for kk in r.keys()}
+                    f["keywords"] = (r["keywords"] or "").split()
+                    did, is_new = self.remember(f)
+                    if is_new and did:
+                        added += 1
+                        try:
+                            for nm in src.execute("SELECT * FROM names WHERE doc_id=?", (r["id"],)).fetchall():
+                                self._db.execute("INSERT INTO names(doc_id,filename,folder,created,last_used,usage_count) VALUES(?,?,?,?,?,?)",
+                                                 (did, nm["filename"], nm["folder"], nm["created"], nm["last_used"], nm["usage_count"]))
+                        except Exception:
+                            pass
+                self._db.commit()
+                src.close()
+            except Exception:
+                pass
+        return added
+
+
 class ScannerWindow(QtWidgets.QMainWindow):
     THUMB_W = 150
     THUMB_H = 200
@@ -5910,6 +6547,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._used_claims = set(self._config.get("used_claims", []))
         self._barcode_tried = False
         self._dirty = False
+        # AI Document Memory (offline learning) — remembers & recognises docs
+        try:
+            self._ai_memory_init()
+        except Exception:
+            self._memory = None
         self._undo_stack = []
         # Startup guard: app khulte hi (jaise app ko Enter dabakar launch karne par
         # wahi Enter naye window me 'Enter = Scan' chala deta tha) galti se scan na
@@ -6101,6 +6743,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "Create desktop shortcut…", self.create_shortcut, "हिन्दी: Desktop पर एक-क्लिक स्कैन का shortcut बनाओ।\nEnglish: Make a one-click desktop scan shortcut.")
         self._ma(mt, "Auto-name pages (document name)", self.auto_name_pages, "हिन्दी: हर पेज को पढ़कर उसका नाम (जैसे DISCHARGE SUMMARY, RECEIPT) थंबनेल के नीचे लिखे। 'Page 1,2' के बजाय असली नाम।\nEnglish: Read each page and label it with its document title instead of 'Page 1,2'.")
         self._ma(mt, "Learned names (manage)…", self.manage_learned_names, "हिन्दी: आपने F2 से जो नाम सिखाए हैं उन्हें देखो/बदलो/हटाओ। एक बार नाम सिखाने पर अगली बार वही document अपने-आप उसी नाम से आता है।\nEnglish: View/edit/remove the names you taught with F2. Once taught, the same document auto-names itself next time.")
+        self._ma(mt, "🧠 Search document memory…", self.ai_search_dialog, "हिन्दी: अब तक याद किए सारे documents में तुरंत ढूँढो — नाम, अंदर का text, barcode, folder किसी से भी। (सब आपके PC पर, offline।)\nEnglish: Instantly search every remembered document — by name, inner text, barcode or folder. (All on your PC, offline.)")
+        self._ma(mt, "🧠 This document's history…", self.ai_document_properties, "हिन्दी: इस document के सारे पुराने नाम (timeline) और जानकारी देखो — कब-कब क्या नाम रखा गया।\nEnglish: See this document's previous names (timeline) and details.")
 
         ms = mb.addMenu(tr("menu_settings", self._lang)); ms.setToolTipsVisible(True)
         self._ma(ms, tr("options", self._lang), self.open_options, "हिन्दी: ऐप की सारी settings (auto-save, blank हटाओ, backup, वग़ैरह)।\nEnglish: All app settings.")
@@ -6113,6 +6757,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, "📊 Stats server URL…", self.set_stats_url, "हिन्दी: worldwide-ginti का server URL (जैसे आपका PHP: https://apnesoftware.com/stats.php)। खाली छोड़ने पर default।\nEnglish: The worldwide-stats server URL (e.g. your PHP: https://apnesoftware.com/stats.php). Empty = default.")
         self._ma(ms, "👤 Analytics me naam…", self.set_user_name, "हिन्दी: Analytics में आपका नाम/clinic — ताकि किसने कितने scan किए, नाम के साथ दिखे।\nEnglish: Your name/clinic for analytics — so scans show per name.")
         self._ma(ms, "🔤 OCR bhashaayein…", self.choose_ocr_langs, "हिन्दी: OCR किन भाषाओं में पढ़े चुनो (Hindi, English, Gujarati, Marathi, Tamil आदि)। ज़्यादा भाषा = थोड़ा धीमा।\nEnglish: Choose which languages OCR should read (Hindi, English, Gujarati, Marathi, Tamil, …). More languages = a bit slower.")
+        self._ma(ms, "🧠 Document Memory / Auto-naam…", self.ai_memory_settings, "हिन्दी: document याद रखने + auto-नाम/folder सुझाव की settings — threshold, auto-save, learning, export/import, optimize। सब offline, आपके PC पर।\nEnglish: Document-memory & auto-name/folder settings — threshold, auto-save, learning, export/import, optimise. All offline, on your PC.")
         self._ma(ms, "💬 Feedback / rating bhejo…", self.send_feedback, "हिन्दी: App को rating दो और अपनी राय भेजो — सीधे developer तक पहुँचेगी।\nEnglish: Rate the app and send feedback — reaches the developer directly.")
         self._ma(ms, "Keyboard Shortcuts…", self.show_shortcuts, "हिन्दी: कीबोर्ड के shortcuts की सूची देखो।\nEnglish: View keyboard shortcuts.")
         self.act_simple = self._ma(ms, tr("simple_on", self._lang), self.toggle_simple_mode, "हिन्दी: Simple mode: सिर्फ़ ज़रूरी buttons दिखें (नए users के लिए आसान)।\nEnglish: Simple mode: show only the essential buttons.")
@@ -17229,6 +17874,547 @@ if the toggle is ticked).</p>
         h = self._config.get("name_history")
         return h if isinstance(h, list) else []
 
+    # ======================================================================
+    #  AI DOCUMENT MEMORY — instance integration (offline learning)
+    #  Recognises re-scanned documents and auto-suggests the LATEST filename +
+    #  folder, learns silently when the user picks a different name, and offers
+    #  "Similar Documents" for near matches. All local; upgrades the old memory.
+    # ======================================================================
+    def _ai_memory_init(self):
+        self._memory = None
+        self._doc_match = None            # last match result for current pages
+        self._doc_match_id = None         # matched/created doc id
+        self._doc_match_features = None   # cached features (avoid double OCR)
+        if not self._opts.get("ai_memory", True):
+            return
+        try:
+            self._memory = DocMemory(MEMORY_DB)
+            if self._memory.ok():
+                self._memory.maybe_optimize()   # weekly, in a bg thread
+                self._ai_migrate_once()
+            else:
+                self._memory = None
+        except Exception:
+            self._memory = None
+
+    def _ai_enabled(self):
+        return (bool(self._opts.get("ai_memory", True))
+                and getattr(self, "_memory", None) is not None and self._memory.ok())
+
+    def _ai_threshold(self):
+        try:
+            return max(50, min(99, int(self._opts.get("ai_threshold", 90))))
+        except Exception:
+            return 90
+
+    def _ai_migrate_once(self):
+        """One-time import of the old JSON memory (learned_names / doc_names)
+        into the SQLite DB so no earlier learning is lost."""
+        if self._opts.get("_ai_migrated"):
+            return
+        try:
+            for e in (self._config.get("learned_names") or []):
+                if not isinstance(e, dict):
+                    continue
+                nm = (e.get("name") or "").strip()
+                if not nm:
+                    continue
+                words = e.get("words") or []
+                text = " ".join(words) if isinstance(words, (list, tuple)) else str(words)
+                self._memory.remember(dict(ocr_text=text, filename=nm,
+                                           folder=(e.get("folder") or ""),
+                                           keywords=_dm_keywords(text)))
+            dn = self._config.get("doc_names") or {}
+            if isinstance(dn, dict):
+                for key, nm in dn.items():
+                    nm = (str(nm) or "").strip()
+                    if nm:
+                        self._memory.remember(dict(ocr_text=str(key), filename=nm,
+                                                   keywords=_dm_keywords(str(key))))
+            self._opts["_ai_migrated"] = True
+            self._save_opts()
+        except Exception:
+            pass
+
+    def _ai_features(self, paths, filename="", folder="", file_size=0, page_count=0):
+        """Build a local features dict from the scanned pages. First page drives
+        the image fingerprints + barcode/QR + OCR text. Nothing leaves the PC."""
+        f = dict(filename=filename, folder=folder, file_size=int(file_size or 0),
+                 page_count=int(page_count or (len(paths) if paths else 0)),
+                 scanner_model=(self._opts.get("scanner_name", "") or "")[:60],
+                 resolution=str(self._opts.get("dpi", "")),
+                 color_mode=str(self._opts.get("color", "")),
+                 ocr_text="", ocr_hash="", keywords=[], doc_type="",
+                 phash="", dhash="", ahash="", barcode="", qrcode="")
+        try:
+            if not paths:
+                return f
+            first = paths[0]
+            im = Image.open(first)
+            try:
+                im.load()
+            except Exception:
+                pass
+            f["phash"] = _dm_phash(im)
+            f["dhash"] = _dm_dhash(im)
+            f["ahash"] = _dm_ahash(im)
+            bc, qr = _dm_decode_codes(im)
+            f["barcode"], f["qrcode"] = bc, qr
+            txt = ""
+            try:
+                txt = page_ocr_text(first, 0.92) or ""
+            except Exception:
+                txt = ""
+            f["ocr_text"] = txt
+            f["ocr_hash"] = _dm_text_hash(txt)
+            f["keywords"] = _dm_keywords(txt)
+            try:
+                f["doc_type"] = classify_from_text(txt) or ""
+            except Exception:
+                f["doc_type"] = ""
+        except Exception:
+            pass
+        return f
+
+    def _ai_match_current(self, paths):
+        if not self._ai_enabled() or not paths:
+            return None
+        try:
+            f = self._ai_features(paths)
+            self._doc_match_features = f
+            res = self._memory.match(f)
+            self._doc_match = res
+            return res
+        except Exception:
+            return None
+
+    def _ai_prepare_save(self, paths, default):
+        """Before the Save dialog: recognise the document and, per settings,
+        pre-fill the latest name+folder, silently auto-save, or show Similar
+        Documents. Returns {'default':path, 'auto':bool, 'path':path_or_None}."""
+        res = {"default": default, "auto": False, "path": None}
+        self._doc_match_id = None
+        if not self._ai_enabled() or not paths:
+            return res
+        try:
+            # Empty memory (first-time use) -> nothing to match; don't pay the
+            # OCR/fingerprint cost before the dialog. We'll still remember on save.
+            try:
+                if self._memory.stats().get("docs", 0) <= 0:
+                    return res
+            except Exception:
+                pass
+            m = self._ai_match_current(paths)
+            if not m or not m.get("similar"):
+                return res
+            conf = int(m.get("confidence", 0))
+            thr = self._ai_threshold()
+            best = m["similar"][0]
+            name = best.get("name") or ""
+            folder = best.get("folder") or ""
+            if not name:
+                return res
+            if conf >= thr:
+                self._doc_match_id = best.get("id")
+                tgt = self._target_folder()
+                if self._opts.get("ai_folder_suggest", True) and folder:
+                    if os.path.isdir(folder):
+                        tgt = folder
+                    else:
+                        try:
+                            os.makedirs(folder, exist_ok=True)
+                            tgt = folder
+                        except Exception:
+                            pass
+                newdefault = os.path.join(tgt, underscore_name(name) + ".pdf")
+                # only pre-fill the name when auto-rename is on; folder suggestion
+                # (tgt) is independent and already gated by ai_folder_suggest.
+                if self._opts.get("ai_auto_rename", True):
+                    res["default"] = newdefault
+                    if self._opts.get("ai_auto_save", False):
+                        res["auto"] = True
+                        res["path"] = newdefault
+                elif tgt and os.path.isdir(tgt):
+                    res["default"] = os.path.join(tgt, os.path.basename(default))
+                try:
+                    self.status.showMessage(self.L("✅ Yeh document pehchana gaya (%d%%): %s",
+                                                   "✅ Recognised this document (%d%%): %s") % (conf, name), 6000)
+                except Exception:
+                    pass
+            elif conf >= 70:
+                picked = self._ai_similar_dialog(m)
+                if picked and picked.get("name"):
+                    self._doc_match_id = picked.get("id")
+                    folder = picked.get("folder") or ""
+                    tgt = folder if (folder and os.path.isdir(folder)) else self._target_folder()
+                    res["default"] = os.path.join(tgt, underscore_name(picked["name"]) + ".pdf")
+        except Exception:
+            pass
+        return res
+
+    def _ai_remember_saved(self, paths, out, npages):
+        """After a successful save: remember/refresh this document and, if it was
+        already known, silently learn the (possibly new) name + folder."""
+        if not self._ai_enabled() or not paths:
+            return
+        try:
+            base = os.path.splitext(os.path.basename(out))[0]
+            folder = os.path.dirname(out)
+            size = os.path.getsize(out) if os.path.exists(out) else 0
+            f = self._doc_match_features or self._ai_features(paths)
+            f = dict(f)
+            f["filename"] = base
+            f["folder"] = folder
+            f["file_size"] = size
+            f["page_count"] = npages
+            did, is_new = self._memory.remember(f)
+            if did and (not is_new) and self._opts.get("ai_learning", True):
+                self._memory.learn_rename(did, base, folder)   # silent learning
+            self._doc_match_id = did
+        except Exception:
+            pass
+        finally:
+            self._doc_match_features = None
+
+    def _ai_learn_page_rename(self, path, name):
+        """If a recognised document's page is renamed before save, learn it too —
+        but only when we already know the doc (no extra OCR here)."""
+        if not self._ai_enabled() or not name or not self._opts.get("ai_learning", True):
+            return
+        try:
+            did = getattr(self, "_doc_match_id", None)
+            if did:
+                self._memory.learn_rename(did, name, None)
+        except Exception:
+            pass
+
+    # ---- Similar Documents picker (70–89% confidence) --------------------
+    def _ai_similar_dialog(self, match):
+        try:
+            sims = match.get("similar") or []
+            if not sims:
+                return None
+            dlg = QtWidgets.QDialog(self)
+            dlg.setWindowTitle(self.L("Milte-julte documents", "Similar documents"))
+            dlg.resize(460, 360)
+            v = QtWidgets.QVBoxLayout(dlg)
+            v.addWidget(QtWidgets.QLabel(self.L(
+                "Yeh scan kisi purane document se milta hai. Naam chuniye (ya Naya rakhiye):",
+                "This scan looks like an earlier document. Pick a name (or keep New):")))
+            lst = QtWidgets.QListWidget()
+            for s in sims:
+                conf = int(s.get("confidence", 0))
+                nm = s.get("name") or "—"
+                dt = (s.get("doc_type") or "").replace("_", " ")
+                it = QtWidgets.QListWidgetItem("%s   —   %d%%%s" % (nm, conf, ("   ·  " + dt) if dt else ""))
+                it.setData(QtCore.Qt.UserRole, s)
+                lst.addItem(it)
+            lst.setCurrentRow(0)
+            v.addWidget(lst, 1)
+            picked = {"v": None}
+
+            def choose():
+                it = lst.currentItem()
+                if it:
+                    picked["v"] = it.data(QtCore.Qt.UserRole)
+                dlg.accept()
+            lst.itemDoubleClicked.connect(lambda *_: choose())
+            row = QtWidgets.QHBoxLayout()
+            bnew = QtWidgets.QPushButton(self.L("Naya rakho", "Keep New"))
+            bnew.clicked.connect(dlg.reject)
+            buse = QtWidgets.QPushButton(self.L("Yeh naam use karo", "Use this name"))
+            buse.setDefault(True)
+            buse.clicked.connect(choose)
+            row.addWidget(bnew)
+            row.addStretch(1)
+            row.addWidget(buse)
+            v.addLayout(row)
+            if dlg.exec_() == QtWidgets.QDialog.Accepted:
+                return picked["v"]
+        except Exception:
+            pass
+        return None
+
+    # ---- Document properties: previous names + timeline ------------------
+    def ai_document_properties(self, doc_id=None):
+        if not self._ai_enabled():
+            self._warn(self.L("Document Memory band hai (Settings me chalu karein).",
+                              "Document Memory is off (enable it in Settings)."))
+            return
+        try:
+            if doc_id is None:
+                doc_id = getattr(self, "_doc_match_id", None)
+            if not doc_id:
+                paths = self._ordered_paths()
+                m = self._ai_match_current(paths) if paths else None
+                if m and m.get("similar"):
+                    doc_id = m["similar"][0].get("id")
+            if not doc_id:
+                self._warn(self.L("Is document ka koi record nahi mila.",
+                                  "No memory record found for this document."))
+                return
+            d = self._memory.doc(doc_id) or {}
+            names = self._memory.names(doc_id)
+            dlg = QtWidgets.QDialog(self)
+            dlg.setWindowTitle(self.L("Document ki jaankari", "Document properties"))
+            dlg.resize(520, 460)
+            v = QtWidgets.QVBoxLayout(dlg)
+            cur = self._memory.latest_name(doc_id) or d.get("filename") or "—"
+            head = QtWidgets.QLabel("<b>%s</b>" % underscore_name(cur).replace("_", " "))
+            head.setStyleSheet("font-size:15px")
+            v.addWidget(head)
+            meta = []
+            if d.get("doc_type"):
+                meta.append(self.L("Type: ", "Type: ") + str(d["doc_type"]).replace("_", " "))
+            if d.get("folder"):
+                meta.append(self.L("Folder: ", "Folder: ") + d["folder"])
+            if d.get("usage_count"):
+                meta.append(self.L("Kitni baar: ", "Used: ") + str(d["usage_count"]))
+            if d.get("page_count"):
+                meta.append(self.L("Pages: ", "Pages: ") + str(d["page_count"]))
+            if d.get("barcode"):
+                meta.append("Barcode: " + d["barcode"])
+            if d.get("qrcode"):
+                meta.append("QR: " + d["qrcode"])
+            if meta:
+                ml = QtWidgets.QLabel("  ·  ".join(meta))
+                ml.setWordWrap(True)
+                ml.setStyleSheet("color:#64748b")
+                v.addWidget(ml)
+            v.addWidget(QtWidgets.QLabel("<b>%s</b>" % self.L("Purane naam (timeline)", "Previous names (timeline)")))
+            tl = QtWidgets.QListWidget()
+            for i, n in enumerate(names):
+                when = ""
+                try:
+                    when = datetime.datetime.fromtimestamp(int(n.get("last_used") or n.get("created") or 0)).strftime("%d-%b-%Y")
+                except Exception:
+                    pass
+                tag = self.L("  (abhi)", "  (latest)") if i == 0 else ""
+                tl.addItem("%s   —   %s%s" % (n.get("filename") or "—", when, tag))
+            v.addWidget(tl, 1)
+            b = QtWidgets.QPushButton(self.L("Band karo", "Close"))
+            b.clicked.connect(dlg.accept)
+            v.addWidget(b)
+            dlg.exec_()
+        except Exception as e:
+            self._warn("%s" % e)
+
+    # ---- Instant search over the whole memory ----------------------------
+    def ai_search_dialog(self):
+        if not self._ai_enabled():
+            self._warn(self.L("Document Memory band hai (Settings me chalu karein).",
+                              "Document Memory is off (enable it in Settings)."))
+            return
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("Documents dhoondo", "Search documents"))
+        dlg.resize(620, 480)
+        v = QtWidgets.QVBoxLayout(dlg)
+        box = QtWidgets.QLineEdit()
+        box.setPlaceholderText(self.L("Naam / text / barcode / folder se dhoondo…",
+                                      "Search by name / text / barcode / folder…"))
+        v.addWidget(box)
+        info = QtWidgets.QLabel("")
+        info.setStyleSheet("color:#64748b;font-size:11px")
+        v.addWidget(info)
+        lst = QtWidgets.QListWidget()
+        v.addWidget(lst, 1)
+
+        def run():
+            q = box.text().strip()
+            lst.clear()
+            if not q:
+                info.setText("")
+                return
+            rows = self._memory.search(q, 80)
+            info.setText(self.L("%d document mile", "%d documents found") % len(rows))
+            for r in rows:
+                nm = self._memory.latest_name(r["id"]) or r.get("filename") or "—"
+                dt = (r.get("doc_type") or "").replace("_", " ")
+                fld = r.get("folder") or ""
+                it = QtWidgets.QListWidgetItem("%s%s\n%s" % (nm, ("   ·  " + dt) if dt else "", fld))
+                it.setData(QtCore.Qt.UserRole, r["id"])
+                lst.addItem(it)
+        box.textChanged.connect(run)
+        lst.itemDoubleClicked.connect(lambda it: self.ai_document_properties(it.data(QtCore.Qt.UserRole)))
+        row = QtWidgets.QHBoxLayout()
+        bopen = QtWidgets.QPushButton(self.L("Folder kholo", "Open folder"))
+
+        def open_folder():
+            it = lst.currentItem()
+            if not it:
+                return
+            d = self._memory.doc(it.data(QtCore.Qt.UserRole)) or {}
+            fld = d.get("folder") or ""
+            if fld and os.path.isdir(fld):
+                try:
+                    os.startfile(fld)   # Windows
+                except Exception:
+                    try:
+                        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(fld))
+                    except Exception:
+                        pass
+            else:
+                self._warn(self.L("Folder nahi mila.", "Folder not found."))
+        bopen.clicked.connect(open_folder)
+        bprop = QtWidgets.QPushButton(self.L("Jaankari", "Properties"))
+        bprop.clicked.connect(lambda: (lst.currentItem() and self.ai_document_properties(lst.currentItem().data(QtCore.Qt.UserRole))))
+        bclose = QtWidgets.QPushButton(self.L("Band", "Close"))
+        bclose.clicked.connect(dlg.accept)
+        row.addWidget(bopen)
+        row.addWidget(bprop)
+        row.addStretch(1)
+        row.addWidget(bclose)
+        v.addLayout(row)
+        box.setFocus()
+        dlg.exec_()
+
+    # ---- Settings dialog -------------------------------------------------
+    def ai_memory_settings(self):
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("Document Memory / Auto-naam settings",
+                                  "Document Memory / Auto-naming settings"))
+        dlg.resize(560, 560)
+        v = QtWidgets.QVBoxLayout(dlg)
+        intro = QtWidgets.QLabel(self.L(
+            "ApneScan aapke documents ko yaad rakhta hai aur dobara scan karne par "
+            "wahi naam + folder khud sujhata hai. Sab kuch aapke PC par — koi internet/cloud nahi.",
+            "ApneScan remembers your documents and, on a re-scan, suggests the same "
+            "name + folder automatically. Everything stays on your PC — no internet/cloud."))
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color:#334155")
+        v.addWidget(intro)
+
+        chk_on = QtWidgets.QCheckBox(self.L("Document Memory chalu rakho",
+                                            "Keep Document Memory on"))
+        chk_on.setChecked(bool(self._opts.get("ai_memory", True)))
+        v.addWidget(chk_on)
+
+        chk_rn = QtWidgets.QCheckBox(self.L("Pehchane document ka naam khud bhar do",
+                                            "Auto-fill the recognised document's name"))
+        chk_rn.setChecked(bool(self._opts.get("ai_auto_rename", True)))
+        v.addWidget(chk_rn)
+
+        chk_fd = QtWidgets.QCheckBox(self.L("Purana folder bhi sujhao",
+                                            "Also suggest the previously-used folder"))
+        chk_fd.setChecked(bool(self._opts.get("ai_folder_suggest", True)))
+        v.addWidget(chk_fd)
+
+        chk_ln = QtWidgets.QCheckBox(self.L("Naya naam apne aap seekho (chup-chaap)",
+                                            "Silently learn new names you choose"))
+        chk_ln.setChecked(bool(self._opts.get("ai_learning", True)))
+        v.addWidget(chk_ln)
+
+        chk_as = QtWidgets.QCheckBox(self.L("Auto-Save: confidence zyada ho to bina poochhe save karo",
+                                            "Auto-Save: save without asking when confidence is high"))
+        chk_as.setChecked(bool(self._opts.get("ai_auto_save", False)))
+        v.addWidget(chk_as)
+
+        hr = QtWidgets.QHBoxLayout()
+        hr.addWidget(QtWidgets.QLabel(self.L("Match bharosa (threshold): ", "Match confidence (threshold): ")))
+        sld = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        sld.setMinimum(70)
+        sld.setMaximum(99)
+        sld.setValue(self._ai_threshold())
+        val = QtWidgets.QLabel("%d%%" % sld.value())
+        sld.valueChanged.connect(lambda x: val.setText("%d%%" % x))
+        hr.addWidget(sld, 1)
+        hr.addWidget(val)
+        v.addLayout(hr)
+        v.addWidget(QtWidgets.QLabel(self.L(
+            "  (Zyada = sirf pakka match par auto-naam;  90% aam taur par sahi rehta hai.)",
+            "  (Higher = only very sure matches auto-name;  90% works well for most.)")))
+
+        # stats + maintenance
+        st = self._memory.stats() if self._ai_enabled() else {"docs": 0, "names": 0, "bytes": 0}
+        stlbl = QtWidgets.QLabel(self.L(
+            "Yaad kiye documents: <b>%d</b>  ·  naam-history: <b>%d</b>  ·  size: <b>%d KB</b>",
+            "Remembered documents: <b>%d</b>  ·  name history: <b>%d</b>  ·  size: <b>%d KB</b>")
+            % (st.get("docs", 0), st.get("names", 0), (st.get("bytes", 0) // 1024)))
+        v.addWidget(stlbl)
+
+        grid = QtWidgets.QGridLayout()
+
+        def refresh_stats():
+            s = self._memory.stats()
+            stlbl.setText(self.L(
+                "Yaad kiye documents: <b>%d</b>  ·  naam-history: <b>%d</b>  ·  size: <b>%d KB</b>",
+                "Remembered documents: <b>%d</b>  ·  name history: <b>%d</b>  ·  size: <b>%d KB</b>")
+                % (s.get("docs", 0), s.get("names", 0), (s.get("bytes", 0) // 1024)))
+
+        def do_optimize():
+            if self._ai_enabled() and self._memory.optimize():
+                refresh_stats()
+                self.status.showMessage(self.L("Memory optimize ho gayi.", "Memory optimised."), 4000)
+
+        def do_rebuild():
+            if self._ai_enabled() and self._memory.rebuild_index():
+                self.status.showMessage(self.L("Search index dobara ban gaya.", "Search index rebuilt."), 4000)
+
+        def do_clear():
+            if not self._ai_enabled():
+                return
+            if QtWidgets.QMessageBox.question(
+                    dlg, self.L("Pakka?", "Sure?"),
+                    self.L("Saari document memory hata dein? (Ye wapas nahi aayegi.)",
+                           "Erase all document memory? (This cannot be undone.)"),
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes:
+                self._memory.clear()
+                refresh_stats()
+
+        def do_export():
+            if not self._ai_enabled():
+                return
+            p, _ = QtWidgets.QFileDialog.getSaveFileName(dlg, self.L("Memory export", "Export memory"),
+                                                         os.path.join(os.path.expanduser("~"), "apnescan_memory_backup.db"),
+                                                         "SQLite DB (*.db)")
+            if p and self._memory.export(p):
+                self.status.showMessage(self.L("Memory export ho gayi.", "Memory exported."), 4000)
+
+        def do_import():
+            if not self._ai_enabled():
+                return
+            p, _ = QtWidgets.QFileDialog.getOpenFileName(dlg, self.L("Memory import", "Import memory"),
+                                                         os.path.expanduser("~"), "SQLite DB (*.db)")
+            if p:
+                n = self._memory.import_from(p)
+                refresh_stats()
+                self.status.showMessage(self.L("%d naye document import huए.", "%d new documents imported.") % n, 5000)
+
+        b_opt = QtWidgets.QPushButton(self.L("Optimize abhi", "Optimize now"))
+        b_opt.clicked.connect(do_optimize)
+        b_reb = QtWidgets.QPushButton(self.L("Search index rebuild", "Rebuild search index"))
+        b_reb.clicked.connect(do_rebuild)
+        b_exp = QtWidgets.QPushButton(self.L("Export…", "Export…"))
+        b_exp.clicked.connect(do_export)
+        b_imp = QtWidgets.QPushButton(self.L("Import…", "Import…"))
+        b_imp.clicked.connect(do_import)
+        b_srch = QtWidgets.QPushButton(self.L("Documents dhoondo…", "Search documents…"))
+        b_srch.clicked.connect(lambda: (dlg.accept(), self.ai_search_dialog()))
+        b_clr = QtWidgets.QPushButton(self.L("Memory clear", "Clear memory"))
+        b_clr.clicked.connect(do_clear)
+        for i, b in enumerate((b_opt, b_reb, b_exp, b_imp, b_srch, b_clr)):
+            grid.addWidget(b, i // 2, i % 2)
+        v.addLayout(grid)
+
+        bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
+        v.addWidget(bb)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            self._opts["ai_memory"] = chk_on.isChecked()
+            self._opts["ai_auto_rename"] = chk_rn.isChecked()
+            self._opts["ai_folder_suggest"] = chk_fd.isChecked()
+            self._opts["ai_learning"] = chk_ln.isChecked()
+            self._opts["ai_auto_save"] = chk_as.isChecked()
+            self._opts["ai_threshold"] = int(sld.value())
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+            if self._opts["ai_memory"] and not self._ai_enabled():
+                self._ai_memory_init()
+
     def _remember_name(self, name):
         name = (name or "").strip()
         if not name:
@@ -17295,6 +18481,7 @@ if the toggle is ticked).</p>
                 it.setText(name)
                 self._store_visual_name(it.data(QtCore.Qt.UserRole), name)   # har page ki shakl yaad
             self._learn_name(sel[0].data(QtCore.Qt.UserRole), name)
+            self._ai_learn_page_rename(sel[0].data(QtCore.Qt.UserRole), name)   # AI memory (silent)
             self.status.showMessage("Renamed %d pages to '%s'" % (len(sel), name), 4000)
             return
         it = self.list.currentItem() or (sel or [None])[0]
@@ -17315,6 +18502,8 @@ if the toggle is ticked).</p>
         self._store_visual_name(it.data(QtCore.Qt.UserRole), name)
         # (b) TEXT se (OCR) — chhapa hua document ho to
         self._learn_name(it.data(QtCore.Qt.UserRole), name)
+        # (c) AI Document Memory — agar yeh document pehchana gaya tha to naya naam seekho
+        self._ai_learn_page_rename(it.data(QtCore.Qt.UserRole), name)
 
     def _learn_name(self, path, name):
         """Rename ka OCR-learning ab BACKGROUND me hota hai — pehle yahi OCR
@@ -17738,6 +18927,18 @@ if the toggle is ticked).</p>
             self._backup_file(out)
         # kabhi-kabhi (bahut halke se) "app share karo" ki yaad (30 din me 1 baar)
         self._maybe_growth_nudge()
+        # AI Document Memory: remember/refresh this document + silent learning.
+        # (single chokepoint for every save path). Runs in the BACKGROUND so the
+        # OCR/fingerprint + DB write never freeze the UI; reuses cached features
+        # from the pre-save match when available, so there is no double OCR.
+        try:
+            _paths = list(getattr(self, "_ai_last_paths", None) or self._ordered_paths())
+            if self._ai_enabled() and _paths:
+                threading.Thread(target=self._ai_remember_saved,
+                                 args=(_paths, out, num_pages), daemon=True).start()
+        except Exception:
+            pass
+        self._ai_last_paths = None
 
     def _append_excel(self, claim, num_pages, out):
         try:
@@ -17870,10 +19071,18 @@ if the toggle is ticked).</p>
             self._warn(tr("scan_first", self._lang)); return
         if not self._validate_claim_ok() or not self._duplicate_ok():
             return
+        self._ai_last_paths = paths
         default = self._build_filename(".pdf", paths=paths)
-        out, _ = QtWidgets.QFileDialog.getSaveFileName(self, 'Save PDF', default, "PDF (*.pdf)")
-        if not out:
-            return
+        # AI Document Memory: recognise this document -> suggest latest name/folder,
+        # optionally auto-save, or offer Similar Documents.
+        _ai = self._ai_prepare_save(paths, default)
+        if _ai.get("auto") and _ai.get("path"):
+            out = _ai["path"]
+        else:
+            default = _ai.get("default", default)
+            out, _ = QtWidgets.QFileDialog.getSaveFileName(self, 'Save PDF', default, "PDF (*.pdf)")
+            if not out:
+                return
         if not out.lower().endswith(".pdf"):
             out += ".pdf"
         ocr = HAS_OCR_LIBS and (self.chk_ocr.isChecked()
