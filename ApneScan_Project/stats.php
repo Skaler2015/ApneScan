@@ -51,7 +51,9 @@ function default_data() {
         'auditLog'=>array(),      // (3) admin actions history
         'featDaily'=>array(),     // (18) feature adoption over time [date][feat]=count
         'reqHours'=>array(),      // (26) requests per hour (load)
-        'sizeDaily'=>array()      // (26) data-file size trend
+        'sizeDaily'=>array(),     // (26) data-file size trend
+        // rename analytics ka privacy-safe meta (koi asli naam nahi — sirf ginti)
+        'renameMeta'=>array('sugY'=>0,'sugN'=>0,'lenSum'=>0,'lenN'=>0,'numY'=>0,'dtY'=>0,'wdSum'=>0)
     );
 }
 // ek file se saaf JSON padho (khaali/tuti -> null)
@@ -967,6 +969,31 @@ if (isset($_GET['admin'])) {
     usort($rl,function($a,$b){return $b['n']-$a['n'];});
     $S['refLeaders']=array_slice($rl,0,12);
 
+    // ---- Rename analytics (worldwide) ----
+    $rnTotal=intval(isset($d['features']['rename'])?$d['features']['rename']:0);
+    $rnUsers=isset($d['featUsers']['rename'])&&is_array($d['featUsers']['rename'])?count($d['featUsers']['rename']):0;
+    $rnLeaders=array(); $rnByCo=array();
+    foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $rc=intval(isset($c['feats']['rename'])?$c['feats']['rename']:0);
+        if($rc>0){ $rnLeaders[]=array('name'=>(trim($c['name'])!==''?$c['name']:'—'),'n'=>$rc,'cc'=>isset($c['country'])?$c['country']:''); $co=trim($c['country']); if($co!=='')bump($rnByCo,$co,$rc); } }
+    usort($rnLeaders,function($a,$b){return $b['n']-$a['n'];});
+    $fd2=isset($d['featDaily'])&&is_array($d['featDaily'])?$d['featDaily']:array(); ksort($fd2);
+    $rnTrend=array(); foreach(array_slice(array_keys($fd2),-30) as $day){ $rnTrend[]=array($day,intval(isset($fd2[$day]['rename'])?$fd2[$day]['rename']:0)); }
+    $rnToday=intval(isset($fd2[$today]['rename'])?$fd2[$today]['rename']:0); $rnWeek=0;$rnMonth=0;
+    for($k=0;$k<30;$k++){ $dk=date('Y-m-d',$now-$k*86400); $vv=intval(isset($fd2[$dk]['rename'])?$fd2[$dk]['rename']:0); $rnMonth+=$vv; if($k<7)$rnWeek+=$vv; }
+    $rm=isset($d['renameMeta'])&&is_array($d['renameMeta'])?$d['renameMeta']:array();
+    $rmN=intval(isset($rm['lenN'])?$rm['lenN']:0); $rmSug=intval(isset($rm['sugY'])?$rm['sugY']:0)+intval(isset($rm['sugN'])?$rm['sugN']:0);
+    $S['rename']=array('total'=>$rnTotal,'users'=>$rnUsers,
+        'adopt'=>($S['users']>0?round(100*$rnUsers/$S['users']):0),
+        'perUser'=>($rnUsers>0?round($rnTotal/$rnUsers,1):0),
+        'today'=>$rnToday,'week'=>$rnWeek,'month'=>$rnMonth,
+        'leaders'=>array_slice($rnLeaders,0,12),'byCountry'=>$rnByCo,'trend'=>$rnTrend,
+        'metaN'=>$rmN,
+        'pickRate'=>($rmSug>0?round(100*intval($rm['sugY'])/$rmSug):0),
+        'avgLen'=>($rmN>0?round($rm['lenSum']/$rmN):0),
+        'avgWords'=>($rmN>0?round($rm['wdSum']/$rmN,1):0),
+        'pctNum'=>($rmN>0?round(100*intval($rm['numY'])/$rmN):0),
+        'pctDate'=>($rmN>0?round(100*intval($rm['dtY'])/$rmN):0));
+
     // ---- (26) server health: request-load + data-size trend ----
     $rh=isset($d['reqHours'])&&is_array($d['reqHours'])?$d['reqHours']:array(); ksort($rh);
     $S['reqHours']=array_slice($rh,-48,null,true);
@@ -1285,6 +1312,15 @@ if (isset($_GET['admin'])) {
 
   <div class="card"><h3><span class="em">📈</span> Feature adoption over time <span style="color:var(--mut);font-weight:500;font-size:11px">— roz kaunsa tool kitna use hua (top 5)</span></h3>
     <canvas id="featAdopt" height="160"></canvas>
+  </div>
+
+  <div class="sec"><span class="em">✏️</span> Rename Analytics (worldwide)</div>
+  <div class="kpis" id="rnKpis" style="margin-bottom:14px"></div>
+  <div class="grid">
+    <div class="card"><h3><span class="em">📈</span> Rename trend (30 din)</h3><canvas id="rnTrend" height="150"></canvas></div>
+    <div class="card"><h3><span class="em">🏆</span> Top renamers</h3><div id="rnLeaders"></div></div>
+    <div class="card"><h3><span class="em">🗺</span> Rename by country</h3><div id="rnByCo"></div></div>
+    <div class="card"><h3><span class="em">🧠</span> Naam ki aadatein <span style="color:var(--mut);font-weight:500;font-size:11px">— v141 ke baad bharega</span></h3><div id="rnHabits"></div></div>
   </div>
 
   </div><!-- /tools -->
@@ -1625,6 +1661,36 @@ document.getElementById('au').innerHTML=(D.auditLog&&D.auditLog.length)?'<table>
   var cols=[PAL.blue,PAL.orange,PAL.aqua,PAL.violet,PAL.magenta];
   var ds=keys.map(function(k,i){return {label:(FEATLBL[k]||k),data:series[k],borderColor:cols[i%cols.length],backgroundColor:cols[i%cols.length],borderWidth:2,tension:.35,pointRadius:0,fill:false};});
   mkChart(el,{type:'line',data:{labels:days.map(function(x){return x.slice(5);}),datasets:ds},options:{plugins:{legend:{display:true,position:'bottom',labels:{boxWidth:10,font:{size:10}}}},scales:CO.scales}});
+})();
+
+// ---- Rename analytics ----
+(function(){ var R=D.rename||{};
+  document.getElementById('rnKpis').innerHTML=
+    kpi('✏️',fmt(R.total),'Total renames')+
+    kpi('👥',fmt(R.users),'Rename karne waale','p')+
+    kpi('📥',(R.adopt||0)+'%','Adoption (users)','o')+
+    kpi('🔁',(R.perUser||0),'Per user','y')+
+    kpi('📅',fmt(R.today),'Aaj')+
+    kpi('🗓️',fmt(R.week),'Is hafte')+
+    kpi('📆',fmt(R.month),'Is mahine')+
+    kpi('💡',(R.metaN>0?(R.pickRate||0)+'%':'—'),'Suggestion pick-rate','g');
+  // trend chart
+  var tr=R.trend||[]; var el=document.getElementById('rnTrend');
+  if(el&&window.Chart) mkChart(el,{type:'line',data:{labels:tr.map(function(x){return x[0].slice(5);}),datasets:[{data:tr.map(function(x){return x[1];}),borderColor:PAL.violet,backgroundColor:function(c){return grad(c,PAL.violet);},borderWidth:2,fill:true,tension:.35,pointRadius:0}]},options:CO});
+  // leaders
+  var L=R.leaders||[]; document.getElementById('rnLeaders').innerHTML=L.length?'<table>'+L.map(function(u,i){var m=(i<3?['🥇','🥈','🥉'][i]:(i+1)+'.');return '<tr><td>'+m+' '+esc(u.name)+(u.cc?' '+flag(u.cc):'')+'</td><td style="text-align:right"><b>'+fmt(u.n)+'</b></td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— abhi kisi ne rename nahi kiya —</div>';
+  // by country
+  var bc=R.byCountry||{}; var bck=Object.keys(bc).sort(function(a,b){return bc[b]-bc[a];}).slice(0,10);
+  document.getElementById('rnByCo').innerHTML=bck.length?'<table>'+bck.map(function(cc){return '<tr><td>'+flag(cc)+' '+cc+'</td><td style="text-align:right"><b>'+fmt(bc[cc])+'</b></td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— data nahi —</div>';
+  // habits (needs v141 meta)
+  if(R.metaN>0){ document.getElementById('rnHabits').innerHTML='<table>'+
+    '<tr><td>💡 Suggestion se chuna</td><td style="text-align:right"><b>'+(R.pickRate||0)+'%</b></td></tr>'+
+    '<tr><td>🔤 Average lambaai</td><td style="text-align:right"><b>'+(R.avgLen||0)+' akshar</b></td></tr>'+
+    '<tr><td>📝 Average shabd</td><td style="text-align:right"><b>'+(R.avgWords||0)+'</b></td></tr>'+
+    '<tr><td>🔢 Number waale naam</td><td style="text-align:right"><b>'+(R.pctNum||0)+'%</b></td></tr>'+
+    '<tr><td>📅 Date waale naam</td><td style="text-align:right"><b>'+(R.pctDate||0)+'%</b></td></tr></table>'+
+    '<div style="color:var(--mut);font-size:10px;margin-top:6px">'+fmt(R.metaN)+' renames ka data · koi asli naam nahi (sirf ginti)</div>';
+  } else { document.getElementById('rnHabits').innerHTML='<div style="color:var(--mut);font-size:12px">Ye deep data (pick-rate, lambaai, patterns) <b>v141</b> update ke baad bharna shuru hoga — app privacy-safe meta bhejegी (koi asli naam nahi).</div>'; }
 })();
 
 // (20) custom report builder
@@ -1972,6 +2038,15 @@ if ($action === 'scan') {
         if(!isset($d['featDaily'][$today])) $d['featDaily'][$today]=array();
         $d['featDaily'][$today][$feat]=intval(isset($d['featDaily'][$today][$feat])?$d['featDaily'][$today][$feat]:0)+1;
         if(count($d['featDaily'])>40){ ksort($d['featDaily']); $d['featDaily']=array_slice($d['featDaily'],-35,null,true); }
+        // rename analytics ka privacy-safe meta (sug=autocomplete-pick, len=lambaai, num/dt=pattern)
+        if($feat==='rename'){
+            if(!isset($d['renameMeta'])||!is_array($d['renameMeta'])) $d['renameMeta']=array('sugY'=>0,'sugN'=>0,'lenSum'=>0,'lenN'=>0,'numY'=>0,'dtY'=>0,'wdSum'=>0);
+            if(isset($_REQUEST['sug'])){ if(intval($_REQUEST['sug']))$d['renameMeta']['sugY']++; else $d['renameMeta']['sugN']++; }
+            $__ln=intval(isset($_REQUEST['len'])?$_REQUEST['len']:0); if($__ln>0){ $d['renameMeta']['lenSum']+=min($__ln,120); $d['renameMeta']['lenN']++; }
+            if(!empty($_REQUEST['num'])) $d['renameMeta']['numY']++;
+            if(!empty($_REQUEST['dt']))  $d['renameMeta']['dtY']++;
+            $__wd=intval(isset($_REQUEST['wd'])?$_REQUEST['wd']:0); if($__wd>0) $d['renameMeta']['wdSum']+=min($__wd,20);
+        }
     }
     // numeric metrics
     if (!isset($d['metrics'])) $d['metrics'] = array();
