@@ -114,6 +114,20 @@ jobs:
           if [ -f _site/ApneScan.exe ]; then
             (cd _site && zip -q ApneScan.zip ApneScan.exe && echo "ApneScan.zip banaya")
           fi
+          # ---- ASLI download data website me daalo (size, SHA-256, date) ----
+          # Fake "~15 MB" jaisi ginti nahi — jo exe deploy ho rahi hai usi ke
+          # asli numbers har page me inject hote hain.
+          SETUPMB="?" ; SHA="checksum unavailable" ; RDATE=$(date -u +"%d %b %Y")
+          if [ -f _site/ApneScan-Setup.exe ]; then
+            SETUPMB=$(awk "BEGIN{printf \"%.1f\", $(stat -c%s _site/ApneScan-Setup.exe)/1048576}")
+            SHA=$(sha256sum _site/ApneScan-Setup.exe | cut -d' ' -f1)
+          fi
+          PDATE=$(gh release view "v$V" -R "$GITHUB_REPOSITORY" --json publishedAt -q .publishedAt 2>/dev/null || true)
+          if [ -n "$PDATE" ]; then RDATE=$(date -u -d "$PDATE" +"%d %b %Y" 2>/dev/null || echo "$RDATE"); fi
+          echo "Real data: ${SETUPMB} MB | $RDATE | sha256=$SHA"
+          for f in _site/*.html; do
+            sed -i "s/{{SETUPMB}}/$SETUPMB/g; s/{{RELDATE}}/$RDATE/g; s/{{SHA256}}/$SHA/g" "$f"
+          done
           ls -la _site/
 
       - name: Configure GitHub Pages

@@ -59,7 +59,6 @@
 "downloadUrl":"https://apnescan.apnesoft.com/ApneScan-Setup.exe",
 "image":"https://apnescan.apnesoft.com/apnescan_logo.png",
 "offers":{"@type":"Offer","price":"0","priceCurrency":"INR"},
-"aggregateRating":{"@type":"AggregateRating","ratingValue":"4.9","ratingCount":"150"},
 "publisher":{"@type":"Organization","name":"ApneSoft"},
 "featureList":"Scan to PDF, Searchable PDF OCR (Hindi + English), Batch ADF scanning, Auto crop, Deskew, Auto rotate, Auto rename, Auto organize, PDF merge/split/compress, Password PDF, Barcode & QR reading, Network eSCL scanning, Dark mode"}
 </script>
@@ -192,6 +191,7 @@ html[data-theme="dark"] .pg .ppr{background:#dfe9e7}
 .cnt b{font-size:2.1rem;font-weight:900;color:var(--p);letter-spacing:-.02em}
 html[data-theme="dark"] .cnt b{color:var(--acc)}
 .cnt span{display:block;color:var(--mut);font-weight:600;font-size:.9rem;margin-top:4px}
+.livedot{font-style:normal;color:var(--ok);font-size:.68rem;font-weight:800;letter-spacing:.06em;vertical-align:middle;animation:blink 1.6s ease-in-out infinite}
 
 /* ============ BRANDS ============ */
 .brands{display:flex;flex-wrap:wrap;justify-content:center;gap:14px;margin-top:36px}
@@ -470,7 +470,7 @@ html[data-theme="dark"] .fgrid2 a:hover{color:var(--acc)}
       </div>
       <div class="hmeta">
         <div><b>{{VERSION}}</b>Latest version</div>
-        <div><b>~15 MB</b>Small download</div>
+        <div><b>{{SETUPMB}} MB</b>Small download</div>
         <div><b>Win 10 / 11</b>32 &amp; 64-bit PCs</div>
         <div><b>Free forever</b>No ads · No tracking</div>
       </div>
@@ -535,11 +535,13 @@ html[data-theme="dark"] .fgrid2 a:hover{color:var(--acc)}
       <span>🏥 Hospitals</span><span>🩺 Clinics</span><span>🏢 Businesses</span>
       <span>🏫 Schools</span><span>🏛 Government Offices</span><span>⚖ Lawyers &amp; CAs</span>
     </div>
-    <div class="counters">
-      <div class="cnt rv"><b class="num" data-n="5000" data-suf="+">0</b><span>Downloads</span></div>
-      <div class="cnt rv d1"><b class="num" data-n="150" data-suf="+">0</b><span>Organizations</span></div>
-      <div class="cnt rv d2"><b class="num" data-n="1000000" data-suf="+">0</b><span>Documents Scanned</span></div>
-      <div class="cnt rv d3"><b class="num" data-n="99.9" data-suf="%" data-dec="1">0</b><span>Success Rate</span></div>
+    <!-- LIVE counters — asli numbers seedha ApneScan stats server se (koi
+         banawati ginti nahi). Fetch fail ho to poora block chhup jaata hai. -->
+    <div class="counters" id="liveCounters" hidden>
+      <div class="cnt rv in"><b class="num" data-live="total">0</b><span>Total Scans Worldwide <em class="livedot">● LIVE</em></span></div>
+      <div class="cnt rv in"><b class="num" data-live="today">0</b><span>Scans Today</span></div>
+      <div class="cnt rv in"><b class="num" data-live="users">0</b><span>PCs Running ApneScan</span></div>
+      <div class="cnt rv in"><b class="num" data-live="countries">0</b><span>Countries</span></div>
     </div>
   </div>
 </section>
@@ -600,7 +602,7 @@ html[data-theme="dark"] .fgrid2 a:hover{color:var(--acc)}
     <h2 class="sec rv">Find Any Document. Instantly.</h2>
     <p class="sub rv">Partial names, partial numbers, typos, Hindi or English — the record always surfaces at the top. Try it below or watch it type.</p>
     <div class="demo rv d1">
-      <div class="dh">🔍 ApneScan Live Search <span style="margin-left:auto;font-weight:500;font-size:.8rem;opacity:.85">among 12,000 documents · &lt;50 ms</span></div>
+      <div class="dh">🔍 ApneScan Live Search <span style="margin-left:auto;font-weight:500;font-size:.8rem;opacity:.85">results as you type — offline index</span></div>
       <div class="dbody">
         <label class="sbox" for="demoInput">
           <span aria-hidden="true">🔍</span>
@@ -814,17 +816,16 @@ html[data-theme="dark"] .fgrid2 a:hover{color:var(--acc)}
           <p style="opacity:.9;font-size:.92rem;margin-top:4px">Windows 10 &amp; 11 · Works on 32-bit and 64-bit PCs</p>
           <div class="dlmeta">
             <div><b>{{VERSION}}</b>Latest version</div>
-            <div><b>~15 MB</b>Download size</div>
+            <div><b>{{SETUPMB}} MB</b>Download size</div>
+            <div><b>{{RELDATE}}</b>Release date</div>
             <div><b>Windows 10 / 11</b>Also works on older PCs</div>
             <div><b>Free</b>License — free for everyone</div>
-            <div><b>1 GHz CPU · 2 GB RAM</b>System requirements</div>
-            <div><b>SHA-256 on GitHub</b><a href="https://github.com/Skaler2015/ApneScan/releases" style="color:#B5F5EA;text-decoration:underline">Verify checksums →</a></div>
+            <div style="grid-column:1/-1"><b>SHA-256 (installer)</b><code style="font-size:.68rem;word-break:break-all;opacity:.9">{{SHA256}}</code></div>
           </div>
         </div>
         <div class="dlbtns">
           <a class="btn w" href="ApneScan-Setup.exe">⬇ Download Installer (.exe)</a>
           <a class="btn o" href="ApneScan.exe">Portable version — no install</a>
-          <a class="btn o" href="https://github.com/Skaler2015/ApneScan/releases">Mirror — GitHub Releases</a>
           <p class="dlnote">Release notes in the <a href="changelog.html" style="color:#B5F5EA;text-decoration:underline">changelog</a> · Guide: <a href="ApneScan_Guide.pdf" style="color:#B5F5EA;text-decoration:underline">PDF manual</a></p>
         </div>
       </div>
@@ -952,17 +953,33 @@ $$(".menu a").forEach(function(a){a.addEventListener("click",function(){menu.cla
 var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){e.target.classList.add("in");io.unobserve(e.target)}})},{threshold:.12});
 $$(".rv").forEach(function(el){io.observe(el)});
 
-/* ---- animated counters ---- */
-var cio=new IntersectionObserver(function(es){es.forEach(function(e){
-  if(!e.isIntersecting)return; cio.unobserve(e.target);
-  var el=e.target,n=parseFloat(el.dataset.n),suf=el.dataset.suf||"",dec=parseInt(el.dataset.dec||"0"),t0=null;
-  function fmt(v){return dec?v.toFixed(dec):Math.round(v).toLocaleString("en-IN")}
-  function tick(ts){if(!t0)t0=ts;var p=Math.min((ts-t0)/1600,1);p=1-Math.pow(1-p,3);
-    el.textContent=fmt(n*p)+(p===1?suf:"");
+/* ---- LIVE counters — asli worldwide numbers stats server se ---- */
+function animateNum(el,n){
+  var t0=null;
+  function tick(ts){if(!t0)t0=ts;var p=Math.min((ts-t0)/1400,1);p=1-Math.pow(1-p,3);
+    el.textContent=Math.round(n*p).toLocaleString("en-IN");
     if(p<1)requestAnimationFrame(tick)}
   requestAnimationFrame(tick);
-})},{threshold:.5});
-$$(".num").forEach(function(el){cio.observe(el)});
+}
+(function(){
+  var box=$("#liveCounters"); if(!box)return;
+  fetch("https://status.apnesoft.com/stats.php?widget=count",{mode:"cors"})
+    .then(function(r){return r.json()})
+    .then(function(P){
+      var got=false;
+      $$(".num",box).forEach(function(el){
+        var v=P[el.dataset.live];
+        if(typeof v==="number"&&isFinite(v)){got=true;
+          var started=false;
+          var o=new IntersectionObserver(function(es){es.forEach(function(e){
+            if(e.isIntersecting&&!started){started=true;o.unobserve(el);animateNum(el,v)}})},{threshold:.4});
+          o.observe(el);
+        }
+      });
+      if(got)box.hidden=false;      // sirf ASLI data aane par hi dikhao
+    })
+    .catch(function(){/* stats na mile to counters chhupe rehte hain */});
+})();
 
 /* ---- interactive search demo ---- */
 var DATA=[

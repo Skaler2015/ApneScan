@@ -424,7 +424,12 @@ if (isset($_GET['cron'])) {
 // =================================================================
 if (isset($_GET['widget'])) {
     $P = public_stats(load_data($DATA_FILE));
-    if ($_GET['widget']==='count') { header('Content-Type: application/json'); echo json_encode($P); exit; }
+    if ($_GET['widget']==='count') {
+        header('Content-Type: application/json');
+        header('Access-Control-Allow-Origin: *');   // website ke live counters ke liye
+        header('Cache-Control: public, max-age=120');
+        echo json_encode($P); exit;
+    }
     header('Content-Type: text/html; charset=utf-8');
     ?><!doctype html><meta charset="utf-8"><style>
     *{margin:0;box-sizing:border-box}body{font-family:Inter,system-ui,Segoe UI,Arial;background:transparent}
