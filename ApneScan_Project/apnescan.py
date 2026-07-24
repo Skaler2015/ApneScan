@@ -176,7 +176,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "144"
+VERSION = "145"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -371,7 +371,8 @@ SHORTCUTS = [
     ("contrast_dn", "Contrast -", ""),
     ("autocrop", "Auto-crop page", ""),
     ("autoname", "Auto-name pages (OCR)", "Ctrl+Alt+N"),
-    ("undo", "Undo delete", "Ctrl+Z"),
+    ("undo", "Undo (edit / delete)", "Ctrl+Z"),
+    ("redo", "Redo", "Ctrl+Shift+Z"),
     ("delete", "Delete page", "Delete"),
     ("clear", "Clear all", "Ctrl+Shift+Delete"),
     ("move_up", "Move page up", "Ctrl+Up"),
@@ -7137,6 +7138,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             self._memory = None
         self._undo_stack = []
+        # unified multi-level undo/redo (page edits + deletes)
+        self._hist = []
+        self._hist_redo = []
+        self._hist_max = 25
         # Startup guard: app khulte hi (jaise app ko Enter dabakar launch karne par
         # wahi Enter naye window me 'Enter = Scan' chala deta tha) galti se scan na
         # ho — pehle ~900ms tak do_scan ignore hota hai.
@@ -7286,7 +7291,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(me, "Auto-crop page", self.autocrop_current, "हिन्दी: पेज के आस-पास की खाली border काटो।\nEnglish: Trim the empty border around the page.")
         self._ma(me, "Copy page text", self.copy_page_text, "हिन्दी: इस पेज का पूरा टेक्स्ट पढ़कर कॉपी कर लो (कहीं भी paste करो)।\nEnglish: OCR this page's text to the clipboard.")
         self._ma(me, "Translate page (Hindi ↔ English)…", self.translate_page, "हिन्दी: पेज का टेक्स्ट पढ़कर हिंदी/English में translate करो (इंटरनेट चाहिए)।\nEnglish: Translate the page's text between Hindi and English (needs internet).")
-        self._ma(me, "Undo delete", self.undo_delete, "हिन्दी: ग़लती से delete हुआ पेज वापस लाओ।\nEnglish: Restore a deleted page.", "Ctrl+Z")
+        self._ma(me, "↶ Undo (edit / delete)", self._hist_undo, "हिन्दी: पिछला बदलाव वापस लो — rotate, crop, enhance, deskew या delete। कई बार दबाकर और पीछे जाओ।\nEnglish: Undo the last change — rotate, crop, enhance, deskew or delete. Press again to step further back.", "Ctrl+Z")
+        self._ma(me, "↷ Redo", self._hist_redo_do, "हिन्दी: Undo किया हुआ बदलाव दोबारा लगाओ।\nEnglish: Re-apply a change you undid.", "Ctrl+Shift+Z")
         me.addSeparator()
         self._ma(me, "Delete page", self.delete_page, "हिन्दी: चुने हुए पेज को हटाओ।\nEnglish: Delete the selected page.", "Delete")
         self._ma(me, "Clear all", self.clear_all, "हिन्दी: सारे पेज हटाओ (खाली करो)।\nEnglish: Remove all pages.")
@@ -7969,7 +7975,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "contrast_dn": lambda: self._enhance_current(1.0, 0.88),
             "autocrop": self.autocrop_current,
             "autoname": self.auto_name_pages,
-            "undo": self.undo_delete,
+            "undo": self._hist_undo,
+            "redo": self._hist_redo_do,
             "delete": self.delete_page,
             "clear": self.clear_all,
             "move_up": self.move_up,
@@ -12338,7 +12345,7 @@ if the toggle is ticked).</p>
             ("✒", "Sign", self.place_sign),
             ("🔤", "OCR text", self.copy_page_text),
             ("🗑", "Delete", self.delete_page),
-            ("↩", "Undo", self.undo_delete)]), L("✏ Edit", "✏ Edit"))
+            ("↩", "Undo", self._hist_undo)]), L("✏ Edit", "✏ Edit"))
         self.ribbon.addTab(_ribbon_tab([
             ("🗜", "Compress", self.compress_pdf_tool),
             ("🧩", "Merge", self.merge_pdfs),
@@ -13117,6 +13124,7 @@ if the toggle is ticked).</p>
         # Ctrl+O = koi folder kholo (sidebar me) · Ctrl+V = clipboard se paste
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+O"), self, self.open_existing_folder)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+V"), self, self._paste_from_clipboard)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Y"), self, self._hist_redo_do)   # redo (alt)
         # Tesseract check ko startup par BACKGROUND me warm kar do (ye tesseract.exe
         # subprocess chalata hai ~1-2s) — taaki baad me koi bhi kaam (rename, scan)
         # is check par UI thread par ATKE nahi.
@@ -16334,6 +16342,134 @@ if the toggle is ticked).</p>
         self.status.showMessage(self.L("↶ %d page wapas aaye" % n,
                                        "↶ Reverted %d page(s)" % n), 3000)
 
+    # ================= Unified multi-level Undo / Redo =================
+    # One history for page EDITS (rotate/crop/deskew/enhance/whiten…) and
+    # DELETES. Each edit stores a small before+after file snapshot in a cache;
+    # undo/redo just copy the right snapshot back. Deletes store the item so the
+    # page (and its name) comes back. Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo.
+    def _hist_dir(self):
+        d = getattr(self, "_histdir", None)
+        if not d:
+            d = os.path.join(self._tmpdir, "_history")
+            try:
+                os.makedirs(d, exist_ok=True)
+            except Exception:
+                pass
+            self._histdir = d
+        return d
+
+    def _hist_snapshot(self, paths):
+        """Copy each page file into the history cache; return {path: copy}."""
+        snap = {}
+        for p in paths:
+            try:
+                fd, tmp = tempfile.mkstemp(suffix=os.path.splitext(p)[1] or ".png", dir=self._hist_dir())
+                os.close(fd)
+                shutil.copy2(p, tmp)
+                snap[p] = tmp
+            except Exception:
+                pass
+        return snap
+
+    def _hist_free(self, entry):
+        try:
+            for key in ("before", "after"):
+                for tmp in (entry.get(key) or {}).values():
+                    if tmp and os.path.exists(tmp):
+                        try:
+                            os.remove(tmp)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    def _hist_record(self, entry):
+        """Push a new undoable action; clears the redo branch (standard model)."""
+        if not hasattr(self, "_hist"):
+            self._hist, self._hist_redo = [], []
+        self._hist.append(entry)
+        while len(self._hist) > getattr(self, "_hist_max", 25):
+            self._hist_free(self._hist.pop(0))
+        for e in self._hist_redo:
+            self._hist_free(e)
+        self._hist_redo = []
+
+    def _hist_undo(self):
+        if not getattr(self, "_hist", None):
+            if getattr(self, "_undo_stack", None):
+                return self.undo_delete()        # legacy fallback
+            self.status.showMessage(self.L("Undo ke liye kuch nahi", "Nothing to undo"), 2500)
+            return
+        entry = self._hist.pop()
+        self._hist_apply(entry, "undo")
+        self._hist_redo.append(entry)
+
+    def _hist_redo_do(self):
+        if not getattr(self, "_hist_redo", None):
+            self.status.showMessage(self.L("Redo ke liye kuch nahi", "Nothing to redo"), 2500)
+            return
+        entry = self._hist_redo.pop()
+        self._hist_apply(entry, "redo")
+        self._hist.append(entry)
+
+    def _hist_apply(self, entry, direction):
+        t = entry.get("type")
+        if t == "edit":
+            src = entry["before"] if direction == "undo" else entry["after"]
+            n = 0
+            for path, tmp in (src or {}).items():
+                try:
+                    if os.path.exists(tmp):
+                        shutil.copy2(tmp, path)
+                        n += 1
+                except Exception:
+                    pass
+            try:
+                self._refresh_all_thumbs()
+                self._update_preview_panel()
+            except Exception:
+                pass
+            self._dirty = True
+            self.status.showMessage(("↶ " if direction == "undo" else "↷ ")
+                                    + (self.L("%d page badle", "%d page(s) changed") % n), 2500)
+        elif t == "delete":
+            if direction == "undo":
+                for it in sorted(entry.get("items", []), key=lambda x: x.get("row", 0)):
+                    self._hist_reinsert(it)
+            else:
+                for it in entry.get("items", []):
+                    self._hist_remove_path(it.get("path"))
+            try:
+                self._renumber_pages()
+                self._update_status()
+                self._update_empty_state()
+            except Exception:
+                pass
+            self._dirty = True
+            self.status.showMessage(("↶ " if direction == "undo" else "↷ ")
+                                    + self.L("delete wapas", "delete reverted"), 2500)
+
+    def _hist_reinsert(self, it):
+        path = it.get("path")
+        if not path or not os.path.exists(path):
+            return
+        try:
+            icon = QtGui.QIcon(self._make_thumb(path))
+        except Exception:
+            icon = QtGui.QIcon()
+        item = QtWidgets.QListWidgetItem(icon, "")
+        item.setData(QtCore.Qt.UserRole, path)
+        if it.get("title"):
+            item.setData(TITLE_ROLE, it["title"])
+        item.setTextAlignment(QtCore.Qt.AlignHCenter)
+        self.list.insertItem(min(int(it.get("row", self.list.count())), self.list.count()), item)
+
+    def _hist_remove_path(self, path):
+        for i in range(self.list.count()):
+            if self.list.item(i).data(QtCore.Qt.UserRole) == path:
+                self.list.takeItem(i)
+                return
+
     def _edit_targets(self):
         """Edit kispar lage: apply-all on ho to SAB pages, warna current."""
         if getattr(self, "pv_apply_all", None) and self.pv_apply_all.isChecked():
@@ -16358,7 +16494,8 @@ if the toggle is ticked).</p>
         paths, allmode = self._edit_targets()
         if not paths:
             return
-        self._pv_backup(paths)
+        self._pv_backup(paths)                       # legacy single-level undo
+        _hist_before = self._hist_snapshot(paths)    # unified multi-level history: 'before'
 
         def job():
             for p in paths:
@@ -16383,6 +16520,12 @@ if the toggle is ticked).</p>
                 self._pv_build_filmstrip()
             self._update_preview_panel()
             self._dirty = True
+            # record this edit (before + after) for unified undo/redo
+            try:
+                self._hist_record({"type": "edit", "before": _hist_before,
+                                   "after": self._hist_snapshot(paths)})
+            except Exception:
+                pass
         self._run_bg(job, on_done, busy_msg)
 
     def deskew_current(self):
@@ -19340,14 +19483,22 @@ if the toggle is ticked).</p>
             items = [item]
         # delete from the highest row down so earlier indices stay valid
         rows = sorted((self.list.row(it) for it in items), reverse=True)
+        deleted = []
         for row in rows:
             it = self.list.item(row)
             if it is None:
                 continue
             path = it.data(QtCore.Qt.UserRole)
+            deleted.append({"path": path, "row": row, "title": it.data(TITLE_ROLE)})
             self.list.takeItem(row)
             self._undo_stack.append((path, row))     # keep file for undo
         self._undo_stack = self._undo_stack[-15:]
+        # record the whole (possibly multi-page) delete as ONE undoable action
+        if deleted:
+            try:
+                self._hist_record({"type": "delete", "items": deleted})
+            except Exception:
+                pass
         self._dirty = True
         self._renumber_pages()
         self._update_status(); self._update_empty_state()
