@@ -21,6 +21,7 @@ import json
 import time
 import shutil
 import socket
+import difflib
 import sqlite3
 import hashlib
 import tempfile
@@ -176,7 +177,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "152"
+VERSION = "153"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2536,6 +2537,107 @@ def underscore_name(s):
 def name_key(s):
     """Normalized key to match the 'same' document title across scans."""
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
+
+
+# ============================================================================
+# SMART SEARCH ENGINE — patient-folder search that ranks like premium hospital
+# software. Works identically for OLD folders ("793_Rajendra_Kumar_MR") and NEW
+# ones ("793 Rajendra Kumar MR") because both normalise to the same tokens.
+# ============================================================================
+
+def _norm_search(s):
+    """Normalise a folder name OR a search query to the SAME internal form:
+    lowercase, treat _ and - as spaces, collapse repeats, trim.
+    '793_Rajendra_Kumar_MR' -> '793 rajendra kumar mr'."""
+    s = (s or "").lower()
+    s = re.sub(r"[_\-]+", " ", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+
+def folder_safe_name(s):
+    """NEW patient folders are human-readable: keep SPACES (no underscores),
+    drop only the characters Windows forbids, collapse repeats.
+    'Rajendra_Kumar' / 'Rajendra   Kumar' -> 'Rajendra Kumar'.
+    (File names still use underscore_name — unchanged.)"""
+    s = (s or "").strip()
+    s = re.sub(r"[_]+", " ", s)                      # underscores -> readable spaces
+    s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", s)      # Windows-illegal chars
+    s = re.sub(r"\s+", " ", s).strip()
+    s = s.rstrip(". ")                               # Windows: no trailing dot/space
+    return s or "New Folder"
+
+
+def _vowel_skeleton(s):
+    """Drop vowels so vowel-only spelling differences collapse together
+    ('rajinder'/'rajender'/'rajendra' -> 'rjndr'). Keeps the first char even if
+    it is a vowel, so 'ayush'/'aiyush' stay comparable."""
+    if not s:
+        return s
+    return s[0] + re.sub(r"[aeiou]", "", s[1:])
+
+
+def _term_category(t, tokens, num, name_part, name_norm):
+    """How strongly one query token matches a folder. Lower = better.
+    0 exact folder-number · 1 exact word · 2 name-starts-with ·
+    3 word-starts-with · 4 contains · 5 fuzzy(typo) · None = no match."""
+    if num is not None and t == num:
+        return 0
+    if t in tokens:
+        return 1
+    if name_part.startswith(t):
+        return 2
+    if any(tok.startswith(t) for tok in tokens):
+        return 3
+    if t in name_norm:
+        return 4
+    # P6 fuzzy — typo/spelling tolerance. Two signals, both guarded by a shared
+    # first letter so it stays safe across 100k folders:
+    #   (a) close overall similarity (rajendar/rajendr/rajedra -> rajendra), or
+    #   (b) same consonant-skeleton, i.e. only the vowels differ — the common
+    #       Indian-name case (rajinder/rajender/rajendra all -> 'rjndr').
+    if len(t) >= 4:
+        tv = _vowel_skeleton(t)
+        for tok in tokens:
+            if len(tok) < 4 or tok[0] != t[0]:
+                continue
+            if difflib.SequenceMatcher(None, t, tok).ratio() >= 0.8:
+                return 5
+            sk = _vowel_skeleton(tok)
+            if tv and sk and difflib.SequenceMatcher(None, tv, sk).ratio() >= 0.85:
+                return 5
+    return None
+
+
+def _folder_search_score(terms, name_norm):
+    """Rank a folder for a multi-word query. Returns (matched, sort_key) where a
+    SMALLER key ranks higher. A folder matches only if EVERY query token finds a
+    home in it. Priority order realised by the key:
+      1 exact folder-number · 2 exact patient-name · 3 name-starts · 4 word-starts
+      · 5 contains · 6 fuzzy."""
+    tokens = name_norm.split()
+    if not tokens or not terms:
+        return (False, None)
+    num = tokens[0] if tokens[0].isdigit() else None
+    name_part = " ".join(tokens[1:] if num else tokens)   # patient name (no number)
+    qjoin = " ".join(terms)
+    exact_name = (qjoin == name_part or qjoin == name_norm)
+    exact_number = False
+    cats = []
+    for t in terms:
+        c = _term_category(t, tokens, num, name_part, name_norm)
+        if c is None:
+            return (False, None)                          # a token matched nothing
+        if c == 0:
+            exact_number = True
+        cats.append(c)
+    key = (0 if exact_number else 1,      # P1: exact folder number to the very top
+           0 if exact_name else 1,        # P2: exact full patient name next
+           max(cats),                     # weakest token's strength (P3/P4/P5/P6)
+           sum(cats),                     # overall tightness of the match
+           len(name_norm),                # shorter (more specific) name first
+           name_norm)                     # stable alphabetical tie-break
+    return (True, key)
 
 
 # Document TYPE classifier — recognise WHAT the document is (by tell-tale keywords)
@@ -6246,6 +6348,57 @@ class ThumbDelegate(QtWidgets.QStyledItemDelegate):
                 painter.restore()
             except Exception:
                 pass
+
+
+class SearchHLDelegate(QtWidgets.QStyledItemDelegate):
+    """Search-results me jo text query se match karta hai use BOLD + rang me
+    dikhata hai (jaise Everything / Windows search). Terms list widget par
+    (_hl_terms) rakhi hoti hai. Sirf LIST-mode me; grid/icon-mode aur error par
+    seedha normal (super) draw — taaki kabhi kuch toote na."""
+
+    def paint(self, painter, option, index):
+        w = option.widget
+        terms = getattr(w, "_hl_terms", None) if w is not None else None
+        text = index.data(QtCore.Qt.DisplayRole)
+        # highlight sirf list-mode search par; warna bilkul purana behaviour
+        if (not terms or not text
+                or (w is not None and w.viewMode() != QtWidgets.QListView.ListMode)):
+            return super().paint(painter, option, index)
+        try:
+            opt = QtWidgets.QStyleOptionViewItem(option)
+            self.initStyleOption(opt, index)
+            style = w.style() if w is not None else QtWidgets.QApplication.style()
+            base_text = opt.text
+            opt.text = ""                                    # text hum khud kheenchenge
+            style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, opt, painter, w)
+            r = style.subElementRect(QtWidgets.QStyle.SE_ItemViewItemText, opt, w)
+            doc = QtGui.QTextDocument()
+            doc.setDefaultFont(opt.font)
+            doc.setHtml(self._html(base_text, terms))
+            painter.save()
+            painter.translate(r.left(), r.top() + max(0, (r.height() - doc.size().height()) / 2.0))
+            doc.setTextWidth(r.width())
+            doc.drawContents(painter, QtCore.QRectF(0, 0, r.width(), r.height()))
+            painter.restore()
+        except Exception:
+            try:
+                painter.restore()
+            except Exception:
+                pass
+            super().paint(painter, option, index)
+
+    def _html(self, text, terms):
+        # leading spaces (file indent) ko nbsp me badlo taaki HTML me na kate
+        stripped = text.lstrip(" ")
+        lead = len(text) - len(stripped)
+        esc = (stripped.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        for t in sorted({x for x in terms if x}, key=len, reverse=True):
+            try:
+                esc = re.sub("(" + re.escape(t) + ")",
+                             r'<b style="color:#b45309">\1</b>', esc, flags=re.IGNORECASE)
+            except Exception:
+                pass
+        return "&nbsp;" * lead + esc
 
 
 class UrlListWidget(QtWidgets.QListWidget):
@@ -13215,6 +13368,8 @@ if the toggle is ticked).</p>
         self.files_results.itemDoubleClicked.connect(self._files_result_activated)
         self.files_results.itemActivated.connect(self._files_result_activated)  # Enter = kholo
         self.files_results.itemClicked.connect(self._on_result_clicked)  # 1-click = preview
+        self.files_results._hl_terms = None                 # smart-search match highlight
+        self.files_results.setItemDelegate(SearchHLDelegate(self.files_results))
         self.files_results.hide()
         fp.addWidget(self.files_results, 1)
         self._files_search_timer = QtCore.QTimer(self)
@@ -15132,7 +15287,7 @@ if the toggle is ticked).</p>
             "Folder name:\n(will be created inside: '%s')" % (os.path.basename(base) or "Meri Files"))
         if not ok or not name.strip():
             return
-        p = os.path.join(base, sanitize(underscore_name(name.strip())))
+        p = os.path.join(base, folder_safe_name(name))   # NEW folders: spaces, readable
         try:
             os.makedirs(p, exist_ok=True)
         except Exception as exc:
@@ -15443,7 +15598,7 @@ if the toggle is ticked).</p>
             "Folder name:\n(will be created inside: '%s')" % (os.path.basename(base) or "Meri Files"))
         if not ok or not name.strip():
             return
-        p = os.path.join(base, sanitize(underscore_name(name.strip())))
+        p = os.path.join(base, folder_safe_name(name))   # NEW folders: spaces, readable
         try:
             os.makedirs(p, exist_ok=True)
         except Exception as exc:
@@ -15900,13 +16055,16 @@ if the toggle is ticked).</p>
             for dp, dns, fn in os.walk(scope):
                 for d in dns:
                     full = os.path.join(dp, d)
+                    # 5th field = smart-search normalised name (computed ONCE here,
+                    # so every keystroke only scores — no re-normalising).
                     idx.append(("dir", full, d.lower(),
-                                os.path.relpath(full, scope).lower()))
+                                os.path.relpath(full, scope).lower(), _norm_search(d)))
                 for f in fn:
                     if f.lower().endswith(self._FILE_EXTS):
                         full = os.path.join(dp, f)
+                        rel = os.path.relpath(full, scope)
                         idx.append(("file", full, f.lower(),
-                                    os.path.relpath(full, scope).lower()))
+                                    rel.lower(), _norm_search(rel)))
                 if len(idx) >= 40000:
                     break
         except Exception:
@@ -15941,19 +16099,24 @@ if the toggle is ticked).</p>
         if len(q) < 2:
             self.files_results.hide()
             self.files_tree.show()
+            self.files_results._hl_terms = None
             return
-        terms = [t for t in q.split() if t]
+        # Smart-search: normalise the query so _ / - / mixed-case / extra spaces
+        # all behave the same, then rank by patient-folder relevance.
+        terms = _norm_search(q).split()
         scope = self._panel_current_dir()
         if not (scope and os.path.isdir(scope)):
             scope = self._files_root()
         search_text = self.btn_search_text.isChecked()   # PDF ke andar bhi?
+        self.files_results._hl_terms = terms              # results me match highlight
 
-        def _rank(name, by_content=False):
-            if by_content:
-                return (2, 0)
-            in_name = all(t in name for t in terms)
-            at_start = any(name.startswith(t) for t in terms)
-            return (0 if in_name else 1, 0 if at_start else 1)
+        def _file_rank(rel_norm):
+            # files keep underscore names; rank on the normalised relative path.
+            if not all(t in rel_norm for t in terms):
+                return None
+            base = os.path.basename(rel_norm)
+            at_start = any(base.startswith(t) for t in terms)
+            return (0 if at_start else 1, len(rel_norm))
 
         # ---- TEZ RAASTA: naam/path search — memory index se turant ----
         if not search_text:
@@ -15968,20 +16131,24 @@ if the toggle is ticked).</p>
                 self.files_tree.hide(); self.files_results.show()
                 return
             dir_hits, file_hits = [], []
-            for kind, full, name, rel in idx:
+            for entry in idx:
+                kind, full, name = entry[0], entry[1], entry[2]
+                norm = entry[4] if len(entry) > 4 else _norm_search(name)
                 if kind == "dir":
-                    if all(t in name for t in terms):
-                        dir_hits.append((_rank(name), name, full))
+                    ok, key = _folder_search_score(terms, norm)
+                    if ok:
+                        dir_hits.append((key, name, full))
                 else:
-                    if all(t in rel for t in terms):
-                        file_hits.append((_rank(name), name, full))
+                    fr = _file_rank(norm)
+                    if fr is not None:
+                        file_hits.append((fr, name, full))
                 if len(dir_hits) + len(file_hits) >= 1000:
                     break
             dir_hits.sort(key=lambda h: (h[0], h[1]))
             file_hits.sort(key=lambda h: (h[0], h[1]))
             res = ([("dir", h[2]) for h in dir_hits] +
                    [("file", h[2]) for h in file_hits])
-            self._render_files_results(res, q)
+            self._render_files_results(res, q, preserve_order=True)
             return
 
         # ---- BHAARI RAASTA: PDF ke andar ka text — background me ----
@@ -15991,21 +16158,21 @@ if the toggle is ticked).</p>
             dir_hits, file_hits = [], []
             for dp, dns, fn in os.walk(scope):
                 for d in dns:
-                    name = d.lower()
-                    if all(t in name for t in terms):
-                        dir_hits.append((_rank(name), name, os.path.join(dp, d)))
+                    ok, key = _folder_search_score(terms, _norm_search(d))
+                    if ok:
+                        dir_hits.append((key, d.lower(), os.path.join(dp, d)))
                 for f in fn:
                     if not f.lower().endswith(exts):
                         continue
                     full = os.path.join(dp, f)
-                    name = f.lower()
-                    rel = os.path.relpath(full, scope).lower()
-                    if all(t in rel for t in terms):
-                        file_hits.append((_rank(name), name, full))
+                    rel_norm = _norm_search(os.path.relpath(full, scope))
+                    fr = _file_rank(rel_norm)
+                    if fr is not None:
+                        file_hits.append((fr, f.lower(), full))
                     elif full.lower().endswith(".pdf"):
                         txt = self._pdf_text_cached(full)
                         if txt and all(t in txt for t in terms):
-                            file_hits.append((_rank(name, True), name, full))
+                            file_hits.append(((2, 0), f.lower(), full))   # content-only
                 if len(dir_hits) + len(file_hits) >= 1000:
                     break
             dir_hits.sort(key=lambda h: (h[0], h[1]))
@@ -16018,31 +16185,46 @@ if the toggle is ticked).</p>
                 return
             if self.files_search.text().strip().lower() != q:
                 return
-            self._render_files_results(res, q)
+            self._render_files_results(res, q, preserve_order=True)
         self._run_bg(job, done, self.L("Andar ka text dhoondh rahe…",
                                        "Searching inside text…"))
 
-    def _render_files_results(self, res, q=None):
+    def _render_files_results(self, res, q=None, preserve_order=False):
         """Search/filter ke natije (list) ko panel me dikhao. q diya ho to sirf
-        tabhi render karo jab search-box me abhi bhi wahi likha ho."""
+        tabhi render karo jab search-box me abhi bhi wahi likha ho.
+        preserve_order=True (smart-search) => ranking ka kram bana rahe (folder
+        jo sabse relevant hai wo sabse upar); filters/recent purane jaise
+        alphabetical hi."""
         if q is not None and self.files_search.text().strip().lower() != q:
             return                          # tab tak nayi search shuru ho gayi
+        if not preserve_order:
+            self.files_results._hl_terms = None   # non-search view => no highlight
         self._last_files_res = res          # grid toggle par dobara render ke liye
+        self._last_files_preserve = preserve_order
         grid = bool(self._opts.get("files_grid"))
         self.files_results.clear()
         # FOLDER ke hisaab se group karo: upar folder ka naam (header),
-        # neeche usi folder ke documents.
+        # neeche usi folder ke documents. preserve_order me folder RANK ke kram me
+        # aate hain (res me jaise mile), warna group banake alphabetical.
         groups, order = {}, []
-        for kind, p in res:
-            if kind == "file":
-                par = os.path.dirname(p)
-                if par not in groups:
-                    groups[par] = []; order.append(par)
-                groups[par].append(p)
-        for kind, p in res:                     # naam-se-mile khali folder bhi
-            if kind == "dir" and p not in groups:
-                groups[p] = []; order.append(p)
-        order.sort(key=lambda f: os.path.basename(f).lower())
+        if preserve_order:
+            for kind, p in res:
+                fol = p if kind == "dir" else os.path.dirname(p)
+                if fol not in groups:
+                    groups[fol] = []; order.append(fol)
+                if kind == "file":
+                    groups[fol].append(p)
+        else:
+            for kind, p in res:
+                if kind == "file":
+                    par = os.path.dirname(p)
+                    if par not in groups:
+                        groups[par] = []; order.append(par)
+                    groups[par].append(p)
+            for kind, p in res:                     # naam-se-mile khali folder bhi
+                if kind == "dir" and p not in groups:
+                    groups[p] = []; order.append(p)
+            order.sort(key=lambda f: os.path.basename(f).lower())
         n_dir = len(order)
         n_file = sum(len(v) for v in groups.values())
         if grid:
@@ -16143,7 +16325,8 @@ if the toggle is ticked).</p>
         self._save_opts()
         # jo abhi dikh raha hai use usi tarah dobara render karo
         if self.files_results.isVisible() and getattr(self, "_last_files_res", None) is not None:
-            self._render_files_results(self._last_files_res)
+            self._render_files_results(self._last_files_res,
+                                       preserve_order=getattr(self, "_last_files_preserve", False))
         else:
             self._apply_files_filter()
 
