@@ -21,13 +21,20 @@ import json
 import time
 import shutil
 import socket
-import difflib
 import sqlite3
 import hashlib
 import tempfile
 import threading
 import traceback
 import datetime
+
+# Local application library — stateless engine code extracted out of this file.
+# These are imported back into the module namespace so every existing call site
+# (underscore_name(...), _folder_search_score(...), etc.) keeps working unchanged.
+from apnescan_lib.text_utils import (
+    sanitize, underscore_name, name_key, folder_safe_name,
+)
+from apnescan_lib.search_engine import _norm_search, _folder_search_score
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
@@ -1166,9 +1173,7 @@ def read_barcode(path):
         return None
 
 
-def sanitize(text, fallback="scan"):
-    safe = "".join(c for c in (text or "") if c.isalnum() or c in "-_")
-    return safe or fallback
+# sanitize() now lives in apnescan_lib.text_utils (imported at top).
 
 
 # ---------------------------------------------------------------------------
@@ -2526,118 +2531,9 @@ LABEL_COLORS = {
 }
 
 
-def underscore_name(s):
-    """Filename-friendly: spaces -> underscore, drop odd chars, collapse repeats."""
-    s = re.sub(r"[^\w\s.\-]", "", s or "")
-    s = re.sub(r"\s+", "_", s.strip())
-    s = re.sub(r"_+", "_", s)
-    return s.strip("_.")
-
-
-def name_key(s):
-    """Normalized key to match the 'same' document title across scans."""
-    return re.sub(r"[^a-z0-9]", "", (s or "").lower())
-
-
-# ============================================================================
-# SMART SEARCH ENGINE — patient-folder search that ranks like premium hospital
-# software. Works identically for OLD folders ("793_Rajendra_Kumar_MR") and NEW
-# ones ("793 Rajendra Kumar MR") because both normalise to the same tokens.
-# ============================================================================
-
-def _norm_search(s):
-    """Normalise a folder name OR a search query to the SAME internal form:
-    lowercase, treat _ and - as spaces, collapse repeats, trim.
-    '793_Rajendra_Kumar_MR' -> '793 rajendra kumar mr'."""
-    s = (s or "").lower()
-    s = re.sub(r"[_\-]+", " ", s)
-    s = re.sub(r"\s+", " ", s)
-    return s.strip()
-
-
-def folder_safe_name(s):
-    """NEW patient folders are human-readable: keep SPACES (no underscores),
-    drop only the characters Windows forbids, collapse repeats.
-    'Rajendra_Kumar' / 'Rajendra   Kumar' -> 'Rajendra Kumar'.
-    (File names still use underscore_name — unchanged.)"""
-    s = (s or "").strip()
-    s = re.sub(r"[_]+", " ", s)                      # underscores -> readable spaces
-    s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", s)      # Windows-illegal chars
-    s = re.sub(r"\s+", " ", s).strip()
-    s = s.rstrip(". ")                               # Windows: no trailing dot/space
-    return s or "New Folder"
-
-
-def _vowel_skeleton(s):
-    """Drop vowels so vowel-only spelling differences collapse together
-    ('rajinder'/'rajender'/'rajendra' -> 'rjndr'). Keeps the first char even if
-    it is a vowel, so 'ayush'/'aiyush' stay comparable."""
-    if not s:
-        return s
-    return s[0] + re.sub(r"[aeiou]", "", s[1:])
-
-
-def _term_category(t, tokens, num, name_part, name_norm):
-    """How strongly one query token matches a folder. Lower = better.
-    0 exact folder-number · 1 exact word · 2 name-starts-with ·
-    3 word-starts-with · 4 contains · 5 fuzzy(typo) · None = no match."""
-    if num is not None and t == num:
-        return 0
-    if t in tokens:
-        return 1
-    if name_part.startswith(t):
-        return 2
-    if any(tok.startswith(t) for tok in tokens):
-        return 3
-    if t in name_norm:
-        return 4
-    # P6 fuzzy — typo/spelling tolerance. Two signals, both guarded by a shared
-    # first letter so it stays safe across 100k folders:
-    #   (a) close overall similarity (rajendar/rajendr/rajedra -> rajendra), or
-    #   (b) same consonant-skeleton, i.e. only the vowels differ — the common
-    #       Indian-name case (rajinder/rajender/rajendra all -> 'rjndr').
-    if len(t) >= 4:
-        tv = _vowel_skeleton(t)
-        for tok in tokens:
-            if len(tok) < 4 or tok[0] != t[0]:
-                continue
-            if difflib.SequenceMatcher(None, t, tok).ratio() >= 0.8:
-                return 5
-            sk = _vowel_skeleton(tok)
-            if tv and sk and difflib.SequenceMatcher(None, tv, sk).ratio() >= 0.85:
-                return 5
-    return None
-
-
-def _folder_search_score(terms, name_norm):
-    """Rank a folder for a multi-word query. Returns (matched, sort_key) where a
-    SMALLER key ranks higher. A folder matches only if EVERY query token finds a
-    home in it. Priority order realised by the key:
-      1 exact folder-number · 2 exact patient-name · 3 name-starts · 4 word-starts
-      · 5 contains · 6 fuzzy."""
-    tokens = name_norm.split()
-    if not tokens or not terms:
-        return (False, None)
-    num = tokens[0] if tokens[0].isdigit() else None
-    name_part = " ".join(tokens[1:] if num else tokens)   # patient name (no number)
-    qjoin = " ".join(terms)
-    exact_name = (qjoin == name_part or qjoin == name_norm)
-    exact_number = False
-    cats = []
-    for t in terms:
-        c = _term_category(t, tokens, num, name_part, name_norm)
-        if c is None:
-            return (False, None)                          # a token matched nothing
-        if c == 0:
-            exact_number = True
-        cats.append(c)
-    key = (0 if exact_number else 1,      # P1: exact folder number to the very top
-           0 if exact_name else 1,        # P2: exact full patient name next
-           max(cats),                     # weakest token's strength (P3/P4/P5/P6)
-           sum(cats),                     # overall tightness of the match
-           len(name_norm),                # shorter (more specific) name first
-           name_norm)                     # stable alphabetical tie-break
-    return (True, key)
+# underscore_name(), name_key(), and the SMART SEARCH ENGINE (_norm_search,
+# folder_safe_name, _vowel_skeleton, _term_category, _folder_search_score) now
+# live in apnescan_lib.text_utils / apnescan_lib.search_engine (imported at top).
 
 
 # Document TYPE classifier — recognise WHAT the document is (by tell-tale keywords)
