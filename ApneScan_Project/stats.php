@@ -1328,6 +1328,33 @@ if (isset($_GET['admin'])) {
     #burger{display:inline-flex}
     .gsrch{max-width:none}
   }
+  /* ---------- enterprise users module ---------- */
+  .ufc{border:1px solid var(--line);background:var(--card2);color:var(--mut);border-radius:20px;padding:5px 11px;font-size:10px;font-weight:700;cursor:pointer;transition:all var(--tr);font-family:inherit}
+  .ufc:hover{color:var(--fg);border-color:var(--accent2)}
+  .ufc.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .uav{width:32px;height:32px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:11px;color:#fff;position:relative;flex:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,.15)}
+  .uav.big{width:64px;height:64px;font-size:22px;border-radius:18px}
+  .uav .on{position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;background:var(--ok);border:2px solid var(--card)}
+  .uav.big .on{width:15px;height:15px}
+  .stb{display:inline-flex;align-items:center;gap:4px;border-radius:20px;padding:2px 9px;font-size:9px;font-weight:800;white-space:nowrap}
+  .stb.g{background:rgba(34,197,94,.15);color:var(--ok)} .stb.y{background:rgba(245,158,11,.15);color:var(--warn)}
+  .stb.r{background:rgba(148,163,184,.14);color:var(--mut)} .stb.w{background:rgba(245,158,11,.18);color:var(--warn)}
+  .stb.b{background:rgba(239,68,68,.16);color:var(--bad)} .stb.p{background:rgba(139,92,246,.18);color:var(--purple)}
+  .hbar{width:56px;height:7px;border-radius:4px;background:var(--line);overflow:hidden;display:inline-block;vertical-align:middle}
+  .hbar i{display:block;height:100%;border-radius:4px}
+  .uact{display:inline-flex;gap:3px}
+  .uact button{width:24px;height:24px;border-radius:7px;border:1px solid var(--line);background:var(--card2);cursor:pointer;font-size:11px;display:inline-flex;align-items:center;justify-content:center;transition:all var(--tr)}
+  .uact button:hover{border-color:var(--accent2);transform:translateY(-1px)}
+  .profgrid{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-top:12px}
+  @media(max-width:640px){.profgrid{grid-template-columns:1fr}}
+  .pcard{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .pcard h4{margin:0 0 8px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);display:flex;gap:6px;align-items:center}
+  .pkv{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:11.5px}
+  .pkv span{color:var(--mut)} .pkv b{font-weight:600;word-break:break-word}
+  .ach{display:inline-flex;align-items:center;gap:5px;background:linear-gradient(135deg,rgba(245,158,11,.16),rgba(245,158,11,.06));border:1px solid rgba(245,158,11,.3);color:var(--warn);border-radius:10px;padding:4px 10px;font-size:10px;font-weight:800;margin:2px}
+  .ach.off{opacity:.32;filter:grayscale(1)}
+  .aii{display:flex;gap:8px;padding:6px 0;font-size:11.5px;border-bottom:1px dashed var(--line)} .aii:last-child{border:none}
+  .hring{width:64px;height:64px;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:13px;flex:none}
   /* ---------- skeleton shimmer ---------- */
   .skel:empty{min-height:90px;border-radius:10px;background:linear-gradient(100deg,var(--card2) 40%,rgba(148,163,184,.14) 50%,var(--card2) 60%);background-size:200% 100%;animation:skel 1.2s infinite}
   @keyframes skel{to{background-position:-200% 0}}
@@ -1560,7 +1587,18 @@ if (isset($_GET['admin'])) {
   <div class="page" data-p="users">
   <div class="sec"><span class="em">👤</span> Users</div>
   <div class="card"><h3><span class="em">👤</span> Saare users (<span id="ucount"></span>) <span style="color:var(--mut);font-weight:500;font-size:11px">— header pe click = sort, naam pe click = details/manage</span></h3>
-    <input id="usearch" class="no-print" placeholder="🔍 naam / desh / version / tag se dhoondo…" style="width:100%;margin-bottom:8px">
+    <input id="usearch" class="no-print" placeholder="🔍 naam / scanner / desh / region / version / tag se dhoondo…" style="width:100%;margin-bottom:8px">
+    <div class="no-print" id="ufbar" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px;align-items:center">
+      <button class="ufc on" data-f="all">Sab</button>
+      <button class="ufc" data-f="online">🟢 Online</button>
+      <button class="ufc" data-f="offline">🔴 Offline</button>
+      <button class="ufc" data-f="today">📅 Aaj active</button>
+      <button class="ufc" data-f="oldver">⚠ Purana version</button>
+      <button class="ufc" data-f="inactive">😴 14d+ inactive</button>
+      <button class="ufc" data-f="heavy">🔥 Heavy users</button>
+      <button class="ufc" data-f="attention">🚨 Dhyan chahiye</button>
+      <select id="ufCountry" style="font-size:10.5px;padding:5px 8px"><option value="">🌍 Sab desh</option></select>
+    </div>
     <div class="no-print" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">
       <span style="font-size:11px;color:var(--mut)">📁 Segments:</span>
       <span id="segbar" style="display:flex;flex-wrap:wrap;gap:5px"></span>
@@ -1579,7 +1617,7 @@ if (isset($_GET['admin'])) {
 
   
 <div id="umodal" class="no-print" onclick="if(event.target===this)closeUser()" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99;align-items:center;justify-content:center">
-    <div style="background:var(--card);color:var(--fg);border-radius:14px;max-width:460px;width:94%;max-height:90vh;overflow:auto;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.3);position:relative">
+    <div style="background:var(--card);color:var(--fg);border-radius:16px;max-width:820px;width:96%;max-height:92vh;overflow:auto;padding:22px;box-shadow:0 24px 70px rgba(0,0,0,.45);position:relative">
       <button onclick="closeUser()" style="position:absolute;top:12px;right:14px;border:none;background:var(--line);border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:16px">✕</button>
       <div id="umbody"></div>
     </div>
@@ -2067,16 +2105,106 @@ document.getElementById('al').innerHTML='<table>'+(D.adminLogins||[]).map(functi
 
 // ---- user table ----
 var sortKey='scans', sortDir=-1;
+// ================= ENTERPRISE USER MANAGEMENT =================
+// Health score (asli data se): crashes, purana version, offline duration, activity
+function uHealth(u){
+  var sc=100, why=[];
+  var crashes=(D.crashes||[]).filter(function(c){return c.client&&u.id&&String(c.client)===String(u.id).slice(0,40);}).length;
+  if(crashes){ sc-=Math.min(30,crashes*10); why.push(crashes+' crash'); }
+  if(u.version&&D.latestVersion&&String(u.version).trim()!==String(D.latestVersion).trim()){ sc-=15; why.push('purana v'+u.version); }
+  var offd=u.last?Math.floor((Date.now()/1000-u.last)/86400):999;
+  if(offd>=30){sc-=25;why.push(offd+'d offline');} else if(offd>=14){sc-=15;why.push(offd+'d offline');} else if(offd>=7){sc-=7;}
+  var dm=u.daysMap||{},w=0,dt=new Date();
+  for(var i=0;i<7;i++){var k=new Date(dt.getTime()-i*86400000).toISOString().slice(0,10);w+=parseInt(dm[k])||0;}
+  if(w===0&&offd<7)sc-=5;
+  if(u.blocked){sc=Math.min(sc,20);why.push('blocked');}
+  return {s:Math.max(5,sc), why:why.join(' · ')||'sab theek', week:w};
+}
+function uToday(u){ var k=new Date().toISOString().slice(0,10); return parseInt((u.daysMap||{})[k])||0; }
+function uStatus(u){
+  if(u.blocked) return '<span class="stb b">🚫 Blocked</span>';
+  var out=u.online?'<span class="stb g">🟢 Online</span>'
+    :((Date.now()/1000-(u.last||0))<1800?'<span class="stb y">🟡 Idle</span>':'<span class="stb r">🔴 Offline</span>');
+  if(u.version&&D.latestVersion&&String(u.version).trim()!==String(D.latestVersion).trim()) out+=' <span class="stb w">⚠ Update</span>';
+  if((u.tags||'').toLowerCase().indexOf('vip')>-1||(u.tags||'').toLowerCase().indexOf('premium')>-1) out+=' <span class="stb p">⭐ VIP</span>';
+  return out;
+}
+function uAvatar(u,big){
+  var nm=(u.name&&u.name!=='—')?u.name:'?';
+  var ini=nm.trim().split(/\s+/).slice(0,2).map(function(w){return (w[0]||'').toUpperCase();}).join('')||'?';
+  var cols=['#2563EB','#7C3AED','#0D9488','#DB2777','#EA580C','#16A34A','#0891B2','#9333EA'];
+  var hsh=0; for(var i=0;i<nm.length;i++)hsh=(hsh*31+nm.charCodeAt(i))>>>0;
+  return '<span class="uav'+(big?' big':'')+'" style="background:'+cols[hsh%cols.length]+'">'+esc(ini)+(u.online?'<span class="on"></span>':'')+'</span>';
+}
+function uCSV(rows){
+  var csv='name,status,scanner,total_scans,today,last_seen,joined,version,country,region,method,health\n'
+    +rows.map(function(u){var h=uHealth(u);
+      return '"'+String(u.name).replace(/"/g,'""')+'",'+(u.online?'online':'offline')+',"'+String(u.model||'').replace(/"/g,'""')+'",'
+      +u.scans+','+uToday(u)+','+(u.last?new Date(u.last*1000).toISOString():'')+','+(u.first?new Date(u.first*1000).toISOString().slice(0,10):'')
+      +','+(u.version||'')+','+(u.country||'')+',"'+String(u.region||'').replace(/"/g,'""')+'",'+(u.method||'')+','+h.s;}).join('\n');
+  var a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='apnescan-users.csv';a.click();
+  if(window.showToast)showToast('⬇ Users CSV taiyaar','ok');
+}
+var _uf='all';
+(function(){ var bar=document.getElementById('ufbar'); if(!bar)return;
+  [].forEach.call(bar.querySelectorAll('.ufc'),function(b){ b.onclick=function(){
+    [].forEach.call(bar.querySelectorAll('.ufc'),function(x){x.classList.remove('on');});
+    b.classList.add('on'); _uf=b.getAttribute('data-f'); renderUsers(); }; });
+  var cs=document.getElementById('ufCountry'); var seen={};
+  (D.userList||[]).forEach(function(u){ if(u.country&&!seen[u.country]){seen[u.country]=1;
+    var o=document.createElement('option'); o.value=u.country; o.textContent=flag(u.country)+' '+u.country; cs.appendChild(o);} });
+  cs.onchange=renderUsers;
+})();
 function renderUsers(){
   var q=(document.getElementById('usearch').value||'').toLowerCase();
-  var rows=(D.userList||[]).filter(function(u){ return (u.name+' '+u.country+' '+u.version+' '+u.method+' '+u.tags+' '+u.model).toLowerCase().indexOf(q)>=0; });
-  rows.sort(function(a,b){ var x=a[sortKey],y=b[sortKey]; if(typeof x==='string'){return sortDir*x.localeCompare(y);} return sortDir*((x||0)-(y||0)); });
+  var cn=(document.getElementById('ufCountry')||{}).value||'';
+  var med=0; (D.userList||[]).forEach(function(u){med=Math.max(med,u.scans||0);});
+  var rows=(D.userList||[]).filter(function(u){
+    if(q&&(u.name+' '+u.country+' '+(u.region||'')+' '+u.version+' '+u.method+' '+u.tags+' '+u.model).toLowerCase().indexOf(q)<0)return false;
+    if(cn&&u.country!==cn)return false;
+    var offd=u.last?Math.floor((Date.now()/1000-u.last)/86400):999;
+    if(_uf==='online'&&!u.online)return false;
+    if(_uf==='offline'&&u.online)return false;
+    if(_uf==='today'&&uToday(u)<=0)return false;
+    if(_uf==='oldver'&&!(u.version&&D.latestVersion&&u.version!==D.latestVersion))return false;
+    if(_uf==='inactive'&&offd<14)return false;
+    if(_uf==='heavy'&&(u.scans||0)<Math.max(10,med*0.4))return false;
+    if(_uf==='attention'&&uHealth(u).s>=80)return false;
+    return true;
+  });
+  rows.forEach(function(u){ u._h=uHealth(u).s; u._t=uToday(u); });
+  rows.sort(function(a,b){ var x=a[sortKey],y=b[sortKey]; if(typeof x==='string'){return sortDir*String(x).localeCompare(String(y));} return sortDir*((x||0)-(y||0)); });
   document.getElementById('ucount').textContent=rows.length;
-  var h='<tr><th class="no-print" style="width:22px"><input type="checkbox" id="uall" title="Sab chuno"></th>'+[['name','Name'],['scans','Scans'],['last','Last seen'],['first','Joined'],['version','Ver'],['country','Desh'],['method','Method']].map(function(c){return '<th data-k="'+c[0]+'">'+c[1]+(sortKey===c[0]?(sortDir<0?' ▼':' ▲'):'')+'</th>';}).join('')+'</tr>';
-  rows.forEach(function(u,i){ h+='<tr data-i="'+i+'" style="'+(u.blocked?'opacity:.45':'')+'"><td class="no-print" style="text-align:center"><input type="checkbox" class="ubox" data-id="'+esc(u.id)+'"></td><td style="cursor:pointer" data-open="'+i+'">'+(u.blocked?'🚫 ':(u.online?'🟢 ':''))+esc(u.name)+(u.tags?' '+u.tags.split(',').map(function(t){return '<span class="tag">'+esc(t.trim())+'</span>';}).join(''):'')+'</td><td><b>'+u.scans+'</b></td><td>'+ago(u.last)+' ago</td><td>'+(u.first?new Date(u.first*1000).toISOString().slice(0,10):'—')+'</td><td>'+(u.version||'—')+'</td><td>'+(u.country?flag(u.country)+' '+u.country:'—')+'</td><td>'+({escl:'Network',wia:'USB',twain:'TWAIN',naps2:'NAPS2'}[u.method]||u.method||'—')+'</td></tr>'; });
+  var COLS=[['name','User'],['scans','Scans'],['_t','Aaj'],['last','Last seen'],['first','Joined'],['version','Ver'],['country','Location'],['method','Method'],['_h','Health']];
+  var h='<tr><th class="no-print" style="width:22px"><input type="checkbox" id="uall" title="Sab chuno"></th>'
+    +COLS.map(function(c){return '<th data-k="'+c[0]+'">'+c[1]+(sortKey===c[0]?(sortDir<0?' ▼':' ▲'):'')+'</th>';}).join('')
+    +'<th class="no-print">Actions</th></tr>';
+  rows.forEach(function(u,i){
+    var hh=u._h, hc=hh>=80?'var(--ok)':(hh>=60?'var(--warn)':'var(--bad)');
+    h+='<tr data-i="'+i+'" style="'+(u.blocked?'opacity:.45':'')+'">'
+      +'<td class="no-print" style="text-align:center"><input type="checkbox" class="ubox" data-id="'+esc(u.id)+'"></td>'
+      +'<td style="cursor:pointer;min-width:150px" data-open="'+i+'"><div style="display:flex;gap:8px;align-items:center">'+uAvatar(u)
+        +'<div><div style="font-weight:700">'+esc(u.name)+'</div><div style="margin-top:1px">'+uStatus(u)
+        +(u.tags?' '+u.tags.split(',').slice(0,2).map(function(t){return '<span class="tag">'+esc(t.trim())+'</span>';}).join(''):'')+'</div></div></div></td>'
+      +'<td><b>'+fmt(u.scans)+'</b><div style="color:var(--mut);font-size:9px">'+esc((u.model||'').slice(0,18)||'—')+'</div></td>'
+      +'<td>'+(u._t?'<b style="color:var(--ok)">'+u._t+'</b>':'<span style="color:var(--mut)">0</span>')+'</td>'
+      +'<td>'+ago(u.last)+'</td>'
+      +'<td>'+(u.first?new Date(u.first*1000).toISOString().slice(0,10):'—')+'</td>'
+      +'<td>'+(u.version?('v'+u.version+(D.latestVersion&&u.version!==D.latestVersion?' ⚠':'')):'—')+'</td>'
+      +'<td>'+(u.country?flag(u.country)+' '+u.country:'—')+(u.region?'<div style="color:var(--mut);font-size:9px">'+esc(u.region)+'</div>':'')+'</td>'
+      +'<td>'+({escl:'🌐 Network',wia:'🔌 USB',twain:'🔌 TWAIN',naps2:'NAPS2'}[u.method]||u.method||'—')+'</td>'
+      +'<td title="'+esc(uHealth(u).why)+'"><span class="hbar"><i style="width:'+hh+'%;background:'+hc+'"></i></span> <b style="color:'+hc+';font-size:10px">'+hh+'%</b></td>'
+      +'<td class="no-print"><span class="uact">'
+        +'<button title="Profile" data-open="'+i+'">👁</button>'
+        +'<button title="Message" data-msg="'+i+'">📨</button>'
+        +'<button title="Export CSV" data-csv="'+i+'">⬇</button></span></td>'
+      +'</tr>';
+  });
   var t=document.getElementById('utable'); t.innerHTML=h;
   [].forEach.call(t.querySelectorAll('th[data-k]'),function(th){ th.style.cursor='pointer'; th.onclick=function(){ var k=th.getAttribute('data-k'); if(sortKey===k)sortDir*=-1; else {sortKey=k;sortDir=(k==='name'||k==='country'||k==='version'||k==='method')?1:-1;} renderUsers(); }; });
-  [].forEach.call(t.querySelectorAll('td[data-open]'),function(td){ td.onclick=function(){ showUser(rows[+td.getAttribute('data-open')]); }; });
+  [].forEach.call(t.querySelectorAll('[data-open]'),function(td){ td.onclick=function(){ showUser(rows[+td.getAttribute('data-open')]); }; });
+  [].forEach.call(t.querySelectorAll('[data-msg]'),function(b){ b.onclick=function(e){ e.stopPropagation(); showUser(rows[+b.getAttribute('data-msg')]); setTimeout(function(){var f=document.querySelector('#umbody input[name=msg]'); if(f)f.focus();},150); }; });
+  [].forEach.call(t.querySelectorAll('[data-csv]'),function(b){ b.onclick=function(e){ e.stopPropagation(); uCSV([rows[+b.getAttribute('data-csv')]]); }; });
   [].forEach.call(t.querySelectorAll('.ubox'),function(b){ b.onchange=bulkSync; });
   var ua=document.getElementById('uall'); if(ua) ua.onchange=function(){ [].forEach.call(t.querySelectorAll('.ubox'),function(b){ b.checked=ua.checked; }); bulkSync(); };
   bulkSync();
@@ -2084,57 +2212,88 @@ function renderUsers(){
 function bulkSync(){ var ids=[].filter.call(document.querySelectorAll('.ubox'),function(b){return b.checked;}).map(function(b){return b.getAttribute('data-id');}); document.getElementById('bulkids').value=ids.join(','); document.getElementById('bulkn').textContent=ids.length; document.getElementById('bulkform').style.display=ids.length?'flex':'none'; }
 (function(){ var ba=document.getElementById('bulkba'); if(ba) ba.onchange=function(){ document.getElementById('bulktags').style.display=ba.value==='tag'?'':'none'; document.getElementById('bulkmsg').style.display=ba.value==='msg'?'':'none'; }; })();
 function bulkGo(){ var n=document.getElementById('bulkids').value.split(',').filter(Boolean).length; if(!n){alert('Pehle users chuno');return false;} return confirm(n+' users par ye action lagaayein?'); }
+// ---------------- PROFILE PAGE (user details) ----------------
 function showUser(u){
   if(!u) return;
-  var mth={escl:'Network (eSCL/WiFi)',wia:'USB (WIA)',twain:'TWAIN',naps2:'NAPS2'}[u.method]||u.method||'—';
+  var mth={escl:'Network (eSCL/WiFi)',wia:'USB (WIA)',twain:'USB (TWAIN)',naps2:'NAPS2'}[u.method]||u.method||'—';
   var share=(D.total>0)?((u.scans*100/D.total).toFixed(u.scans*100/D.total<1?2:1)+'%'):'—';
-  function row(l,v){ return '<tr><td style="color:var(--mut);padding:5px 14px 5px 0;white-space:nowrap">'+l+'</td><td style="font-weight:600">'+v+'</td></tr>'; }
-  var html='<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'+
-      '<div style="font-size:26px">'+(u.blocked?'🚫':(u.online?'🟢':'👤'))+'</div>'+
-      '<div><div style="font-size:20px;font-weight:700">'+esc(u.name!=='—'?u.name:'(bina naam)')+'</div>'+
-      '<div style="color:var(--mut);font-size:13px">'+(u.online?'Abhi online':'Offline · '+ago(u.last)+' pehle')+'</div></div></div>'+
-    '<table style="width:100%;font-size:14px">'+
-      row('Total scans','<span style="font-size:18px">'+fmt(u.scans)+'</span>')+
-      row('World me hissa',share)+
-      row('Country',u.country?flag(u.country)+' '+u.country:'—')+
-      ((u.region||u.city)?row('Location',esc([u.city,u.region].filter(Boolean).join(', ')||'—')):'')+
-      row('App version',u.version?'v'+u.version:'—')+
-      row('Scan method',mth)+
-      row('Scanner model',esc(u.model||'—'))+
-      row('Joined',u.first?new Date(u.first*1000).toLocaleString():'—')+
-      row('Aakhri activity',u.last?new Date(u.last*1000).toLocaleString():'—')+
-      row('Active din',(u.active&&u.active.length?u.active.length+' din':'—'))+
-      (u.note?row('Note','<i>'+esc(u.note)+'</i>'):'')+
-    '</table>'+
-    ((u.feats&&u.feats.length)?'<div style="margin-top:10px"><div style="color:var(--mut);font-size:12px;margin-bottom:4px">🧰 Istemaal ke tools</div>'+u.feats.map(function(f){return '<span class="tag">'+esc(FEATLBL[f]||f)+'</span>';}).join(' ')+'</div>':'')+
-    (function(){
-      var dm=u.daysMap||{};
-      var keys=Object.keys(dm).filter(function(k){return (parseInt(dm[k])||0)>0;});
-      function since(n){var s=0,dt=new Date();for(var i=0;i<n;i++){var d=new Date(dt.getTime()-i*86400000).toISOString().slice(0,10);s+=parseInt(dm[d])||0;}return s;}
-      function fdate(k){var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var p=k.split('-');return (parseInt(p[2],10))+' '+(mn[parseInt(p[1],10)-1]||'')+' '+p[0];}
-      // 60-din ka heatmap — rang ki gehraai = us din kitne scan (zyada = gehra)
+  var H=uHealth(u), hc=H.s>=80?'var(--ok)':(H.s>=60?'var(--warn)':'var(--bad)');
+  var dm=u.daysMap||{};
+  function since(n){var s=0,dt=new Date();for(var i=0;i<n;i++){var d=new Date(dt.getTime()-i*86400000).toISOString().slice(0,10);s+=parseInt(dm[d])||0;}return s;}
+  var crashes=(D.crashes||[]).filter(function(c){return c.client&&u.id&&String(c.client)===String(u.id).slice(0,40);});
+  var fbs=(D.feedback||[]).filter(function(f){return (f.client&&String(f.client)===String(u.id).slice(0,40))||(f.name&&u.name!=='—'&&f.name===u.name);});
+  function kv(l,v){ return '<span>'+l+'</span><b>'+v+'</b>'; }
+  // achievements (asli data se)
+  var actDays=(u.active&&u.active.length)||0;
+  var ACH=[['🥉','100 Scans',u.scans>=100],['🥈','500 Scans',u.scans>=500],['🥇','1000 Scans',u.scans>=1000],
+    ['📅','30 Active Days',actDays>=30],['🔥','Aaj active',uToday(u)>0],['⚡','Power User',u.scans>=Math.max(50,(D.total||1)*0.1)]];
+  // AI insights (rules — sirf asli data)
+  var ins=[]; var w1=since(7), w2=since(14)-since(7);
+  if(w2>0&&w1>w2*1.25) ins.push(['📈','Is hafte scanning <b>'+Math.round((w1-w2)*100/w2)+'% badhi</b> hai pichhle hafte se.']);
+  if(w2>0&&w1<w2*0.6) ins.push(['📉','Is hafte scanning <b>'+Math.round((w2-w1)*100/Math.max(1,w2))+'% ghati</b> — dhyaan dein.']);
+  if(u.version&&D.latestVersion&&String(u.version).trim()!==String(D.latestVersion).trim()) ins.push(['⚠','Purane version v'+esc(u.version)+' par hai (latest v'+D.latestVersion+') — 📨 Message se update yaad dilayein.']);
+  var cr7=crashes.filter(function(c){return (Date.now()/1000-(c.t||0))<7*86400;}).length;
+  if(cr7) ins.push(['💥','Pichhle 7 din me <b>'+cr7+' crash</b> — jaanch zaroori.']);
+  var offd=u.last?Math.floor((Date.now()/1000-u.last)/86400):0;
+  if(offd>=14) ins.push(['😴','<b>'+offd+' din</b> se offline — follow-up ka time.']);
+  if(!ins.length) ins.push(['✅','Sab normal — koi khaas dhyaan nahi chahiye.']);
+  var html=
+   '<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:4px">'
+    +uAvatar(u,true)
+    +'<div style="flex:1;min-width:150px"><div style="font-size:20px;font-weight:800">'+esc(u.name!=='—'?u.name:'(bina naam)')+'</div>'
+    +'<div style="margin-top:4px">'+uStatus(u)+'</div>'
+    +'<div style="color:var(--mut);font-size:11px;margin-top:4px">'+(u.online?'Abhi online':'Last seen '+ago(u.last)+' pehle')+' · Joined '+(u.first?new Date(u.first*1000).toLocaleDateString():'—')+'</div></div>'
+    +'<div class="hring" style="background:conic-gradient('+hc+' '+(H.s*3.6)+'deg,var(--line) 0)"><span style="background:var(--card);width:48px;height:48px;border-radius:50%;display:grid;place-items:center;color:'+hc+'">'+H.s+'%</span></div>'
+   +'</div>'
+   +'<div style="color:var(--mut);font-size:10px;margin-bottom:6px">Health: '+esc(H.why)+'</div>'
+   +'<div class="kpis" style="grid-template-columns:repeat(auto-fill,minmax(110px,1fr));margin-top:8px">'
+    +_kpi('','📄',fmt(u.scans),'Total scans')+_kpi('g','📅',fmt(since(1)),'Aaj')
+    +_kpi('p','🗓',fmt(since(7)),'7 din')+_kpi('y','📆',fmt(since(30)),'30 din')
+    +_kpi('o','🌍',share,'World share')+_kpi('','⚡',actDays,'Active din')
+   +'</div>'
+   +'<div class="profgrid">'
+    +'<div class="pcard"><h4>👤 Overview</h4><div class="pkv">'
+      +kv('User ID',esc(String(u.id).slice(0,18))+'…')+kv('Country',(u.country?flag(u.country)+' '+u.country:'—'))
+      +((u.region||u.city)?kv('Region',esc([u.city,u.region].filter(Boolean).join(', '))):'')
+      +kv('IP',esc(u.ip||'—'))+kv('Joined',u.first?new Date(u.first*1000).toLocaleString():'—')
+      +kv('Last activity',u.last?new Date(u.last*1000).toLocaleString():'—')
+      +(u.note?kv('📝 Note','<i>'+esc(u.note)+'</i>'):'')
+    +'</div></div>'
+    +'<div class="pcard"><h4>🖨 Device &amp; Scanner</h4><div class="pkv">'
+      +kv('Scanner',esc(u.model||'—'))+kv('Connection',mth)
+      +kv('App version',(u.version?'v'+u.version:'—')+(u.version&&D.latestVersion&&u.version!==D.latestVersion?' <span class="stb w">⚠ old</span>':' <span class="stb g">✓ latest</span>'))
+      +kv('License','<span class="stb g">Free · lifetime</span>')
+      +kv('Crashes',crashes.length?('<span style="color:var(--bad);font-weight:700">'+crashes.length+'</span>'):'0 🎉')
+    +'</div></div>'
+   +'</div>'
+   +((u.feats&&u.feats.length)?'<div class="pcard" style="margin-top:11px"><h4>🧰 Feature usage</h4>'+u.feats.map(function(f){return '<span class="tag">'+esc(FEATLBL[f]||f)+'</span>';}).join(' ')+'</div>':'')
+   +'<div class="pcard" style="margin-top:11px"><h4>🏆 Achievements</h4>'
+     +ACH.map(function(a){return '<span class="ach'+(a[2]?'':' off')+'">'+a[0]+' '+a[1]+'</span>';}).join('')+'</div>'
+   +'<div class="pcard" style="margin-top:11px"><h4>🤖 AI Insights</h4>'
+     +ins.map(function(i){return '<div class="aii"><span>'+i[0]+'</span><div>'+i[1]+'</div></div>';}).join('')+'</div>'
+   +(function(){
       var mx=1; for(var kk in dm){ if((parseInt(dm[kk])||0)>mx) mx=parseInt(dm[kk]); }
       var strip='',dt=new Date();
       for(var i=59;i>=0;i--){ var dd=new Date(dt.getTime()-i*86400000).toISOString().slice(0,10); var c=parseInt(dm[dd])||0;
-        var a=c>0?(0.2+0.8*Math.min(1,c/mx)):0; var bg=c>0?('rgba(27,175,122,'+a.toFixed(2)+')'):'var(--line)';
-        strip+='<span title="'+fdate(dd)+': '+c+' scan" style="width:9px;height:9px;border-radius:2px;background:'+bg+'"></span>'; }
-      var listRows = keys.sort().reverse().slice(0,120).map(function(k){
-        return '<tr><td style="color:var(--mut);padding:2px 0">'+fdate(k)+'</td><td style="text-align:right;font-weight:600">'+fmt(dm[k])+' scan</td></tr>'; }).join('');
-      return '<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">'+
-        '<div style="font-weight:700;font-size:13px;margin-bottom:6px">📊 Kab kitne scan (din-wise)</div>'+
-        '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">Aaj: <b style="color:var(--fg)">'+fmt(since(1))+'</b> · Is hafte: <b style="color:var(--fg)">'+fmt(since(7))+'</b> · Is mahine: <b style="color:var(--fg)">'+fmt(since(30))+'</b> · Kul: <b style="color:var(--fg)">'+fmt(u.scans)+'</b></div>'+
-        '<div style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:8px" title="pichhle 60 din — gehra rang = us din zyada scan">'+strip+'</div>'+
-        (listRows?'<div style="max-height:160px;overflow:auto"><table style="width:100%;font-size:12px">'+listRows+'</table></div>'
-                 :'<div style="color:var(--mut);font-size:12px">— din-wise scan data abhi record nahi hua —</div>')+
-        '</div>';
-    })()+
-    '<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px">'+
-      '<div style="font-weight:700;font-size:13px;margin-bottom:8px">✏️ Manage</div>'+
-      '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="rename"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="name" value="'+esc(u.name!=='—'?u.name:'')+'" placeholder="Naam badlo" style="width:60%"> <button class="btn">Rename</button></form>'+
-      '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="tag"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="tags" value="'+esc(u.tags)+'" placeholder="Tags (comma se): VIP,Hospital" style="width:60%"> <button class="btn">Tag</button></form>'+
-      '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="note"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="note" value="'+esc(u.note)+'" placeholder="Note likho" style="width:60%"> <button class="btn">Note</button></form>'+
-      '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="umsg"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="msg" placeholder="Is user ko message (app me dikhega)" style="width:60%"> <button class="btn">📨 Message</button></form>'+
-    '</div>';
+        var a=c>0?(0.25+0.75*Math.min(1,c/mx)):0; var bg=c>0?('rgba(59,130,246,'+a.toFixed(2)+')'):'var(--line)';
+        strip+='<span title="'+dd+': '+c+' scan" style="width:9px;height:9px;border-radius:2px;background:'+bg+'"></span>'; }
+      var keys=Object.keys(dm).filter(function(k){return (parseInt(dm[k])||0)>0;}).sort().reverse().slice(0,90);
+      var hist=keys.map(function(k){return '<tr><td style="color:var(--mut);padding:2px 0">'+k+'</td><td style="text-align:right;font-weight:600">'+fmt(dm[k])+' scan</td></tr>';}).join('');
+      return '<div class="pcard" style="margin-top:11px"><h4>📊 Scan history (60-din heatmap + din-wise)</h4>'
+        +'<div style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:8px">'+strip+'</div>'
+        +(hist?'<div style="max-height:150px;overflow:auto"><table style="font-size:11px">'+hist+'</table></div>':'<div style="color:var(--mut);font-size:11px">— abhi record nahi —</div>')+'</div>';
+    })()
+   +(crashes.length?'<div class="pcard" style="margin-top:11px"><h4>💥 Crash history</h4><div style="max-height:120px;overflow:auto"><table style="font-size:11px">'
+      +crashes.slice(0,15).map(function(c){return '<tr><td>'+esc((c.err||'').slice(0,50))+'</td><td style="text-align:right;color:var(--mut);white-space:nowrap">v'+(c.v||'?')+' · '+ago(c.t)+'</td></tr>';}).join('')+'</table></div></div>':'')
+   +(fbs.length?'<div class="pcard" style="margin-top:11px"><h4>💬 Feedback history</h4>'
+      +fbs.slice(0,6).map(function(f){return '<div class="aii"><span>'+('★'.repeat(f.rating||0)||'—')+'</span><div>'+esc((f.msg||'').slice(0,90))+(f.reply?' <span class="stb g">↩ replied</span>':' <span class="stb y">pending</span>')+'</div></div>';}).join('')+'</div>':'')
+   +'<div class="pcard" style="margin-top:11px"><h4>✏️ Manage</h4>'
+     +'<form method="post" style="margin-bottom:6px;display:flex;gap:6px"><input type="hidden" name="act" value="rename"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="name" value="'+esc(u.name!=='—'?u.name:'')+'" placeholder="Naam badlo" style="flex:1"><button class="btn">Rename</button></form>'
+     +'<form method="post" style="margin-bottom:6px;display:flex;gap:6px"><input type="hidden" name="act" value="tag"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="tags" value="'+esc(u.tags)+'" placeholder="Tags: VIP,Hospital,Beta" style="flex:1"><button class="btn">Tag</button></form>'
+     +'<form method="post" style="margin-bottom:6px;display:flex;gap:6px"><input type="hidden" name="act" value="note"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="note" value="'+esc(u.note)+'" placeholder="Admin note (scanner badla, call kiya…)" style="flex:1"><button class="btn">Note</button></form>'
+     +'<form method="post" style="margin-bottom:6px;display:flex;gap:6px"><input type="hidden" name="act" value="umsg"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="msg" placeholder="Is user ko message (app me dikhega)" style="flex:1"><button class="btn">📨 Message</button></form>'
+     +'<button class="btn gray" onclick="uCSV([JSON.parse(this.getAttribute(\'data-u\'))])" data-u="'+esc(JSON.stringify({name:u.name,online:u.online,model:u.model,scans:u.scans,daysMap:{},last:u.last,first:u.first,version:u.version,country:u.country,region:u.region,method:u.method,id:u.id}))+'">⬇ User report (CSV)</button>'
+   +'</div>';
   document.getElementById('umbody').innerHTML=html;
   document.getElementById('umodal').style.display='flex';
 }
