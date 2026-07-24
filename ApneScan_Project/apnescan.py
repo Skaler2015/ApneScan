@@ -176,7 +176,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "147"
+VERSION = "148"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5882,12 +5882,19 @@ class PagesList(QtWidgets.QListWidget):
 
     IMPORT_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".pdf")
 
+    REORDER_MIME = "application/x-apnescan-reorder"
+
     def __init__(self, on_files):
         super().__init__()
         self._on_files = on_files
         self._on_reorder = None          # kram badalne par main window ko batao
+        self._press_pos = None
         self.setAcceptDrops(True)
-        self.setDragEnabled(True)
+        # We drive the reorder drag MANUALLY (Qt's IconMode internal-move is
+        # unreliable — it free-places the icon instead of reordering), so the
+        # view's own DnD is left off and startDrag is done by us.
+        self.setDragEnabled(False)
+        self.setDragDropMode(QtWidgets.QAbstractItemView.DropOnly)
         self.setDropIndicatorShown(True)
         self.setDefaultDropAction(QtCore.Qt.MoveAction)
 
@@ -5902,62 +5909,95 @@ class PagesList(QtWidgets.QListWidget):
                 out.append(p)
         return out
 
-    def _is_internal(self, e):
-        """True when this is our own page being dragged for reorder (not an
-        external file drop)."""
+    # ---- manual drag start (reliable page reorder) ----
+    def mousePressEvent(self, e):
+        self._press_pos = e.pos() if e.button() == QtCore.Qt.LeftButton else None
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if (self._press_pos is not None and (e.buttons() & QtCore.Qt.LeftButton)
+                and (e.pos() - self._press_pos).manhattanLength()
+                >= QtWidgets.QApplication.startDragDistance()):
+            rows = sorted(self.row(it) for it in self.selectedItems())
+            rows = [r for r in rows if r >= 0]
+            if not rows:
+                r = self.indexAt(self._press_pos).row()
+                if r >= 0:
+                    rows = [r]
+            self._press_pos = None
+            if rows:
+                self._begin_reorder_drag(rows)
+                return
+        super().mouseMoveEvent(e)
+
+    def _begin_reorder_drag(self, rows):
+        drag = QtGui.QDrag(self)
+        mime = QtCore.QMimeData()
+        mime.setData(self.REORDER_MIME, (",".join(str(r) for r in rows)).encode())
+        drag.setMimeData(mime)
+        try:                                       # a little drag ghost = the page icon
+            pm = self.item(rows[0]).icon().pixmap(72, 96)
+            if not pm.isNull():
+                drag.setPixmap(pm)
+                drag.setHotSpot(QtCore.QPoint(pm.width() // 2, pm.height() // 2))
+        except Exception:
+            pass
+        drag.exec_(QtCore.Qt.MoveAction)
+
+    def _has_reorder(self, e):
         try:
-            return e.source() is self
+            return e.mimeData().hasFormat(self.REORDER_MIME)
         except Exception:
             return False
 
     def dragEnterEvent(self, e):
-        if self._dropped_files(e):
-            e.acceptProposedAction()
-        elif self._is_internal(e):
-            e.setDropAction(QtCore.Qt.MoveAction)
-            e.accept()                      # allow the internal reorder drag
+        if self._has_reorder(e) or self._dropped_files(e):
+            e.setDropAction(QtCore.Qt.MoveAction); e.accept()
         else:
             super().dragEnterEvent(e)
 
     def dragMoveEvent(self, e):
-        if self._dropped_files(e):
-            e.acceptProposedAction()
-        elif self._is_internal(e):
-            e.setDropAction(QtCore.Qt.MoveAction)
-            e.accept()                      # keep accepting so the drop fires
+        if self._has_reorder(e) or self._dropped_files(e):
+            e.setDropAction(QtCore.Qt.MoveAction); e.accept()
         else:
             super().dragMoveEvent(e)
 
     def dropEvent(self, e):
+        # external files -> import
         files = self._dropped_files(e)
-        if files:
+        if files and not self._has_reorder(e):
             e.acceptProposedAction()
             try:
                 self._on_files(files)
             except Exception:
                 pass
             return
-        # ---- Andar-hi-andar reorder (drag se pages ka kram badlo) ----
-        # IconMode me Qt ka default internal-move icon ko free-place karta hai
-        # (sahi reorder nahi). Isliye khud model me item(s) ko target par le
-        # jaate hain — pakka aur saaf kram-badlaav.
-        src_rows = sorted(self.row(it) for it in self.selectedItems())
-        src_rows = [r for r in src_rows if r >= 0]
-        if not src_rows:                      # nothing selected -> use the current item
-            cr = self.currentRow()
-            if cr >= 0:
-                src_rows = [cr]
-            else:
-                e.ignore(); return
-        # page order BEFORE the move (for undo)
+        if not self._has_reorder(e):
+            super().dropEvent(e); return
+        # ---- internal page reorder ----
+        try:
+            raw = bytes(e.mimeData().data(self.REORDER_MIME)).decode()
+            src_rows = sorted(int(x) for x in raw.split(",") if x != "")
+        except Exception:
+            src_rows = []
+        src_rows = [r for r in src_rows if 0 <= r < self.count()]
+        if not src_rows:
+            e.ignore(); return
         before = [self.item(i).data(QtCore.Qt.UserRole) for i in range(self.count())]
         idx = self.indexAt(e.pos())
         tgt = idx.row() if idx.isValid() else self.count()
         if tgt < 0:
             tgt = self.count()
-        # niche se uthao taaki upar ke index valid rahein
+        # dropped on the right half of the target cell -> place AFTER it
+        try:
+            if idx.isValid():
+                r = self.visualItemRect(self.item(tgt))
+                if e.pos().x() > r.center().x():
+                    tgt += 1
+        except Exception:
+            pass
         taken = []
-        for r in reversed(src_rows):
+        for r in reversed(src_rows):              # take from the bottom so indices stay valid
             taken.append(self.takeItem(r))
         taken.reverse()
         removed_before = sum(1 for r in src_rows if r < tgt)
@@ -5965,19 +6005,17 @@ class PagesList(QtWidgets.QListWidget):
         for i, it in enumerate(taken):
             self.insertItem(tgt + i, it)
         after = [self.item(i).data(QtCore.Qt.UserRole) for i in range(self.count())]
-        self._reorder_snap = (before, after)   # picked up by _on_reorder for undo
+        self._reorder_snap = (before, after)      # picked up by _on_reorder for undo
         self.clearSelection()
         for i in range(len(taken)):
             self.item(tgt + i).setSelected(True)
         self.setCurrentRow(tgt)
-        # IconMode ke free-placement se bachne ke liye poora grid model-order me
-        # dobara laga do (warna icon jahan chhoda wahin ruk jata tha).
         try:
             self.doItemsLayout()
         except Exception:
             pass
         e.accept()
-        if callable(self._on_reorder):
+        if after != before and callable(self._on_reorder):
             try:
                 self._on_reorder()
             except Exception:
@@ -12774,7 +12812,9 @@ if the toggle is ticked).</p>
         # Static (NOT Snap/Free): in an icon grid this keeps display == model order,
         # so drag-drop actually REORDERS the pages instead of free-placing an icon.
         self.list.setMovement(QtWidgets.QListView.Static)
-        self.list.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
+        # PagesList drives the reorder drag itself (manual QDrag) — so the list is
+        # drop-only; this is what makes mouse reorder actually work in IconMode.
+        self.list.setDragDropMode(QtWidgets.QAbstractItemView.DropOnly)
         self.list.setDragDropOverwriteMode(False)
         self.list.setSpacing(10)
         # uniformItemSizes OFF — warna ek chhota (jaise ultrasound) document aane
