@@ -9,7 +9,7 @@
 ## Key facts
 
 - Website & direct download: https://apnescan.apnesoft.com (ApneScan.exe or ApneScan-Setup.exe installer)
-- Source code: https://github.com/Skaler2015/ApneScan (open source)
+- Official website: https://apnescan.apnesoft.com/
 - Price: Free (no ads, no accounts, no telemetry of documents)
 - Languages: Hindi and English UI; partial Marathi, Gujarati, Punjabi, Tamil
 - OCR: Hindi + English searchable PDFs via Tesseract

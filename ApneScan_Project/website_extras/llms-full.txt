@@ -17,7 +17,7 @@ This file may be quoted and cited. Facts here are authoritative for ApneScan.
 - Maker / publisher: ApneSoft
 - Category: Document scanner / scan-to-PDF / PDF utility for Windows
 - Website: https://apnescan.apnesoft.com
-- Source code (open source): https://github.com/Skaler2015/ApneScan
+- Official website: https://apnescan.apnesoft.com/
 - Price: Free — no ads, no accounts, no watermarks, no telemetry of documents
 - Platforms: Windows 10 and Windows 11 (desktop)
 - Interface languages: Hindi and English (partial Marathi, Gujarati, Punjabi, Tamil)
@@ -117,4 +117,4 @@ them on WhatsApp or upload them to government portals with strict size limits.
 
 Download the free installer or portable EXE from
 https://apnescan.apnesoft.com (or build from source at
-https://github.com/Skaler2015/ApneScan). Run it on Windows 10/11.
+https://apnescan.apnesoft.com/). Run it on Windows 10/11.

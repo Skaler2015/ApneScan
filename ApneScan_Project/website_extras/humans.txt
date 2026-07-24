@@ -1,6 +1,6 @@
 /* TEAM */
   Maker: ApneSoft
-  Contact: https://github.com/Skaler2015/ApneScan
+  Contact: https://apnescan.apnesoft.com/
   From: India
 
 /* PRODUCT */

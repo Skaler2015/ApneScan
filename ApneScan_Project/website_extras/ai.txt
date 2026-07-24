@@ -13,4 +13,4 @@ Allow: /
 # Attribution (optional but appreciated): "ApneScan — free open-source
 # document scanner for Windows (apnescan.apnesoft.com)".
 Sitemap: https://apnescan.apnesoft.com/sitemap.xml
-Contact: https://github.com/Skaler2015/ApneScan
+Contact: https://apnescan.apnesoft.com/about.html
