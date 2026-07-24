@@ -176,7 +176,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "146"
+VERSION = "147"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5902,15 +5902,29 @@ class PagesList(QtWidgets.QListWidget):
                 out.append(p)
         return out
 
+    def _is_internal(self, e):
+        """True when this is our own page being dragged for reorder (not an
+        external file drop)."""
+        try:
+            return e.source() is self
+        except Exception:
+            return False
+
     def dragEnterEvent(self, e):
         if self._dropped_files(e):
             e.acceptProposedAction()
+        elif self._is_internal(e):
+            e.setDropAction(QtCore.Qt.MoveAction)
+            e.accept()                      # allow the internal reorder drag
         else:
             super().dragEnterEvent(e)
 
     def dragMoveEvent(self, e):
         if self._dropped_files(e):
             e.acceptProposedAction()
+        elif self._is_internal(e):
+            e.setDropAction(QtCore.Qt.MoveAction)
+            e.accept()                      # keep accepting so the drop fires
         else:
             super().dragMoveEvent(e)
 
@@ -5929,13 +5943,18 @@ class PagesList(QtWidgets.QListWidget):
         # jaate hain — pakka aur saaf kram-badlaav.
         src_rows = sorted(self.row(it) for it in self.selectedItems())
         src_rows = [r for r in src_rows if r >= 0]
-        if not src_rows:
-            e.ignore(); return
+        if not src_rows:                      # nothing selected -> use the current item
+            cr = self.currentRow()
+            if cr >= 0:
+                src_rows = [cr]
+            else:
+                e.ignore(); return
+        # page order BEFORE the move (for undo)
+        before = [self.item(i).data(QtCore.Qt.UserRole) for i in range(self.count())]
         idx = self.indexAt(e.pos())
         tgt = idx.row() if idx.isValid() else self.count()
         if tgt < 0:
             tgt = self.count()
-        moving = [self.item(r) for r in src_rows]
         # niche se uthao taaki upar ke index valid rahein
         taken = []
         for r in reversed(src_rows):
@@ -5945,6 +5964,8 @@ class PagesList(QtWidgets.QListWidget):
         tgt = max(0, min(tgt - removed_before, self.count()))
         for i, it in enumerate(taken):
             self.insertItem(tgt + i, it)
+        after = [self.item(i).data(QtCore.Qt.UserRole) for i in range(self.count())]
+        self._reorder_snap = (before, after)   # picked up by _on_reorder for undo
         self.clearSelection()
         for i in range(len(taken)):
             self.item(tgt + i).setSelected(True)
@@ -9606,6 +9627,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
         """Drag-drop se pages ka kram badla — number dobara lagao, dirty mark
         karo aur preview taaza karo (banne wali PDF me yahi kram jayega)."""
         self._dirty = True
+        # record for unified undo/redo (F14) — before/after page order
+        try:
+            snap = getattr(self.list, "_reorder_snap", None)
+            self.list._reorder_snap = None
+            if snap and snap[0] != snap[1]:
+                self._hist_record({"type": "reorder", "before": snap[0], "after": snap[1]})
+        except Exception:
+            pass
         try:
             self._renumber_pages()
         except Exception:
@@ -12742,8 +12771,11 @@ if the toggle is ticked).</p>
         self.list.setViewMode(QtWidgets.QListView.IconMode)
         self.list.setIconSize(QtCore.QSize(self.THUMB_W, self.THUMB_H))
         self.list.setResizeMode(QtWidgets.QListView.Adjust)
-        self.list.setMovement(QtWidgets.QListView.Snap)
+        # Static (NOT Snap/Free): in an icon grid this keeps display == model order,
+        # so drag-drop actually REORDERS the pages instead of free-placing an icon.
+        self.list.setMovement(QtWidgets.QListView.Static)
         self.list.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
+        self.list.setDragDropOverwriteMode(False)
         self.list.setSpacing(10)
         # uniformItemSizes OFF — warna ek chhota (jaise ultrasound) document aane
         # par Qt SAB thumbnails ko chhota kar deta tha. Ab har thumbnail apni
@@ -16611,6 +16643,32 @@ if the toggle is ticked).</p>
             self._dirty = True
             self.status.showMessage(("↶ " if direction == "undo" else "↷ ")
                                     + self.L("delete wapas", "delete reverted"), 2500)
+        elif t == "reorder":
+            self._reorder_to(entry["before"] if direction == "undo" else entry["after"])
+            try:
+                self._renumber_pages()
+                self._update_preview_panel()
+            except Exception:
+                pass
+            self._dirty = True
+            self.status.showMessage(("↶ " if direction == "undo" else "↷ ")
+                                    + self.L("kram wapas", "order reverted"), 2500)
+
+    def _reorder_to(self, paths):
+        """Reorder the page list so items follow the given path order (used by
+        undo/redo of a drag-reorder). Items not in the list are ignored."""
+        items = {}
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            items[it.data(QtCore.Qt.UserRole)] = it
+        for i in reversed(range(self.list.count())):
+            self.list.takeItem(i)
+        for p in paths:
+            it = items.pop(p, None)
+            if it is not None:
+                self.list.addItem(it)
+        for it in items.values():            # any leftovers (shouldn't happen) go last
+            self.list.addItem(it)
 
     def _hist_reinsert(self, it):
         path = it.get("path")
