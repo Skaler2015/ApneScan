@@ -176,7 +176,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "150"
+VERSION = "151"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6033,6 +6033,9 @@ class PagesList(QtWidgets.QListWidget):
 
     def _dropped_files(self, e):
         md = e.mimeData()
+        # Apna hi page-drag (folder me save ke liye) — ise import mat samjho
+        if md.hasText() and md.text() == "apnescan-pages":
+            return []
         if not md.hasUrls():
             return []
         out = []
@@ -6084,8 +6087,49 @@ class PagesList(QtWidgets.QListWidget):
                     >= QtWidgets.QApplication.startDragDistance()):
                 self._dragging = True
                 self.setCursor(QtCore.Qt.ClosedHandCursor)
+            # Cursor list ke BAHAR nikal gaya -> asli QDrag shuru karo taaki
+            # 'My Files' folder par chhodne se page wahan SAVE ho jaaye.
+            if self._dragging and not self.viewport().rect().contains(e.pos()):
+                self._start_external_drag()
             return
         super().mouseMoveEvent(e)
+
+    def _start_external_drag(self):
+        """List se bahar (My Files folder par) drop ke liye asli QDrag. Reorder
+        state reset karke selected page(s) ko file-URLs ke saath drag karte hain;
+        FilesTree ka dropEvent inhe khule folder me save kar deta hai."""
+        try:
+            row = self._drag_row
+            # geometry-reorder band -> ab QDrag sambhalega
+            self._dragging = False
+            self._drag_row = -1
+            self._press_pos = None
+            try:
+                self.unsetCursor()
+            except Exception:
+                pass
+            # Jis page ko pakda hai wo selection me na ho to usi ko chuno
+            sel = self.selectedItems()
+            if 0 <= row < self.count():
+                it0 = self.item(row)
+                if it0 not in sel:
+                    self.clearSelection()
+                    it0.setSelected(True)
+                    self.setCurrentItem(it0)
+                    sel = [it0]
+            paths = [it.data(QtCore.Qt.UserRole) for it in (sel or [])]
+            paths = [p for p in paths if p]
+            drag = QtGui.QDrag(self)
+            md = QtCore.QMimeData()
+            md.setText("apnescan-pages")           # apna marker (self-import roke)
+            try:
+                md.setUrls([QtCore.QUrl.fromLocalFile(p) for p in paths])
+            except Exception:
+                pass
+            drag.setMimeData(md)
+            drag.exec_(QtCore.Qt.CopyAction)
+        except Exception:
+            pass
 
     def mouseReleaseEvent(self, e):
         if self._dragging and self._drag_row >= 0:
