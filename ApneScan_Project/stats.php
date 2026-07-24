@@ -1764,7 +1764,27 @@ function showUser(u){
       (u.note?row('Note','<i>'+esc(u.note)+'</i>'):'')+
     '</table>'+
     ((u.feats&&u.feats.length)?'<div style="margin-top:10px"><div style="color:var(--mut);font-size:12px;margin-bottom:4px">🧰 Istemaal ke tools</div>'+u.feats.map(function(f){return '<span class="tag">'+esc(FEATLBL[f]||f)+'</span>';}).join(' ')+'</div>':'')+
-    ((u.active&&u.active.length)?'<div style="margin-top:10px"><div style="color:var(--mut);font-size:12px;margin-bottom:4px">📅 Pichhle 30 din (active)</div><div style="display:flex;flex-wrap:wrap;gap:2px">'+(function(){var s=new Set(u.active),h='',dt=new Date();for(var i=29;i>=0;i--){var d=new Date(dt.getTime()-i*86400000).toISOString().slice(0,10);var on=s.has(d);h+='<span title="'+d+'" style="width:9px;height:9px;border-radius:2px;background:'+(on?PAL.aqua:'var(--line)')+'"></span>';}return h;})()+'</div></div>':'')+
+    (function(){
+      var dm=u.daysMap||{};
+      var keys=Object.keys(dm).filter(function(k){return (parseInt(dm[k])||0)>0;});
+      function since(n){var s=0,dt=new Date();for(var i=0;i<n;i++){var d=new Date(dt.getTime()-i*86400000).toISOString().slice(0,10);s+=parseInt(dm[d])||0;}return s;}
+      function fdate(k){var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var p=k.split('-');return (parseInt(p[2],10))+' '+(mn[parseInt(p[1],10)-1]||'')+' '+p[0];}
+      // 60-din ka heatmap — rang ki gehraai = us din kitne scan (zyada = gehra)
+      var mx=1; for(var kk in dm){ if((parseInt(dm[kk])||0)>mx) mx=parseInt(dm[kk]); }
+      var strip='',dt=new Date();
+      for(var i=59;i>=0;i--){ var dd=new Date(dt.getTime()-i*86400000).toISOString().slice(0,10); var c=parseInt(dm[dd])||0;
+        var a=c>0?(0.2+0.8*Math.min(1,c/mx)):0; var bg=c>0?('rgba(27,175,122,'+a.toFixed(2)+')'):'var(--line)';
+        strip+='<span title="'+fdate(dd)+': '+c+' scan" style="width:9px;height:9px;border-radius:2px;background:'+bg+'"></span>'; }
+      var listRows = keys.sort().reverse().slice(0,120).map(function(k){
+        return '<tr><td style="color:var(--mut);padding:2px 0">'+fdate(k)+'</td><td style="text-align:right;font-weight:600">'+fmt(dm[k])+' scan</td></tr>'; }).join('');
+      return '<div style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px">'+
+        '<div style="font-weight:700;font-size:13px;margin-bottom:6px">📊 Kab kitne scan (din-wise)</div>'+
+        '<div style="font-size:12px;color:var(--mut);margin-bottom:6px">Aaj: <b style="color:var(--fg)">'+fmt(since(1))+'</b> · Is hafte: <b style="color:var(--fg)">'+fmt(since(7))+'</b> · Is mahine: <b style="color:var(--fg)">'+fmt(since(30))+'</b> · Kul: <b style="color:var(--fg)">'+fmt(u.scans)+'</b></div>'+
+        '<div style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:8px" title="pichhle 60 din — gehra rang = us din zyada scan">'+strip+'</div>'+
+        (listRows?'<div style="max-height:160px;overflow:auto"><table style="width:100%;font-size:12px">'+listRows+'</table></div>'
+                 :'<div style="color:var(--mut);font-size:12px">— din-wise scan data abhi record nahi hua —</div>')+
+        '</div>';
+    })()+
     '<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px">'+
       '<div style="font-weight:700;font-size:13px;margin-bottom:8px">✏️ Manage</div>'+
       '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="rename"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="name" value="'+esc(u.name!=='—'?u.name:'')+'" placeholder="Naam badlo" style="width:60%"> <button class="btn">Rename</button></form>'+
