@@ -22,6 +22,15 @@ date_default_timezone_set('Asia/Kolkata');   // "Aaj" India (IST) ke hisaab se
 
 $DATA_FILE   = __DIR__ . '/stats.json';
 $BACKUP_DIR  = __DIR__ . '/backups';
+
+// ---- JSON STORAGE LAYER (json_storage.php) -------------------------------
+// Poora storage ab dedicated module me hai: flock locking, atomic verify-
+// write, rotating backups (.bak..bak4), auto-recovery, size caps, error/perf
+// logging, .htaccess suraksha. Module na mila to bhi app chalti rahti hai —
+// neeche ke legacy load_data/save_data khud kaam sambhal lete hain.
+if (is_file(__DIR__ . '/json_storage.php')) { @require_once __DIR__ . '/json_storage.php'; }
+$HAS_STORAGE = function_exists('loadJson');
+if ($HAS_STORAGE) { initializeStorage($DATA_FILE); }
 $ADMIN_PASS  = 'apne123';            // <-- ISE BADAL LO (admin password)
 $ADMIN_EMAIL = '';                   // <-- daily/weekly report yahan aayega (khaali = band)
 $CRON_KEY    = 'apnecron';           // <-- ?cron=daily&key=... ka key
@@ -79,6 +88,11 @@ function _data_score($d) {
  * khaali/tuti/0 ho jaaye to bhi purana data apne aap wapas aa jaata hai.
  */
 function load_data($file) {
+    if (!empty($GLOBALS['HAS_STORAGE'])) {
+        // naya storage layer: flock + recovery + default — phir default_data
+        // se merge (nayi keys purane data me bhi mil jayein)
+        return array_merge(default_data(), loadJson($file, 'default_data'));
+    }
     $cands = array();
     $m = _read_json($file);          if ($m !== null) $cands[] = $m;
     $b = _read_json($file . '.bak'); if ($b !== null) $cands[] = $b;
@@ -99,6 +113,7 @@ function load_data($file) {
  * $force=true sirf admin ke jaan-boojhkar kiye actions ke liye (purge waghairah).
  */
 function save_data($file, $d, $force = false) {
+    if (!empty($GLOBALS['HAS_STORAGE'])) { saveJson($file, $d, $force); return; }
     $prev = _read_json($file);
     if ($prev === null) $prev = _read_json($file . '.bak');
     if (is_array($prev)) {
@@ -550,7 +565,10 @@ if (isset($_GET['admin'])) {
     //  purani file ka backup (.bak) taaki galti par wapas la sakein.
     // ============================================================
     if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['act']) && $_POST['act']==='selfupdate') {
-        $self = __FILE__;
+        // target: 'panel' (default) = stats.php · 'module' = json_storage.php
+        $target = (isset($_POST['target']) && $_POST['target']==='module') ? 'module' : 'panel';
+        $self = ($target==='module') ? __DIR__.'/json_storage.php' : __FILE__;
+        $minLen = ($target==='module') ? 1500 : 3000;
         $new = '';
         if (!empty($_FILES['phpfile']['tmp_name']) && is_uploaded_file($_FILES['phpfile']['tmp_name'])) {
             $new = @file_get_contents($_FILES['phpfile']['tmp_name']);
@@ -559,12 +577,17 @@ if (isset($_GET['admin'])) {
         }
         $new = ($new===false) ? '' : ltrim($new, "\xEF\xBB\xBF");   // strip UTF-8 BOM
         $msg = '';
-        if (strlen($new) < 3000) {
+        $sigOk = ($target==='module')
+            ? (strpos($new,'function loadJson')!==false && strpos($new,'function saveJson')!==false)
+            : (strpos($new,'function default_data')!==false && strpos($new,'compute_stats')!==false);
+        if (strlen($new) < $minLen) {
             $msg = '❌ File khaali/bahut chhoti hai — update nahi ki.';
         } elseif (strncmp(ltrim($new), '<?php', 5) !== 0) {
-            $msg = '❌ Ye stats.php nahi lagti (shuru me &lt;?php nahi). Update nahi ki.';
-        } elseif (strpos($new,'function default_data')===false || strpos($new,'compute_stats')===false) {
-            $msg = '❌ Ye ApneScan ki stats.php nahi lagti (zaroori hisse nahi mile). Update nahi ki.';
+            $msg = '❌ Ye PHP file nahi lagti (shuru me &lt;?php nahi). Update nahi ki.';
+        } elseif (!$sigOk) {
+            $msg = ($target==='module')
+                ? '❌ Ye json_storage.php nahi lagti (loadJson/saveJson nahi mile). Update nahi ki.'
+                : '❌ Ye ApneScan ki stats.php nahi lagti (zaroori hisse nahi mile). Update nahi ki.';
         } else {
             $tmp = $self.'.new';
             if (@file_put_contents($tmp, $new) === false) {
@@ -592,10 +615,11 @@ if (isset($_GET['admin'])) {
                     @unlink($tmp);
                     $msg = '❌ Nayi file me PHP syntax error hai — update ROK di (panel safe hai).<br><small>'.htmlspecialchars(substr($lint_out,0,300)).'</small>';
                 } else {
-                    @copy($self, $self.'.bak');                     // purani ka backup
+                    if (is_file($self)) @copy($self, $self.'.bak');  // purani ka backup
                     if (@rename($tmp, $self) || @file_put_contents($self, $new) !== false) {
                         @unlink($tmp);
-                        $msg = '✅ Panel update ho gaya! (nayi stats.php lag gayi)';
+                        $msg = ($target==='module') ? '✅ Storage module update ho gaya! (nayi json_storage.php lag gayi)'
+                                                    : '✅ Panel update ho gaya! (nayi stats.php lag gayi)';
                     } else {
                         @unlink($tmp);
                         $msg = '❌ File replace nahi ho paayi — permission (chmod 644 / owner) check karein.';
@@ -1552,6 +1576,7 @@ if (isset($_GET['admin'])) {
     <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Jab bhi nayi <b>stats.php</b> mile, yahan upload kar do — panel khud update ho jaayega (Hostinger file manager kholne ki zaroorat nahi). Purani file ka backup apne aap ban jaata hai, aur syntax galat ho to update ROK di jaati hai (panel safe rehta hai).</div>
     <form method="post" enctype="multipart/form-data" onsubmit="return confirm('Nayi stats.php se panel update karein? (purani ka backup ban jaayega)')">
       <input type="hidden" name="act" value="selfupdate">
+      <select name="target" style="font-size:12px"><option value="panel">stats.php (panel)</option><option value="module">json_storage.php (storage)</option></select>
       <input type="file" name="phpfile" accept=".php,text/x-php,application/x-php" style="font-size:12px">
       <button class="btn" style="margin-left:6px">⬆️ Upload &amp; update</button>
     </form>
@@ -1580,6 +1605,27 @@ if (isset($_GET['admin'])) {
     <form method="post" style="display:inline"><input type="hidden" name="act" value="clearfeedback"><button class="btn gray">Feedback clear</button></form>
     <div style="color:var(--mut);font-size:11px;margin-top:8px">Data file: <b><?php echo $S['fileKB']; ?> KB</b> · Backup: <b><?php echo $S['lastBackup']?date('d M H:i',$S['lastBackup']):'—'; ?></b> · Fail-logins: <b><?php echo $S['fails']; ?></b></div>
   </div>
+
+  <?php if (!empty($GLOBALS['HAS_STORAGE'])) { $SH = storageHealth($DATA_FILE); ?>
+  <!-- storage health (json_storage.php module) -->
+  <div class="card"><h3><span class="em">🗄️</span> Storage health (JSON layer)</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;font-size:12px">
+      <div>📄 JSON size<br><b><?php echo $SH['fileKB']; ?> KB</b></div>
+      <div>🗂 Backups size (.bak×5 + daily)<br><b><?php echo $SH['backupKB']; ?> KB</b></div>
+      <div>🧠 Memory (peak)<br><b><?php echo $SH['memMB']; ?> MB</b></div>
+      <div>💾 Last save<br><b><?php echo $SH['lastSave']?date('d M H:i:s',$SH['lastSave']):'—'; ?></b></div>
+      <div>🛟 Last backup<br><b><?php echo $SH['lastBackup']?date('d M H:i:s',$SH['lastBackup']):'—'; ?></b></div>
+      <div>♻️ Last recovery<br><b><?php echo $SH['lastRecovery']?date('d M H:i:s',$SH['lastRecovery']):'kabhi zaroorat nahi padi ✅'; ?></b></div>
+      <div>🧾 Total records<br><b><?php echo number_format($SH['records']); ?></b></div>
+      <div>⏱ Load / Save<br><b><?php echo $SH['loadMs']; ?> / <?php echo $SH['saveMs']; ?> ms</b></div>
+    </div>
+    <div style="font-size:10px;color:var(--mut);margin-top:8px">flock locking · atomic verify-writes · rotating .bak..bak4 · auto-recovery · caps (scans 1000 / feedback 500 / crash 500) · errors → <code>logs/error.log</code></div>
+  </div>
+  <?php } else { ?>
+  <div class="card"><h3><span class="em">🗄️</span> Storage module</h3>
+    <div style="font-size:12px;color:var(--mut)">⚠️ <b>json_storage.php</b> abhi upload nahi hui — panel legacy storage par chal raha hai (sab kaam karta hai). Upar "Upload &amp; update" me <b>json_storage.php (storage)</b> chunkar module upload karein — flock locking, rotating backups, auto-recovery aur error-log turant chalu ho jayenge.</div>
+  </div>
+  <?php } ?>
 
   </div><!-- /system -->
 
@@ -2106,6 +2152,32 @@ setInterval(function(){ if(document.getElementById('umodal').style.display==='fl
 $action = isset($_REQUEST['action']) ? $_REQUEST['action'] : 'stats';
 $client = isset($_REQUEST['client']) ? $_REQUEST['client'] : '';
 $today  = today_str(); $now = time();
+
+// ---- INPUT VALIDATION (spec #9): har aane wali request saaf-suthri ho ----
+// Lambaai-caps + control-characters hatao; number-fields sirf int; kharab IP
+// wali request seedha reject. (Purane clients par koi asar nahi — sahi data
+// waise ka waisa nikal jaata hai.)
+function _clean_str($v, $max) {
+    $v = (string)$v;
+    $v = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $v);  // control chars
+    return substr(trim($v), 0, $max);
+}
+foreach (array('u'=>100, 'sm'=>100, 'c'=>8, 'region'=>80, 'city'=>80, 'v'=>16) as $_k => $_max) {
+    if (isset($_REQUEST[$_k])) $_REQUEST[$_k] = _clean_str($_REQUEST[$_k], $_max);
+}
+foreach (array('n','pg','kb','imp','prt','t','sug','len','num','dt','wd') as $_k) {
+    if (isset($_REQUEST[$_k]) && $_REQUEST[$_k] !== '' && !preg_match('/^-?\d+$/', (string)$_REQUEST[$_k]))
+        $_REQUEST[$_k] = intval($_REQUEST[$_k]);      // integer-only fields
+}
+$client = _clean_str($client, 64);
+$__ip = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '';
+if ($__ip !== '' && !filter_var($__ip, FILTER_VALIDATE_IP)) {
+    header('Content-Type: application/json'); echo json_encode(array('ok'=>false,'error'=>'bad request')); exit;
+}
+
+// Poore read-modify-write par EXCLUSIVE lock (spec #6) — kai clients ek saath
+// bhejein to bhi ginti kabhi na uljhe. (Script ke ant par khud khul jaata hai.)
+if (!empty($HAS_STORAGE)) storageLockExclusive($DATA_FILE);
 $d = load_data($DATA_FILE);
 
 if ($action === 'scan') {
@@ -2113,6 +2185,18 @@ if ($action === 'scan') {
         header('Content-Type: application/json'); echo json_encode(array('ok'=>false,'error'=>'bad secret')); exit;
     }
     $n = max(0, min(100, intval(isset($_REQUEST['n'])?$_REQUEST['n']:1)));
+    // ---- DUPLICATE PROTECTION (spec #10): wahi user + scanner + pages ka
+    // bilkul wahi scan 15 second ke andar dobara aaye (retry/double-fire) to
+    // use dobara mat gino. Alag scans par koi asar nahi.
+    $__dupKey = md5($client . '|' . (isset($_REQUEST['u'])?$_REQUEST['u']:'') . '|'
+                  . (isset($_REQUEST['sm'])?$_REQUEST['sm']:'') . '|' . $n);
+    if (!isset($d['dupGuard']) || !is_array($d['dupGuard'])) $d['dupGuard'] = array();
+    $__isDup = isset($d['dupGuard'][$__dupKey]) && ($now - intval($d['dupGuard'][$__dupKey])) < 15;
+    $d['dupGuard'][$__dupKey] = $now;
+    if (count($d['dupGuard']) > 200) $d['dupGuard'] = array_slice($d['dupGuard'], -150, null, true);
+    if ($__isDup) {
+        header('Content-Type: application/json'); echo json_encode(array('ok'=>true,'dup'=>true)); exit;
+    }
     $okc = touch_client($d, $client, $_REQUEST, $n, $now, $today);   // blocked -> false
     if ($okc) {
         $_before = intval($d['total']);
@@ -2133,7 +2217,7 @@ if ($action === 'scan') {
         if (!isset($d['recentScans'])) $d['recentScans'] = array();
         $d['recentScans'][] = array('t'=>$now, 'name'=>substr(isset($_REQUEST['u'])?$_REQUEST['u']:'',0,40),
             'cc'=>substr(isset($_REQUEST['c'])?$_REQUEST['c']:'',0,4), 'n'=>$n);
-        $d['recentScans'] = array_slice($d['recentScans'], -40);
+        $d['recentScans'] = array_slice($d['recentScans'], -1000);   // cap (spec #8)
         update_peak($d, $now, $today);
     }
 } else if ($action === 'ping') {
@@ -2181,7 +2265,7 @@ if ($action === 'scan') {
     $_cv = substr(isset($_REQUEST['v'])?$_REQUEST['v']:'',0,10);
     $_ce = substr(isset($_REQUEST['err'])?$_REQUEST['err']:'',0,200);
     $d['crashes'][] = array('t'=>$now,'v'=>$_cv,'err'=>$_ce,'client'=>substr($client,0,40));
-    $d['crashes'] = array_slice($d['crashes'], -100);
+    $d['crashes'] = array_slice($d['crashes'], -500);    // cap (spec #8)
     tg_send("💥 <b>Crash report</b> (v".$_cv.")\n".htmlspecialchars($_ce));
 } else if ($action === 'feedback') {
     $d['feedback'][] = array('t'=>$now,'name'=>substr(isset($_REQUEST['u'])?$_REQUEST['u']:'',0,40),
@@ -2189,7 +2273,7 @@ if ($action === 'scan') {
         'msg'=>substr(isset($_REQUEST['msg'])?$_REQUEST['msg']:'',0,400),
         'status'=>'open',                           // (22) ticket status: open/resolved
         'client'=>substr($client,0,40));            // reply is user tak pahunchane ke liye
-    $d['feedback'] = array_slice($d['feedback'], -300);
+    $d['feedback'] = array_slice($d['feedback'], -500);  // cap (spec #8)
     touch_client($d, $client, $_REQUEST, 0, $now, $today);
 }
 
