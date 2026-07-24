@@ -564,6 +564,29 @@ if (isset($_GET['admin'])) {
     //  Suraksha: sirf logged-in admin; file ki jaanch (signature + syntax);
     //  purani file ka backup (.bak) taaki galti par wapas la sakein.
     // ============================================================
+    // ---- SELF-DOWNLOAD: abhi chal rahi file download karo (replace se pehle
+    //      apne paas backup rakhne ke liye). Sirf logged-in admin. ----
+    if (isset($_GET['dl'])) {
+        $__dlmap = array(
+            'panel'     => array(__FILE__,                          'stats.php'),
+            'module'    => array(__DIR__.'/json_storage.php',       'json_storage.php'),
+            'panelbak'  => array(__FILE__.'.bak',                   'stats.php.bak'),
+            'modulebak' => array(__DIR__.'/json_storage.php.bak',   'json_storage.php.bak'),
+            'data'      => array($DATA_FILE, 'stats-data-'.date('Y-m-d-His').'.json'),
+        );
+        $__k = (string)$_GET['dl'];
+        if (isset($__dlmap[$__k]) && is_file($__dlmap[$__k][0])) {
+            header('Content-Type: application/octet-stream');
+            header('Content-Disposition: attachment; filename="'.$__dlmap[$__k][1].'"');
+            header('Content-Length: '.filesize($__dlmap[$__k][0]));
+            header('X-Content-Type-Options: nosniff');
+            readfile($__dlmap[$__k][0]);
+            exit;
+        }
+        $_SESSION['su_msg'] = '❌ Download: file nahi mili ('.htmlspecialchars(substr($__k,0,20)).')';
+        header('Location: '.strtok($_SERVER['REQUEST_URI'],'?').'?admin=1'); exit;
+    }
+
     if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['act']) && $_POST['act']==='selfupdate') {
         // target: 'panel' (default) = stats.php · 'module' = json_storage.php
         $target = (isset($_POST['target']) && $_POST['target']==='module') ? 'module' : 'panel';
@@ -1591,6 +1614,14 @@ if (isset($_GET['admin'])) {
       <input type="hidden" name="act" value="selfrestore">
       <button class="btn gray">↩️ Pichhla version wapas lao (restore)</button>
     </form>
+    <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--line)">
+      <div style="font-size:11px;color:var(--mut);margin-bottom:5px">⬇️ <b>Abhi ki files download karo</b> — replace karne se pehle apna backup rakh lo:</div>
+      <a class="btn gray" style="text-decoration:none" href="?admin=1&amp;dl=panel">⬇ stats.php</a>
+      <a class="btn gray" style="text-decoration:none" href="?admin=1&amp;dl=module">⬇ json_storage.php</a>
+      <a class="btn gray" style="text-decoration:none" href="?admin=1&amp;dl=data">⬇ stats.json (data)</a>
+      <a class="btn gray" style="text-decoration:none;font-size:11px" href="?admin=1&amp;dl=panelbak">stats.php.bak</a>
+      <a class="btn gray" style="text-decoration:none;font-size:11px" href="?admin=1&amp;dl=modulebak">json_storage.php.bak</a>
+    </div>
     <div style="font-size:10px;color:var(--mut);margin-top:8px">🔐 Suraksha: ye sirf login ke baad chalta hai. Isliye <b>admin password mazboot rakhein</b> (Settings me <code>$ADMIN_PASS</code> badlein) — warna koi aur bhi panel badal sakta hai.</div>
   </div>
 
