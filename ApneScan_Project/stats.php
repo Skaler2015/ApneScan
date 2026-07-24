@@ -1791,8 +1791,6 @@ function showUser(u){
       '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="tag"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="tags" value="'+esc(u.tags)+'" placeholder="Tags (comma se): VIP,Hospital" style="width:60%"> <button class="btn">Tag</button></form>'+
       '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="note"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="note" value="'+esc(u.note)+'" placeholder="Note likho" style="width:60%"> <button class="btn">Note</button></form>'+
       '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="umsg"><input type="hidden" name="id" value="'+esc(u.id)+'"><input name="msg" placeholder="Is user ko message (app me dikhega)" style="width:60%"> <button class="btn">📨 Message</button></form>'+
-      '<form method="post" style="margin-bottom:6px"><input type="hidden" name="act" value="block"><input type="hidden" name="id" value="'+esc(u.id)+'"><input type="hidden" name="on" value="'+(u.blocked?'':'1')+'"><button class="btn '+(u.blocked?'gray':'red')+'">'+(u.blocked?'✅ Unblock':'🚫 Block (stats se hatao)')+'</button></form>'+
-      (u.ip?'<form method="post" onsubmit="return confirm(\'Is IP ('+esc(u.ip)+') ke saare users block? (spam/abuse ke liye)\')"><input type="hidden" name="act" value="blockip"><input type="hidden" name="ip" value="'+esc(u.ip)+'"><button class="btn red">🚫 IP block ('+esc(u.ip)+')</button></form>':'')+
     '</div>';
   document.getElementById('umbody').innerHTML=html;
   document.getElementById('umodal').style.display='flex';
