@@ -538,6 +538,77 @@ if (isset($_GET['admin'])) {
         $d['adminLogins']=array_slice($d['adminLogins'],-20); save_data($DATA_FILE,$d);
     }
 
+    // ============================================================
+    //  SELF-UPDATE — nayi stats.php seedhe admin panel se upload karke
+    //  panel ko update karo (Hostinger file manager kholne ki zaroorat nahi).
+    //  Suraksha: sirf logged-in admin; file ki jaanch (signature + syntax);
+    //  purani file ka backup (.bak) taaki galti par wapas la sakein.
+    // ============================================================
+    if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['act']) && $_POST['act']==='selfupdate') {
+        $self = __FILE__;
+        $new = '';
+        if (!empty($_FILES['phpfile']['tmp_name']) && is_uploaded_file($_FILES['phpfile']['tmp_name'])) {
+            $new = @file_get_contents($_FILES['phpfile']['tmp_name']);
+        } elseif (isset($_POST['phpcode']) && trim($_POST['phpcode'])!=='') {
+            $new = (string)$_POST['phpcode'];
+        }
+        $new = ($new===false) ? '' : ltrim($new, "\xEF\xBB\xBF");   // strip UTF-8 BOM
+        $msg = '';
+        if (strlen($new) < 3000) {
+            $msg = '❌ File khaali/bahut chhoti hai — update nahi ki.';
+        } elseif (strncmp(ltrim($new), '<?php', 5) !== 0) {
+            $msg = '❌ Ye stats.php nahi lagti (shuru me &lt;?php nahi). Update nahi ki.';
+        } elseif (strpos($new,'function default_data')===false || strpos($new,'compute_stats')===false) {
+            $msg = '❌ Ye ApneScan ki stats.php nahi lagti (zaroori hisse nahi mile). Update nahi ki.';
+        } else {
+            $tmp = $self.'.new';
+            if (@file_put_contents($tmp, $new) === false) {
+                $msg = '❌ Temp file nahi ban paayi (folder ki write-permission check karein).';
+            } else {
+                // syntax check — do tarah se (jo chale): (a) exec se `php -l`,
+                // warna (b) pure-PHP token_get_all(TOKEN_PARSE) jo galat syntax
+                // par ParseError phenkta hai. Dono me se ek se bhi galti mile to ROK.
+                $lint_ok = true; $lint_out = '';
+                $checked = false;
+                $disabled = array_map('trim', explode(',', (string)ini_get('disable_functions')));
+                if (function_exists('exec') && !in_array('exec', $disabled)) {
+                    $php = (defined('PHP_BINARY') && PHP_BINARY) ? PHP_BINARY : 'php';
+                    $o = array(); $rc = 0;
+                    @exec(escapeshellarg($php).' -l '.escapeshellarg($tmp).' 2>&1', $o, $rc);
+                    if ($rc !== 0) { $lint_ok = false; $lint_out = implode("\n", $o); }
+                    $checked = true;
+                }
+                if ($lint_ok && defined('TOKEN_PARSE')) {   // pure-PHP fallback (no exec needed)
+                    try { token_get_all($new, TOKEN_PARSE); $checked = true; }
+                    catch (\ParseError $e) { $lint_ok = false; $lint_out = $e->getMessage(); }
+                    catch (\Throwable $e) { /* purane PHP: chhod do */ }
+                }
+                if (!$lint_ok) {
+                    @unlink($tmp);
+                    $msg = '❌ Nayi file me PHP syntax error hai — update ROK di (panel safe hai).<br><small>'.htmlspecialchars(substr($lint_out,0,300)).'</small>';
+                } else {
+                    @copy($self, $self.'.bak');                     // purani ka backup
+                    if (@rename($tmp, $self) || @file_put_contents($self, $new) !== false) {
+                        @unlink($tmp);
+                        $msg = '✅ Panel update ho gaya! (nayi stats.php lag gayi)';
+                    } else {
+                        @unlink($tmp);
+                        $msg = '❌ File replace nahi ho paayi — permission (chmod 644 / owner) check karein.';
+                    }
+                }
+            }
+        }
+        $_SESSION['su_msg'] = $msg;
+        header('Location: '.strtok($_SERVER['REQUEST_URI'],'?').'?admin=1'); exit;
+    }
+    if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['act']) && $_POST['act']==='selfrestore') {
+        $self = __FILE__; $bak = $self.'.bak'; $msg = '';
+        if (is_file($bak)) { $msg = @copy($bak, $self) ? '↩️ Pichhla version wapas aa gaya.' : '❌ Restore fail (permission?).'; }
+        else { $msg = '❌ Koi backup (.bak) nahi mila.'; }
+        $_SESSION['su_msg'] = $msg;
+        header('Location: '.strtok($_SERVER['REQUEST_URI'],'?').'?admin=1'); exit;
+    }
+
     // ---- POST admin actions (user manage / broadcast / config / purge) ----
     if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['act'])) {
         $act=$_POST['act']; $id=isset($_POST['id'])?$_POST['id']:'';
@@ -601,6 +672,10 @@ if (isset($_GET['admin'])) {
             foreach ($d['clients'] as $c){ echo '"'.str_replace('"','""',trim(isset($c['name'])?$c['name']:'')).'",'.intval(isset($c['scans'])?$c['scans']:0).','.date('Y-m-d H:i',intval(isset($c['first'])?$c['first']:0)).','.date('Y-m-d H:i',intval(isset($c['last'])?$c['last']:0)).','.trim(isset($c['version'])?$c['version']:'').','.trim(isset($c['country'])?$c['country']:'').','.trim(isset($c['method'])?$c['method']:'').',"'.str_replace('"','""',trim(isset($c['model'])?$c['model']:'')).'","'.str_replace('"','""',trim(isset($c['tags'])?$c['tags']:'')).'"'."\n"; }
             exit; }
     }
+
+    // self-update ka result message (redirect ke baad ek baar dikhao)
+    $SU_MSG = '';
+    if (!empty($_SESSION['su_msg'])) { $SU_MSG = $_SESSION['su_msg']; unset($_SESSION['su_msg']); }
 
     // ---- rich compute ----
     $S=compute_stats($d,''); $today=today_str(); $now=time();
@@ -1169,6 +1244,9 @@ if (isset($_GET['admin'])) {
   <button class="tab" data-p="system">💬 Feedback &amp; System</button>
 </nav>
 <div class="wrap">
+  <?php if ($SU_MSG !== ''): ?>
+  <div style="margin:0 0 12px;padding:11px 14px;border-radius:10px;font-size:13px;font-weight:600;<?php echo (strpos($SU_MSG,'✅')!==false||strpos($SU_MSG,'↩')!==false)?'background:#e6f7ef;color:#0a7a4f;border:1px solid #9fdcbf':'background:#fdecea;color:#b3261e;border:1px solid #f5b5ad'; ?>"><?php echo $SU_MSG; ?></div>
+  <?php endif; ?>
   <div id="banner" class="banner"></div>
 
   <div class="page" data-p="overview">
@@ -1462,6 +1540,28 @@ if (isset($_GET['admin'])) {
   <div class="card no-print"><h3><span class="em">📄</span> Report (PDF)</h3>
     <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Ek-page ka worldwide summary — KPIs, top desh, feature usage, versions. Print → "Save as PDF".</div>
     <a class="btn" href="?admin=1&report=1" target="_blank">📄 Report kholo / PDF banao</a>
+  </div>
+
+  <!-- self-update: nayi stats.php seedhe yahin se -->
+  <div class="card no-print" style="border:1px solid var(--accent)"><h3><span class="em">🔄</span> Panel update (nayi stats.php yahin se)</h3>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Jab bhi nayi <b>stats.php</b> mile, yahan upload kar do — panel khud update ho jaayega (Hostinger file manager kholne ki zaroorat nahi). Purani file ka backup apne aap ban jaata hai, aur syntax galat ho to update ROK di jaati hai (panel safe rehta hai).</div>
+    <form method="post" enctype="multipart/form-data" onsubmit="return confirm('Nayi stats.php se panel update karein? (purani ka backup ban jaayega)')">
+      <input type="hidden" name="act" value="selfupdate">
+      <input type="file" name="phpfile" accept=".php,text/x-php,application/x-php" style="font-size:12px">
+      <button class="btn" style="margin-left:6px">⬆️ Upload &amp; update</button>
+    </form>
+    <details style="margin-top:8px"><summary style="cursor:pointer;font-size:11px;color:var(--mut)">…ya file ki jagah code paste karo</summary>
+      <form method="post" onsubmit="return confirm('Paste ki hui code se panel update karein?')" style="margin-top:6px">
+        <input type="hidden" name="act" value="selfupdate">
+        <textarea name="phpcode" rows="4" style="width:100%;font-family:monospace;font-size:10px" placeholder="&lt;?php … poori stats.php ka code …"></textarea>
+        <button class="btn" style="margin-top:6px">Code se update</button>
+      </form>
+    </details>
+    <form method="post" onsubmit="return confirm('Pichhle version par wapas jaayein?')" style="margin-top:8px">
+      <input type="hidden" name="act" value="selfrestore">
+      <button class="btn gray">↩️ Pichhla version wapas lao (restore)</button>
+    </form>
+    <div style="font-size:10px;color:var(--mut);margin-top:8px">🔐 Suraksha: ye sirf login ke baad chalta hai. Isliye <b>admin password mazboot rakhein</b> (Settings me <code>$ADMIN_PASS</code> badlein) — warna koi aur bhi panel badal sakta hai.</div>
   </div>
 
   <!-- maintenance -->
