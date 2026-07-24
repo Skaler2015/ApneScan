@@ -176,7 +176,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "145"
+VERSION = "146"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -429,6 +429,9 @@ DEFAULT_OPTIONS = {
     "auto_orient": True,         # Always Auto Rotate — har page apne aap seedha (default ON)
     "auto_orient_mode": "accurate",  # "accurate" (OSD + layout fallback) ya "fast"
     "auto_orient_deskew": False, # halka tirchapan bhi seedha karo (thoda resample)
+    "enhance_mode": "original",  # F5: original / white / enhanced / high_contrast
+    "noise_removal": False,      # F8: dust/speck/noise hatao (median)
+    "smart_scan": False,         # F15: ek-click auto cleanup (crop+deskew+edges+enhance+denoise)
     "auto_colour": False,        # rangeen page colour me, baki gray me (chhoti file)
     "custom_page_mm": 600,       # "custom" page size ki lambai (mm)
     "touch_mode": False,         # bade buttons/font (touch / buzurg mode)
@@ -675,6 +678,47 @@ def auto_enhance(img):
         return rgb
     except Exception:
         return img
+
+
+def auto_brightness(img):
+    """F7: normalise exposure so pages are neither washed-out nor too dark.
+    Nudges brightness toward a bright-but-not-blown target using the grey mean;
+    gentle, clamped, and a no-op when the page is already well-exposed."""
+    try:
+        from PIL import ImageStat
+        mean = ImageStat.Stat(img.convert("L")).mean[0] or 128.0
+        if 170 <= mean <= 225:                 # already good -> leave it alone
+            return img
+        factor = max(0.75, min(1.6, 200.0 / max(1.0, mean)))
+        return ImageEnhance.Brightness(img).enhance(factor)
+    except Exception:
+        return img
+
+
+def denoise(img):
+    """F8: remove small dust/specks/compression noise while keeping text sharp
+    (a light median filter — does not blur edges noticeably)."""
+    try:
+        return img.convert("RGB").filter(ImageFilter.MedianFilter(3))
+    except Exception:
+        return img
+
+
+def apply_enhance_mode(img, mode):
+    """F5: background-enhancement modes — 'original' (untouched), 'white' (clean
+    white background), 'enhanced' (contrast+sharpness+brightness), 'high_contrast'
+    (crisp near-B&W text). Unknown/'original' returns the image unchanged."""
+    try:
+        if mode == "white":
+            return ImageOps.autocontrast(whiten_dark_background(img).convert("RGB"), cutoff=1)
+        if mode == "enhanced":
+            return auto_enhance(auto_brightness(img))
+        if mode == "high_contrast":
+            base = ImageOps.autocontrast(auto_brightness(img).convert("RGB"), cutoff=3)
+            return ImageEnhance.Contrast(base).enhance(1.35)
+    except Exception:
+        pass
+    return img
 
 
 def clean_edges(img, margin_frac=0.018, dark_level=90):
@@ -1881,6 +1925,9 @@ def friendly_error(text, lang="hi"):
         "jam": "Paper jam hua lagta hai. Feeder check karein.",
         "driver": "Scanner driver ki dikkat. Doosri scan-method (Settings me TWAIN/WIA) try karein.",
         "twain": "TWAIN scanner nahi khula. Settings me WIA method try karein.",
+        "offline": "Scanner se sampark nahi hua. Scanner ON karein, cable/WiFi check karein aur dobara jodein.",
+        "timeout": "Scanner ne jawab nahi diya (timeout). Scanner ON hai? WiFi/USB check karke dobara try karein.",
+        "inuse": "Scanner kisi aur app me khula hai. Woh app band karke dobara try karein.",
         "generic": "Scan nahi ho paya. Scanner ON hai aur juda hai? Dobara try karein.",
     }
     en = {
@@ -1890,18 +1937,29 @@ def friendly_error(text, lang="hi"):
         "jam": "Looks like a paper jam. Check the feeder.",
         "driver": "Scanner driver issue. Try the other method (TWAIN/WIA) in Settings.",
         "twain": "TWAIN scanner didn't open. Try WIA method in Settings.",
+        "offline": "Couldn't reach the scanner. Turn it on, check the cable/WiFi, and reconnect.",
+        "timeout": "The scanner didn't respond (timeout). Check it's on and on the same WiFi/USB, then try again.",
+        "inuse": "The scanner is open in another app. Close that app and try again.",
         "generic": "Scanning failed. Is the scanner on and connected? Try again.",
     }
     m = hi if lang == "hi" else en
     if "paper_empty" in low or "0x80210003" in low or "-2145320957" in low or "feeder me" in low:
         return m["empty"]
-    if "busy" in low or "0x80210006" in low:
+    if "busy" in low or "0x80210006" in low or "503" in low:
         return m["busy"]
     if "jam" in low:
         return m["jam"]
+    if ("access" in low and "denied" in low) or "in use" in low or "being used" in low or "0x80210015" in low:
+        return m["inuse"]
+    if "timed out" in low or "timeout" in low or "timeout" in low:
+        return m["timeout"]
+    if ("refused" in low or "unreachable" in low or "no route" in low or "getaddrinfo" in low
+            or "connection" in low and ("fail" in low or "error" in low) or "offline" in low
+            or "name or service" in low or "network is" in low):
+        return m["offline"]
     if "device driver threw" in low or "exception_in_driver" in low or "-2145320946" in low:
         return m["driver"]
-    if "nahi mila" in low or "not found" in low or "no such" in low or "device" in low and "nahi" in low:
+    if "nahi mila" in low or "not found" in low or "no such" in low or ("device" in low and "nahi" in low):
         return m["not_found"]
     if "twain" in low and ("open" in low or "khula" in low or "install" in low):
         return m["twain"]
@@ -2781,6 +2839,7 @@ class ScanWorker(QtCore.QThread):
     page_done = QtCore.pyqtSignal(str)
     done = QtCore.pyqtSignal(int, int)
     failed = QtCore.pyqtSignal(str)
+    stage = QtCore.pyqtSignal(str)      # F16: live processing-stage updates
 
     def __init__(self, hwnd, source_name, dpi, pixel_type, duplex, tmpdir, opts):
         super().__init__()
@@ -2806,6 +2865,7 @@ class ScanWorker(QtCore.QThread):
                 if img is None:
                     break
                 try:
+                    self.stage.emit("processing")   # F16: live processing stage
                     if self.opts.get("remove_blank"):
                         _sens = {"kam": 0.0003, "normal": 0.0008, "zyada": 0.004}
                         _thr = _sens.get(self.opts.get("blank_sensitivity", "normal"), 0.0008)
@@ -2816,14 +2876,25 @@ class ScanWorker(QtCore.QThread):
                     # size me sheet chhoti ho to backing dikhti hai; print me
                     # kala bilkul nahi aana chahiye.
                     img = whiten_dark_background(img)
-                    if self.opts.get("clean_edges"):
+                    # F15 Smart Scan: one toggle turns on the recommended cleanup set
+                    _smart = bool(self.opts.get("smart_scan"))
+                    if self.opts.get("clean_edges") or _smart:
                         img = clean_edges(img)
-                    if self.opts.get("auto_crop"):
+                    if self.opts.get("auto_crop") or _smart:
                         img = autocrop(img)
-                    if self.opts.get("deskew"):
+                    if self.opts.get("deskew") or _smart:
                         img = deskew(img)
                     if self.opts.get("quality_enhance"):
                         img = auto_enhance(img)
+                    # F5 background-enhancement mode (Original/White/Enhanced/High-Contrast);
+                    # Smart Scan defaults it to 'enhanced' when left on Original.
+                    _mode = self.opts.get("enhance_mode", "original")
+                    if _smart and _mode == "original":
+                        _mode = "enhanced"
+                    if _mode and _mode != "original":
+                        img = apply_enhance_mode(img, _mode)
+                    if self.opts.get("noise_removal") or _smart:   # F8 denoise
+                        img = denoise(img)
                     # Always Auto Rotate — har page apne aap seedha (background thread me,
                     # thumbnail/preview/OCR/PDF/save sabse pehle; kam confidence par original).
                     if self.opts.get("auto_orient", True):
@@ -2839,6 +2910,7 @@ class ScanWorker(QtCore.QThread):
                         parts = split_two_pages(img)
                     else:
                         parts = [img]
+                    self.stage.emit("saving")
                     for _pi in parts:
                         self._save_and_emit(_pi)
                 except Exception:
@@ -3191,6 +3263,18 @@ class OptionsDialog(QtWidgets.QDialog):
         self.cmb_orient_mode.addItems(["High accuracy (OCR + layout)", "Fast (only very sure)"])
         self.cmb_orient_mode.setCurrentIndex(1 if self.opts.get("auto_orient_mode") == "fast" else 0)
         form.addRow(lblhelp("     ↳ Auto-rotate mode", 'हिन्दी: High accuracy = OCR + layout दोनों से पहचान (सबसे सही)। Fast = सिर्फ़ पक्के मामलों में घुमाए (सबसे तेज़)।\nEnglish: High accuracy = OCR + layout (most correct). Fast = only rotate when very sure (quickest).'), self.cmb_orient_mode)
+        self.chk_smart = QtWidgets.QCheckBox("✨ Smart Scan — auto clean-up (Recommended)")
+        self.chk_smart.setChecked(bool(self.opts.get("smart_scan")))
+        form.addRow(chkrow(self.chk_smart, 'हिन्दी: एक क्लिक में पूरा auto-cleanup: किनारे साफ़, auto-crop, सीधा (deskew), background enhance और dust हटाना — सब अपने-आप। (Fast mode में बंद रहता है।)\nEnglish: One toggle for the whole cleanup: clean edges, auto-crop, deskew, background enhance and dust removal — all automatic. (Disabled in Fast mode.)'))
+        self.cmb_enhmode = QtWidgets.QComboBox()
+        self.cmb_enhmode.addItems(["Original (no change)", "Clean white background",
+                                   "Enhanced (contrast + sharpen)", "High contrast (crisp B&W text)"])
+        _emi = {"original": 0, "white": 1, "enhanced": 2, "high_contrast": 3}.get(self.opts.get("enhance_mode", "original"), 0)
+        self.cmb_enhmode.setCurrentIndex(_emi)
+        form.addRow(lblhelp("     ↳ Image mode", 'हिन्दी: पेज कैसा दिखे — Original (जैसा है), Clean white (साफ़ सफ़ेद background), Enhanced (contrast+sharp), High contrast (गहरा काला text)।\nEnglish: How pages look — Original, Clean white background, Enhanced (contrast+sharpen), or High contrast (crisp black text).'), self.cmb_enhmode)
+        self.chk_denoise = QtWidgets.QCheckBox("     ↳ Remove dust / noise")
+        self.chk_denoise.setChecked(bool(self.opts.get("noise_removal")))
+        form.addRow(chkrow(self.chk_denoise, 'हिन्दी: छोटे धब्बे/धूल/noise अपने-आप हटाओ, text साफ़ रखते हुए।\nEnglish: Auto-remove small specks/dust/noise while keeping text sharp.'))
         self.chk_autocolour = QtWidgets.QCheckBox("Auto colour-detect (colourless pages to gray)")
         self.chk_autocolour.setChecked(bool(self.opts.get("auto_colour")))
         form.addRow(chkrow(self.chk_autocolour, 'हिन्दी: चालू करने पर (सिर्फ़ Colour स्कैन में): जिस पेज पर रंग नहीं है वह अपने-आप ग्रे में सेव होगा — छोटी फ़ाइल, साफ़ प्रिंट।\nEnglish: ON (colour scans only): pages with no real colour are saved as grayscale — smaller files.'))
@@ -3299,6 +3383,9 @@ class OptionsDialog(QtWidgets.QDialog):
         o["auto_orient"] = self.chk_orient.isChecked()
         o["auto_orient_deskew"] = self.chk_orient_deskew.isChecked()
         o["auto_orient_mode"] = "fast" if self.cmb_orient_mode.currentIndex() == 1 else "accurate"
+        o["smart_scan"] = self.chk_smart.isChecked()
+        o["enhance_mode"] = ["original", "white", "enhanced", "high_contrast"][self.cmb_enhmode.currentIndex()]
+        o["noise_removal"] = self.chk_denoise.isChecked()
         o["auto_colour"] = self.chk_autocolour.isChecked()
         o["custom_page_mm"] = int(self.spin_custlen.value())
         o["compress"] = self.chk_compress.isChecked()
@@ -3328,36 +3415,107 @@ class OptionsDialog(QtWidgets.QDialog):
 # ---------------------------------------------------------------------------
 
 class ScanProgressDialog(QtWidgets.QDialog):
-    """NAPS2-style scanning box: page counter + Run in Background + Cancel."""
+    """Scanning box: live page counter, current stage, elapsed time + rate
+    (pages/min) and ETA (when the total is known) + Run-in-Background + Cancel."""
     cancelled = QtCore.pyqtSignal()
+
+    _STAGES = {
+        "scanning":   ("Scanning…", "Scan ho raha hai…"),
+        "processing": ("Cleaning & straightening…", "Saaf aur seedha kar rahe hain…"),
+        "saving":     ("Saving page…", "Page save ho raha hai…"),
+        "finishing":  ("Finishing…", "Poora ho raha hai…"),
+    }
 
     def __init__(self, parent, title, lang="hi"):
         super().__init__(parent)
         self._lang = lang
+        self._pages = 0
+        self._total = 0
+        self._t0 = time.time()
         self.setWindowTitle(title or "Scanning")
         self.setModal(False)
-        self.setMinimumWidth(430)
+        self.setMinimumWidth(440)
         lay = QtWidgets.QVBoxLayout(self)
-        self.lbl = QtWidgets.QLabel(self._page_text(1))
+        self.lbl = QtWidgets.QLabel(self._page_text())
+        f = self.lbl.font(); f.setPointSize(f.pointSize() + 2); f.setBold(True); self.lbl.setFont(f)
         lay.addWidget(self.lbl)
-        self.bar = QtWidgets.QProgressBar(); self.bar.setRange(0, 0)
+        self.lbl_stage = QtWidgets.QLabel(self._stage_text("scanning"))
+        self.lbl_stage.setStyleSheet("color:#2a78d6")
+        lay.addWidget(self.lbl_stage)
+        self.bar = QtWidgets.QProgressBar(); self.bar.setRange(0, 0)   # busy until a total is known
         lay.addWidget(self.bar)
+        self.lbl_stats = QtWidgets.QLabel("")
+        self.lbl_stats.setStyleSheet("color:#64748b;font-size:11px")
+        lay.addWidget(self.lbl_stats)
         row = QtWidgets.QHBoxLayout(); row.addStretch(1)
-        self.btn_bg = QtWidgets.QPushButton("Run in Background" if lang == "en" else "Run in Background")
+        self.btn_bg = QtWidgets.QPushButton("Run in Background")
         self.btn_bg.clicked.connect(self.hide)
         self.btn_cancel = QtWidgets.QPushButton("Cancel")
         self.btn_cancel.clicked.connect(lambda: self.cancelled.emit())
         row.addWidget(self.btn_bg); row.addWidget(self.btn_cancel)
         lay.addLayout(row)
+        # tick the elapsed/rate/ETA line ~2x per second
+        self._timer = QtCore.QTimer(self); self._timer.timeout.connect(self._tick)
+        self._timer.start(500)
+        self._tick()
         self.show()
 
-    def _page_text(self, n):
-        return ("Scanning page %d..." % n) if self._lang == "en" else ('Scanning page %d...' % n)
+    def _page_text(self):
+        if self._total > 0:
+            return (("Scanning page %d of %d…" % (self._pages, self._total)) if self._lang == "en"
+                    else ("Page %d / %d scan ho raha…" % (self._pages, self._total)))
+        n = max(1, self._pages)
+        return (("Scanning page %d…" % n) if self._lang == "en" else ("Page %d scan ho raha…" % n))
+
+    def _stage_text(self, key):
+        en, hi = self._STAGES.get(key, self._STAGES["scanning"])
+        return ("Stage: " + (en if self._lang == "en" else hi))
+
+    @staticmethod
+    def _fmt_time(secs):
+        secs = int(max(0, secs))
+        return "%d:%02d" % (secs // 60, secs % 60)
+
+    def _tick(self):
+        el = time.time() - self._t0
+        parts = ["⏱ " + self._fmt_time(el)]
+        if self._pages > 0 and el > 0.5:
+            rate = self._pages / el * 60.0
+            parts.append("%.1f pages/min" % rate)
+            if self._total > self._pages:
+                remaining = (self._total - self._pages) / (self._pages / el)
+                parts.append(("~%s left" % self._fmt_time(remaining)) if self._lang == "en"
+                             else ("~%s baaki" % self._fmt_time(remaining)))
+        self.lbl_stats.setText("  ·  ".join(parts))
+
+    def set_total(self, n):
+        """Enable a determinate bar + ETA once the total page count is known."""
+        try:
+            n = int(n)
+        except Exception:
+            return
+        if n > 0:
+            self._total = n
+            self.bar.setRange(0, n)
+            self.bar.setValue(min(self._pages, n))
+            self.lbl.setText(self._page_text())
+
+    def set_stage(self, key):
+        self.lbl_stage.setText(self._stage_text(key))
 
     def set_page(self, n):
-        self.lbl.setText(self._page_text(n))
+        self._pages = int(n)
+        if self._total > 0:
+            self.bar.setValue(min(self._pages, self._total))
+        self.lbl.setText(self._page_text())
+        self.set_stage("scanning")
+        self._tick()
 
     def closeEvent(self, e):
+        try:
+            self._timer.stop()
+        except Exception:
+            pass
         e.accept()
 
 
@@ -13513,8 +13671,9 @@ if the toggle is ticked).</p>
             dpi, color = 200, "bw"     # keep the profile's duplex (both-side) choice
             opts = dict(self._opts)    # lean copy: skip heavy per-page processing
             for k in ("remove_blank", "auto_crop", "deskew", "quality_enhance",
-                      "clean_edges", "split_two_page"):
+                      "clean_edges", "split_two_page", "smart_scan", "noise_removal"):
                 opts[k] = False
+            opts["enhance_mode"] = "original"   # fast mode = speed, skip cleanup
         opts = dict(opts)
         opts["page_size"] = page_size
         opts["paper_source"] = source
@@ -13523,6 +13682,10 @@ if the toggle is ticked).</p>
         self._worker.page_done.connect(self._on_page_scanned)
         self._worker.done.connect(self._on_scan_done)
         self._worker.failed.connect(self._on_scan_failed)
+        try:
+            self._worker.stage.connect(self._progress.set_stage)   # F16 live stage
+        except Exception:
+            pass
         self.btn_scan.setEnabled(False)
         try:
             self._conn_timer.stop()
