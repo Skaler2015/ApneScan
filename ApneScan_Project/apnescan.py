@@ -176,7 +176,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "143"
+VERSION = "144"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -425,7 +425,9 @@ DEFAULT_OPTIONS = {
     "daily_jpeg_folder": os.path.join(os.path.expanduser("~"), "Documents", "ApneScan_DailyScans"),
     "scanner_method": "twain",   # "twain" ya "wia"
     "twain_file_xfer": False,    # experimental: continuous ADF feed (TWAIN file transfer)
-    "auto_orient": False,        # ulta page OCR se seedha karo
+    "auto_orient": True,         # Always Auto Rotate — har page apne aap seedha (default ON)
+    "auto_orient_mode": "accurate",  # "accurate" (OSD + layout fallback) ya "fast"
+    "auto_orient_deskew": False, # halka tirchapan bhi seedha karo (thoda resample)
     "auto_colour": False,        # rangeen page colour me, baki gray me (chhoti file)
     "custom_page_mm": 600,       # "custom" page size ki lambai (mm)
     "touch_mode": False,         # bade buttons/font (touch / buzurg mode)
@@ -824,18 +826,100 @@ def detect_content_boxes(img, bg_thresh=235):
     return boxes
 
 
-def auto_orient(img):
-    """Ulta (90/180/270 ghuma hua) page OCR (Tesseract OSD) se pehchan kar
-    seedha karo. Tesseract na ho ya samajh na aaye to page waise hi rehta hai."""
+def _orient_keep_dpi(src, out):
+    """Carry the original DPI/format hints onto the rotated image (no quality loss)."""
     try:
-        osd = pytesseract.image_to_osd(img.convert("RGB"))
-        m = re.search(r"Rotate:\s*(\d+)", osd or "")
-        rot = int(m.group(1)) if m else 0
-        if rot in (90, 180, 270):
-            return img.rotate(-rot, expand=True)
+        if src is not out and src.info.get("dpi"):
+            out.info["dpi"] = src.info["dpi"]
     except Exception:
         pass
-    return img
+    return out
+
+
+def _orient_osd(img):
+    """Tesseract OSD orientation on a downscaled copy (fast) — returns
+    (rotate_degrees, confidence, script). Detection is on a small copy; the
+    rotation itself is applied to the full-res original elsewhere."""
+    try:
+        rgb = img.convert("RGB")
+        w, h = rgb.size
+        m = max(w, h)
+        if m > 1000:                      # detect small, rotate original -> fast + lossless
+            s = 1000.0 / m
+            rgb = rgb.resize((max(1, int(w * s)), max(1, int(h * s))))
+        try:
+            from pytesseract import Output as _Out
+            d = pytesseract.image_to_osd(rgb, output_type=_Out.DICT)
+            return (int(d.get("rotate", 0) or 0),
+                    float(d.get("orientation_conf", 0) or 0), str(d.get("script", "")))
+        except Exception:
+            osd = pytesseract.image_to_osd(rgb)
+            mr = re.search(r"Rotate:\s*(\d+)", osd or "")
+            mc = re.search(r"Orientation confidence:\s*([\d.]+)", osd or "")
+            return (int(mr.group(1)) if mr else 0,
+                    float(mc.group(1)) if mc else 0.0, "")
+    except Exception:
+        return (0, 0.0, "")
+
+
+def _orient_layout(img):
+    """OCR-free fallback: guess upright-vs-sideways from text-line projection
+    profiles. Returns (rotate, confidence). Cannot tell up/down, so it only ever
+    suggests a 90° fix and keeps confidence modest (won't override a good OSD)."""
+    if not HAS_NUMPY:
+        return (0, 0.0)
+    try:
+        g = img.convert("L").resize((300, 300))
+        a = np.asarray(g, dtype=np.float32)
+        ink = (a < 128).astype(np.float32)
+        if ink.sum() < 50:                # nearly blank -> no signal
+            return (0, 0.0)
+        rv = float(np.var(np.diff(ink.sum(axis=1))))   # variance of per-row ink
+        cv = float(np.var(np.diff(ink.sum(axis=0))))   # variance of per-col ink
+        if rv <= 0 and cv <= 0:
+            return (0, 0.0)
+        if cv > rv * 1.8:                 # columns vary more -> lines are vertical -> sideways
+            return (90, min(3.0, (cv / (rv + 1e-6)) - 1.0))
+        return (0, min(2.0, rv / (cv + 1e-6)))
+    except Exception:
+        return (0, 0.0)
+
+
+def auto_orient(img, mode="accurate", ocr_based=True, layout_based=True,
+                deskew_small=False, min_conf=None):
+    """Intelligent 'Always Auto Rotate' engine (offline). Detects the correct
+    0/90/180/270 orientation from the page's text (Tesseract OSD — works for
+    English, Hindi and mixed) with an OCR-free layout fallback, and returns an
+    UPRIGHT image. 90°-steps are lossless (no resize/recompress); DPI + colour
+    depth are preserved. If confidence is very low the ORIGINAL is kept so a
+    correct page is never rotated wrongly. Blank pages skip OCR.
+
+    Backward compatible: auto_orient(img) behaves like before, only smarter."""
+    try:
+        orig = img
+        if min_conf is None:
+            min_conf = 2.0 if mode == "fast" else 1.0
+        # blank page -> no reliable text/layout signal; keep as-is
+        try:
+            if is_blank_page(orig.convert("RGB"), 0.0008):
+                return orig
+        except Exception:
+            pass
+        rot, conf = 0, 0.0
+        if ocr_based and tesseract_available():
+            rot, conf, _script = _orient_osd(orig)
+        if conf < min_conf and layout_based:      # OSD unsure -> try layout
+            lrot, lconf = _orient_layout(orig)
+            if lconf > conf:
+                rot, conf = lrot, lconf
+        out = orig
+        if rot in (90, 180, 270) and conf >= min_conf:
+            out = orig.rotate(-rot, expand=True)  # lossless quarter-turn
+        if deskew_small:                          # optional slight-tilt straighten
+            out = deskew(out)
+        return _orient_keep_dpi(orig, out)
+    except Exception:
+        return img
 
 
 def colorfulness(img):
@@ -2739,8 +2823,11 @@ class ScanWorker(QtCore.QThread):
                         img = deskew(img)
                     if self.opts.get("quality_enhance"):
                         img = auto_enhance(img)
-                    if self.opts.get("auto_orient") and tesseract_available():
-                        img = auto_orient(img)
+                    # Always Auto Rotate — har page apne aap seedha (background thread me,
+                    # thumbnail/preview/OCR/PDF/save sabse pehle; kam confidence par original).
+                    if self.opts.get("auto_orient", True):
+                        img = auto_orient(img, mode=self.opts.get("auto_orient_mode", "accurate"),
+                                          deskew_small=bool(self.opts.get("auto_orient_deskew")))
                     # Rang-heen page ko gray bana do (chhoti file) — sirf colour
                     # scan me, aur sirf jab option ON ho.
                     if (self.opts.get("auto_colour") and self.pixel_type == "color"
@@ -3093,9 +3180,16 @@ class OptionsDialog(QtWidgets.QDialog):
         self.chk_clean_edges.setChecked(bool(self.opts.get("clean_edges"))); form.addRow(chkrow(self.chk_clean_edges, 'हिन्दी: चालू करने पर: स्कैन के किनारों की काली border और किनारे के छेद (punch-hole) के निशान अपने-आप सफ़ेद हो जाएँगे। बीच का टेक्स्ट/स्टांप नहीं छुआ जाता।\nEnglish: ON: whitens the black scan border and edge punch-hole marks. The middle content is never touched.'))
         self.chk_split2 = QtWidgets.QCheckBox("Split two pages on one glass into two")
         self.chk_split2.setChecked(bool(self.opts.get("split_two_page"))); form.addRow(chkrow(self.chk_split2, 'हिन्दी: चालू करने पर: एक glass पर दो छोटे पेज एक साथ रखें — स्कैन होते ही वे दो अलग पेज बन जाएँगे (बीच की सफ़ेद पट्टी से काटकर)।\nEnglish: ON: put two small pages together on the glass — the scan is auto-split into two separate pages at the white gutter.'))
-        self.chk_orient = QtWidgets.QCheckBox("Auto-rotate upside-down pages (via OCR)")
-        self.chk_orient.setChecked(bool(self.opts.get("auto_orient")))
-        form.addRow(chkrow(self.chk_orient, 'हिन्दी: चालू करने पर: उल्टा (90/180/270) स्कैन हुआ पेज OCR से पहचानकर अपने-आप सीधा हो जाएगा (Tesseract चाहिए; स्कैन थोड़ा धीमा होता है)।\nEnglish: ON: auto-rotates upside-down/sideways pages using OCR (needs Tesseract; slightly slower).'))
+        self.chk_orient = QtWidgets.QCheckBox("Always Auto Rotate (Recommended)")
+        self.chk_orient.setChecked(bool(self.opts.get("auto_orient", True)))
+        form.addRow(chkrow(self.chk_orient, 'हिन्दी: पेपर किसी भी दिशा में रखो — हर पेज अपने-आप सीधा (upright) हो जाता है। Thumbnail, preview, saved image, PDF सब सीधे। कम भरोसा हो तो पेज वैसा ही रहता है (गलत घुमाव नहीं)। (Tesseract हो तो सबसे सही; background में चलता है।)\nEnglish: Place the paper any way — every page is made upright automatically (thumbnail, preview, saved image, PDF). If unsure it keeps the original (never a wrong rotation). Runs in the background.'))
+        self.chk_orient_deskew = QtWidgets.QCheckBox("     ↳ Also straighten slight tilt (high accuracy)")
+        self.chk_orient_deskew.setChecked(bool(self.opts.get("auto_orient_deskew")))
+        form.addRow(chkrow(self.chk_orient_deskew, 'हिन्दी: थोड़ा तिरछा (skew) पेज भी सीधा करता है (−10° से +10°)। बहुत हल्का resample होता है इसलिए default बंद।\nEnglish: Also straightens a slightly tilted page (−10° to +10°). Does a tiny resample, so it is off by default.'))
+        self.cmb_orient_mode = QtWidgets.QComboBox()
+        self.cmb_orient_mode.addItems(["High accuracy (OCR + layout)", "Fast (only very sure)"])
+        self.cmb_orient_mode.setCurrentIndex(1 if self.opts.get("auto_orient_mode") == "fast" else 0)
+        form.addRow(lblhelp("     ↳ Auto-rotate mode", 'हिन्दी: High accuracy = OCR + layout दोनों से पहचान (सबसे सही)। Fast = सिर्फ़ पक्के मामलों में घुमाए (सबसे तेज़)।\nEnglish: High accuracy = OCR + layout (most correct). Fast = only rotate when very sure (quickest).'), self.cmb_orient_mode)
         self.chk_autocolour = QtWidgets.QCheckBox("Auto colour-detect (colourless pages to gray)")
         self.chk_autocolour.setChecked(bool(self.opts.get("auto_colour")))
         form.addRow(chkrow(self.chk_autocolour, 'हिन्दी: चालू करने पर (सिर्फ़ Colour स्कैन में): जिस पेज पर रंग नहीं है वह अपने-आप ग्रे में सेव होगा — छोटी फ़ाइल, साफ़ प्रिंट।\nEnglish: ON (colour scans only): pages with no real colour are saved as grayscale — smaller files.'))
@@ -3202,6 +3296,8 @@ class OptionsDialog(QtWidgets.QDialog):
         o["split_two_page"] = self.chk_split2.isChecked()
         o["twain_file_xfer"] = self.chk_filexfer.isChecked()
         o["auto_orient"] = self.chk_orient.isChecked()
+        o["auto_orient_deskew"] = self.chk_orient_deskew.isChecked()
+        o["auto_orient_mode"] = "fast" if self.cmb_orient_mode.currentIndex() == 1 else "accurate"
         o["auto_colour"] = self.chk_autocolour.isChecked()
         o["custom_page_mm"] = int(self.spin_custlen.value())
         o["compress"] = self.chk_compress.isChecked()
@@ -7062,6 +7158,15 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if not self._opts.get("_vsig_v2"):
             self._opts["_vsig_v2"] = True
             self._config["learned_visual"] = []
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+        # v143: "Always Auto Rotate" ab default ON — purane installs (jinme ye
+        # False saved tha) me bhi ek baar chalu kar do (recommended).
+        if not self._opts.get("_always_rotate_v143"):
+            self._opts["_always_rotate_v143"] = True
+            self._opts["auto_orient"] = True
             try:
                 self._save_opts()
             except Exception:
