@@ -34,7 +34,7 @@ import datetime
 from apnescan_lib.text_utils import (
     sanitize, underscore_name, name_key, folder_safe_name,
 )
-from apnescan_lib.search_engine import _norm_search, _folder_search_score
+from apnescan_lib.search_engine import _folder_search_score
 # Image-processing engine lives in apnescan_lib.imaging. Only the functions
 # apnescan.py calls directly are imported back; the rest (e.g. auto_brightness,
 # _largest_gap) are used internally by their siblings inside that module.
@@ -68,6 +68,9 @@ from apnescan_lib.ocr_text import (
     visual_signature, _vsig_sim, visual_name_for, extract_doc_number,
     classify_from_text, ocr_page_title,
 )
+# File Search Engine — Everything-style instant search for the My Files panel
+# (normalise / tokenize / partial+number+fuzzy match / rank / filters / cache).
+from apnescan_lib.file_search import SearchEngine as FileSearchEngine, ENGINE as _search_engine
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
@@ -223,7 +226,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "153"
+VERSION = "154"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11850,6 +11853,15 @@ if the toggle is ticked).</p>
         self.files_model.setNameFilters(["*.pdf", "*.jpg", "*.jpeg", "*.png",
                                          "*.tif", "*.tiff", "*.docx", "*.xlsx"])
         self.files_model.setNameFilterDisables(False)
+        # AUTO INDEX REFRESH: file system me kuch bhi bade (Explorer se copy,
+        # rename, delete — app ke bahar se bhi) to search-index apne aap taaza
+        # ho jaye. Restart ki kabhi zaroorat nahi.
+        try:
+            self.files_model.rowsInserted.connect(lambda *_a: self._invalidate_files_index())
+            self.files_model.rowsRemoved.connect(lambda *_a: self._invalidate_files_index())
+            self.files_model.fileRenamed.connect(lambda *_a: self._invalidate_files_index())
+        except Exception:
+            pass
         self.files_tree = FilesTree(self._on_pages_dropped)
         self.files_tree.setModel(self.files_model)
         self.files_tree.setRootIndex(self.files_model.index(_root))
@@ -13632,6 +13644,7 @@ if the toggle is ticked).</p>
             self._update_panel_nav()
             if hasattr(self, "foot_folder"):
                 self._update_footer()
+            self._invalidate_files_index()      # move/copy ke baad index taaza
         except Exception:
             pass
 
@@ -13868,6 +13881,7 @@ if the toggle is ticked).</p>
             if isinstance(n, Exception):
                 self._warn(self.L("Import fail ho gaya", "Import failed"))
                 return
+            self._invalidate_files_index()      # nayi files turant search me aayein
             try:
                 idx = self.files_model.index(folder)
                 self.files_tree.setCurrentIndex(idx)
@@ -14562,44 +14576,73 @@ if the toggle is ticked).</p>
     _FILE_EXTS = (".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".docx", ".xlsx")
 
     def _invalidate_files_index(self):
-        """Folder badla ya nayi file bani — index dobara banega."""
+        """Folder badla / nayi file bani / delete-import hua — index dobara
+        banega, search-cache saaf. (Search kabhi purani list par na atke.)"""
         self._files_index = None
+        self._files_index_time = 0
+        try:
+            _search_engine.clear_cache()
+        except Exception:
+            pass
+
+    _FILES_INDEX_TTL = 45      # seconds — stale-while-revalidate window
 
     def _build_files_index(self, scope):
-        """scope ke andar sabhi folder+file ka halka index (path + naam).
-        Ye disk-walk sirf EK BAAR hota hai; uske baad har keystroke par sirf
-        is list ko memory me chhaanto (bahut tez)."""
+        """scope ke andar sabhi folder+file ka index. Har entry:
+        (kind, full, name_lower, rel_lower, norm, compact, ext, size, mtime).
+        norm/compact EK hi baar banate hain — har keystroke par sirf scoring.
+        size/mtime se '>1mb' / 'today' jaise filter turant lagte hain."""
+        SE = FileSearchEngine
         idx = []
         try:
             for dp, dns, fn in os.walk(scope):
                 for d in dns:
                     full = os.path.join(dp, d)
-                    # 5th field = smart-search normalised name (computed ONCE here,
-                    # so every keystroke only scores — no re-normalising).
+                    n = SE.norm(d)
                     idx.append(("dir", full, d.lower(),
-                                os.path.relpath(full, scope).lower(), _norm_search(d)))
+                                os.path.relpath(full, scope).lower(),
+                                n, SE.compact(n), "", 0, 0))
                 for f in fn:
                     if f.lower().endswith(self._FILE_EXTS):
                         full = os.path.join(dp, f)
                         rel = os.path.relpath(full, scope)
-                        idx.append(("file", full, f.lower(),
-                                    rel.lower(), _norm_search(rel)))
-                if len(idx) >= 40000:
+                        n = SE.norm(f)
+                        try:
+                            st = os.stat(full)
+                            size, mtime = st.st_size, st.st_mtime
+                        except Exception:
+                            size, mtime = 0, 0
+                        idx.append(("file", full, f.lower(), rel.lower(),
+                                    n, SE.compact(n),
+                                    os.path.splitext(f)[1].lower(), size, mtime))
+                if len(idx) >= 120000:
                     break
         except Exception:
             pass
         return idx
 
-    def _ensure_files_index_async(self, scope):
+    def _ensure_files_index_async(self, scope, force=False):
         """scope ka index memory me tayyar rakho (background me). Jab tak na bane
-        tab tak None rehta hai."""
-        if getattr(self, "_files_index", None) is not None and \
+        tab tak None rehta hai. force=True => TTL ke baad chupchap taaza banao
+        (purana index tab tak kaam karta rehta hai — UI kabhi na ruke)."""
+        if (not force) and getattr(self, "_files_index", None) is not None and \
                 getattr(self, "_files_index_scope", None) == scope:
             return
+        if getattr(self, "_files_index_building", False):
+            return
+        self._files_index_building = True
 
         def _done(idx):
+            self._files_index_building = False
+            if isinstance(idx, Exception):
+                return
             self._files_index = idx
             self._files_index_scope = scope
+            self._files_index_time = time.time()
+            try:
+                _search_engine.clear_cache()
+            except Exception:
+                pass
             # index aate hi agar search-box me abhi bhi kuch likha hai to
             # turant natije dikha do
             try:
@@ -14609,33 +14652,87 @@ if the toggle is ticked).</p>
                 pass
         self._run_bg_quiet(lambda: self._build_files_index(scope), _done)
 
+    def _search_index_entries(self, terms, filters, idx, limit=1000):
+        """Score every index entry with the SearchEngine. Two passes: an instant
+        substring pass over ALL entries; a fuzzy (typo) pass only when the first
+        pass found little — so 50,000 files stay live-fast, but 'Garma' still
+        finds 'Garima'. Returns [('dir'|'file', path), ...] ranked best-first."""
+        SE = FileSearchEngine
+        dir_hits, file_hits = [], []
+        misses = []
+        fcache = {}                       # folder-path -> (norm, compact), once per dir
+
+        def _folder_strs(rel):
+            d = os.path.dirname(rel)
+            if d not in fcache:
+                fn = SE.norm(d)
+                fcache[d] = (fn, SE.compact(fn))
+            return fcache[d]
+
+        for e in idx:
+            kind, full, name = e[0], e[1], e[2]
+            norm = e[4] if len(e) > 4 else SE.norm(name)
+            comp = e[5] if len(e) > 5 else SE.compact(norm)
+            ext = e[6] if len(e) > 6 else os.path.splitext(name)[1]
+            size = e[7] if len(e) > 7 else None
+            mtime = e[8] if len(e) > 8 else None
+            if kind == "dir":
+                if filters.get("ext") or filters.get("size") or filters.get("days"):
+                    continue           # metadata filters are about FILES
+                if not terms:
+                    continue
+                ok, key = _folder_search_score(terms, norm)
+                if ok:
+                    dir_hits.append((key, name, full))
+                elif all(t in comp for t in terms):     # across-separator fallback
+                    dir_hits.append(((1, 1, 4, 4 * len(terms), len(norm), norm),
+                                     name, full))
+                continue
+            if not SE.passes_filters(filters, ext, size, mtime):
+                continue
+            if not terms:                # pure filter query ('pdf', 'today', '>1mb')
+                file_hits.append(((3, 9, 9, len(norm), norm), name, full))
+                continue
+            fn_norm, fn_comp = _folder_strs(e[3]) if len(e) > 3 else ("", "")
+            m = SE.match_file(terms, norm, comp, None, fn_norm, fn_comp, fuzzy=False)
+            if m is not None:
+                file_hits.append((SE.rank_key(m[0], m[1], norm), name, full))
+            else:
+                misses.append((norm, comp, fn_norm, fn_comp, name, full))
+            if len(dir_hits) + len(file_hits) >= limit:
+                break
+        # fuzzy pass — sirf tab jab seedhe match kam mile (typo ka ilaaj)
+        if terms and len(file_hits) < 25 and misses:
+            for norm, comp, fn_norm, fn_comp, name, full in misses:
+                m = SE.match_file(terms, norm, comp, norm.split(), fn_norm, fn_comp, fuzzy=True)
+                if m is not None:
+                    file_hits.append((SE.rank_key(m[0], m[1], norm), name, full))
+                if len(file_hits) >= limit:
+                    break
+        dir_hits.sort(key=lambda h: (h[0], h[1]))
+        file_hits.sort(key=lambda h: (h[0], h[1]))
+        return ([("dir", h[2]) for h in dir_hits] +
+                [("file", h[2]) for h in file_hits])
+
     def _run_files_search(self):
-        """Advanced search — POORE panel-folder (aur uske andar ke sabhi
-        folders) me naam se dhoondo. Ab TURANT: disk baar-baar nahi padha jaata,
-        ek in-memory index ko memory me chhaanta hai (2 akshar likhte hi natije).
-        Kai shabd (jaise 'ram bill') = sabhi match; folder-naam bhi milta hai."""
+        """Live search — POORE panel-folder (sab subfolders) me. In-memory index
+        + SearchEngine: har partial (naam/number/beech-ka-tukda), _-/space
+        farak nahi, Hindi/English, typo-tolerant, 'pdf'/'today'/'>1mb' filter.
+        Index purana ho to purane se TURANT jawab + background me taaza."""
         q = self.files_search.text().strip().lower()
         if len(q) < 2:
             self.files_results.hide()
             self.files_tree.show()
             self.files_results._hl_terms = None
             return
-        # Smart-search: normalise the query so _ / - / mixed-case / extra spaces
-        # all behave the same, then rank by patient-folder relevance.
-        terms = _norm_search(q).split()
+        SE = FileSearchEngine
+        t0 = time.time()
+        terms, filters = SE.parse_query(q)
         scope = self._panel_current_dir()
         if not (scope and os.path.isdir(scope)):
             scope = self._files_root()
         search_text = self.btn_search_text.isChecked()   # PDF ke andar bhi?
         self.files_results._hl_terms = terms              # results me match highlight
-
-        def _file_rank(rel_norm):
-            # files keep underscore names; rank on the normalised relative path.
-            if not all(t in rel_norm for t in terms):
-                return None
-            base = os.path.basename(rel_norm)
-            at_start = any(base.startswith(t) for t in terms)
-            return (0 if at_start else 1, len(rel_norm))
 
         # ---- TEZ RAASTA: naam/path search — memory index se turant ----
         if not search_text:
@@ -14649,49 +14746,52 @@ if the toggle is ticked).</p>
                 self.files_results.addItem(_w)
                 self.files_tree.hide(); self.files_results.show()
                 return
-            dir_hits, file_hits = [], []
-            for entry in idx:
-                kind, full, name = entry[0], entry[1], entry[2]
-                norm = entry[4] if len(entry) > 4 else _norm_search(name)
-                if kind == "dir":
-                    ok, key = _folder_search_score(terms, norm)
-                    if ok:
-                        dir_hits.append((key, name, full))
-                else:
-                    fr = _file_rank(norm)
-                    if fr is not None:
-                        file_hits.append((fr, name, full))
-                if len(dir_hits) + len(file_hits) >= 1000:
-                    break
-            dir_hits.sort(key=lambda h: (h[0], h[1]))
-            file_hits.sort(key=lambda h: (h[0], h[1]))
-            res = ([("dir", h[2]) for h in dir_hits] +
-                   [("file", h[2]) for h in file_hits])
+            # AUTO-REFRESH: index TTL paar kar gaya? purane se abhi jawab do,
+            # background me naya banao (naya aate hi results khud refresh).
+            if time.time() - getattr(self, "_files_index_time", 0) > self._FILES_INDEX_TTL:
+                self._ensure_files_index_async(scope, force=True)
+            ckey = "%s|%s" % (scope, q)
+            res = _search_engine.cached(ckey)
+            if res is None:
+                res = self._search_index_entries(terms, filters, idx)
+                _search_engine.remember(ckey, res)
+            SE.log(q, time.time() - t0, len(res))
             self._render_files_results(res, q, preserve_order=True)
             return
 
-        # ---- BHAARI RAASTA: PDF ke andar ka text — background me ----
+        # ---- BHAARI RAASTA: PDF ke andar ka text bhi — background me ----
         exts = self._FILE_EXTS
 
         def job():
             dir_hits, file_hits = [], []
             for dp, dns, fn in os.walk(scope):
                 for d in dns:
-                    ok, key = _folder_search_score(terms, _norm_search(d))
+                    if not terms:
+                        continue
+                    nd = SE.norm(d)
+                    ok, key = _folder_search_score(terms, nd)
                     if ok:
                         dir_hits.append((key, d.lower(), os.path.join(dp, d)))
                 for f in fn:
                     if not f.lower().endswith(exts):
                         continue
                     full = os.path.join(dp, f)
-                    rel_norm = _norm_search(os.path.relpath(full, scope))
-                    fr = _file_rank(rel_norm)
-                    if fr is not None:
-                        file_hits.append((fr, f.lower(), full))
-                    elif full.lower().endswith(".pdf"):
-                        txt = self._pdf_text_cached(full)
-                        if txt and all(t in txt for t in terms):
-                            file_hits.append(((2, 0), f.lower(), full))   # content-only
+                    try:
+                        st = os.stat(full)
+                        size, mtime = st.st_size, st.st_mtime
+                    except Exception:
+                        size, mtime = None, None
+                    if not SE.passes_filters(filters, os.path.splitext(f)[1], size, mtime):
+                        continue
+                    n = SE.norm(f)
+                    txt = ""
+                    if full.lower().endswith(".pdf"):
+                        txt = (self._pdf_text_cached(full) or "")
+                    m = SE.match_file(terms, n, SE.compact(n), n.split(),
+                                      SE.norm(dp), SE.compact(SE.norm(dp)),
+                                      txt.lower()) if terms else (3, [9])
+                    if m is not None:
+                        file_hits.append((SE.rank_key(m[0], m[1], n), f.lower(), full))
                 if len(dir_hits) + len(file_hits) >= 1000:
                     break
             dir_hits.sort(key=lambda h: (h[0], h[1]))
@@ -14701,9 +14801,11 @@ if the toggle is ticked).</p>
 
         def done(res):
             if isinstance(res, Exception):
+                SE.log(q, time.time() - t0, 0, error=str(res))
                 return
             if self.files_search.text().strip().lower() != q:
                 return
+            SE.log(q, time.time() - t0, len(res))
             self._render_files_results(res, q, preserve_order=True)
         self._run_bg(job, done, self.L("Andar ka text dhoondh rahe…",
                                        "Searching inside text…"))
@@ -14886,7 +14988,7 @@ if the toggle is ticked).</p>
             self.files_tree.hide(); self.files_results.show()
             QtCore.QTimer.singleShot(400, self._apply_files_filter)
             return
-        files = [(full) for kind, full, name, rel in idx if kind == "file"]
+        files = [e[1] for e in idx if e[0] == "file"]
         if mode == "pdf":
             res = [("file", p) for p in files if p.lower().endswith(".pdf")]
         elif mode == "img":
@@ -14918,7 +15020,7 @@ if the toggle is ticked).</p>
             self.status.showMessage(self.L("Taiyaari… phir se dabao.",
                                            "Indexing… tap again."), 2000)
             return
-        files = [full for kind, full, name, rel in idx if kind == "file"]
+        files = [e[1] for e in idx if e[0] == "file"]
 
         def job():
             dated = []
@@ -15071,6 +15173,7 @@ if the toggle is ticked).</p>
             idx.append({"trash": trash_name, "orig": path, "name": base,
                         "when": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")})
             self._save_trash_index(idx)
+            self._invalidate_files_index()      # deleted file search me na dikhe
             return True
         except Exception:
             return False
