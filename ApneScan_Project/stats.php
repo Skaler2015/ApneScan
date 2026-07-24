@@ -46,7 +46,12 @@ function default_data() {
         'broadcast'=>array('msg'=>'','target'=>'all','id'=>0),'rconfig'=>array(),
         'adminLogins'=>array(),'failLog'=>array(),'lastBackup'=>0,
         'scanEvents'=>0,'recentScans'=>array(),'metrics'=>array(),'featUsers'=>array(),
-        'blockedIPs'=>array()
+        'blockedIPs'=>array(),
+        // naye admin features ke liye
+        'auditLog'=>array(),      // (3) admin actions history
+        'featDaily'=>array(),     // (18) feature adoption over time [date][feat]=count
+        'reqHours'=>array(),      // (26) requests per hour (load)
+        'sizeDaily'=>array()      // (26) data-file size trend
     );
 }
 // ek file se saaf JSON padho (khaali/tuti -> null)
@@ -567,6 +572,20 @@ if (isset($_GET['admin'])) {
             if ($act==='donate') { $d['rconfig']['donate_url']=substr(trim($_POST['url']),0,200); }
             if ($act==='tips')   { $lines=array_filter(array_map('trim',explode("\n", isset($_POST['tips'])?$_POST['tips']:''))); $d['rconfig']['tips']=array_slice(array_values($lines),0,20); }
             if ($act==='flags')  { $j=json_decode(isset($_POST['json'])?$_POST['json']:'',true); if(is_array($j)) $d['rconfig']['flags']=$j; } }
+        // (22) feedback ticket status: open <-> resolved
+        if ($act==='fstatus') { $fi=intval($_POST['fi']); if(isset($d['feedback'][$fi])){ $cur=isset($d['feedback'][$fi]['status'])?$d['feedback'][$fi]['status']:'open'; $d['feedback'][$fi]['status']=($cur==='resolved')?'open':'resolved'; } }
+        // (23,24,25) rconfig content editors: canned replies, changelog, news feed
+        if (in_array($act,array('canned','changelog','news'))) { if(!isset($d['rconfig'])||!is_array($d['rconfig']))$d['rconfig']=array();
+            if ($act==='canned')    { $lines=array_filter(array_map('trim',explode("\n", isset($_POST['canned'])?$_POST['canned']:''))); $d['rconfig']['canned']=array_slice(array_values($lines),0,20); }
+            if ($act==='changelog') { $d['rconfig']['changelog']=substr(trim(isset($_POST['changelog'])?$_POST['changelog']:''),0,4000); }
+            if ($act==='news')      { $lines=array_filter(array_map('trim',explode("\n", isset($_POST['news'])?$_POST['news']:''))); $d['rconfig']['news']=array_slice(array_values($lines),0,20); } }
+        // (3) audit log — har admin action ka record (kab/kaunse IP se/kya)
+        if(!isset($d['auditLog'])||!is_array($d['auditLog'])) $d['auditLog']=array();
+        $__adet=$id; if($act==='bulk')$__adet=(isset($_POST['ba'])?$_POST['ba']:'').' ×'.count(array_filter(array_map('trim',explode(',',isset($_POST['ids'])?$_POST['ids']:''))));
+        elseif(in_array($act,array('broadcast','umsg','freply','news','canned')))$__adet=substr(trim(isset($_POST['msg'])?$_POST['msg']:(isset($_POST['reply'])?$_POST['reply']:'')),0,40);
+        elseif(in_array($act,array('blockip','unblockip')))$__adet=isset($_POST['ip'])?$_POST['ip']:'';
+        $d['auditLog'][]=array('t'=>time(),'ip'=>isset($_SERVER['REMOTE_ADDR'])?$_SERVER['REMOTE_ADDR']:'?','act'=>$act,'det'=>substr((string)$__adet,0,50));
+        $d['auditLog']=array_slice($d['auditLog'],-200);
         save_data($DATA_FILE,$d,true);   // admin ka jaan-boojhkar action (purge/clear) -> force
         header('Location: '.strtok($_SERVER['REQUEST_URI'],'?').'?admin=1'); exit;
     }
@@ -667,7 +686,9 @@ if (isset($_GET['admin'])) {
     // crashes + feedback
     $S['crashes']=array_reverse(array_slice(isset($d['crashes'])?$d['crashes']:array(),-25));
     $fb=isset($d['feedback'])?$d['feedback']:array();
-    $S['feedback']=array_reverse(array_slice($fb,-40));
+    // asli index attach karo (fi) taaki reply/status sahi item par lage (list ulti dikhti hai)
+    $fbi=array(); foreach($fb as $__k=>$__f){ $__f['fi']=$__k; $fbi[]=$__f; }
+    $S['feedback']=array_reverse(array_slice($fbi,-40));
     $rsum=0;$rn=0; foreach($fb as $f){ if(!empty($f['rating'])){$rsum+=intval($f['rating']);$rn++;} }
     $S['avgRating']=$rn?round($rsum/$rn,1):0; $S['ratingCount']=$rn;
     // broadcast + config current
@@ -906,6 +927,54 @@ if (isset($_GET['admin'])) {
         if(count($ca)>0 && $both>0) $corr[]=array('a'=>$a,'b'=>$b,'both'=>$both,'pct'=>round(100*$both/count($ca))); } }
     usort($corr,function($x,$y){return $y['pct']-$x['pct'];});
     $S['featCorr']=array_slice($corr,0,8);
+
+    // ---- (18) feature adoption over time: top features ki daily series ----
+    $fd=isset($d['featDaily'])&&is_array($d['featDaily'])?$d['featDaily']:array();
+    ksort($fd); $fdDays=array_slice(array_keys($fd),-30);
+    $ftot=array(); foreach($fd as $day=>$fl){ foreach($fl as $ft=>$cn){ $ftot[$ft]=(isset($ftot[$ft])?$ftot[$ft]:0)+$cn; } }
+    arsort($ftot); $fdTop=array_slice(array_keys($ftot),0,5);
+    $fdSeries=array(); foreach($fdTop as $ft){ $row=array(); foreach($fdDays as $day){ $row[]=isset($fd[$day][$ft])?intval($fd[$day][$ft]):0; } $fdSeries[$ft]=$row; }
+    $S['featAdopt']=array('days'=>$fdDays,'series'=>$fdSeries);
+
+    // ---- (15) retention heatmap: cohort (pehla din ka hafta) × hafte-baad wapsi ----
+    $wk=function($ts){ return intval(floor($ts/604800)); };  // hafta-number (epoch/7d)
+    $coh=array();  // cohortWeek => array(weekOffset=>uniqueUsers)
+    $cohSize=array();
+    foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $first=intval(isset($c['first'])?$c['first']:0); if(!$first)continue; $cw=$wk($first);
+        if(!isset($cohSize[$cw]))$cohSize[$cw]=0; $cohSize[$cw]++;
+        $seen=array(); $act=isset($c['active'])&&is_array($c['active'])?$c['active']:array();
+        foreach($act as $ad){ $ats=strtotime($ad); if($ats===false)continue; $off=$wk($ats)-$cw; if($off<0||$off>7)continue; $seen[$off]=1; }
+        if(!isset($coh[$cw]))$coh[$cw]=array(); foreach($seen as $off=>$_){ $coh[$cw][$off]=(isset($coh[$cw][$off])?$coh[$cw][$off]:0)+1; } }
+    krsort($coh); $cohOut=array(); $ci=0;
+    foreach($coh as $cw=>$offs){ if($ci++>=8)break; $sz=isset($cohSize[$cw])?$cohSize[$cw]:0; if($sz<=0)continue;
+        $rowp=array(); for($o=0;$o<=7;$o++){ $u=isset($offs[$o])?$offs[$o]:0; $rowp[]=($o===0)?100:round(100*$u/$sz); }
+        $cohOut[]=array('label'=>date('d M',$cw*604800),'size'=>$sz,'pct'=>$rowp); }
+    $S['retention']=array_reverse($cohOut);
+
+    // ---- (27) crash grouping: same error ko group karke count ----
+    $cg=array();
+    foreach($d['crashes'] as $cr){ $e=isset($cr['err'])?$cr['err']:''; $sig=preg_replace('/0x[0-9a-fA-F]+|\d+/','#',$e); $sig=trim(substr($sig,0,80)); if($sig==='')$sig='(unknown)';
+        if(!isset($cg[$sig]))$cg[$sig]=array('sig'=>$sig,'sample'=>substr($e,0,80),'count'=>0,'last'=>0,'vers'=>array());
+        $cg[$sig]['count']++; $cg[$sig]['last']=max($cg[$sig]['last'],intval(isset($cr['t'])?$cr['t']:0));
+        $vv=trim(isset($cr['v'])?$cr['v']:''); if($vv!=='')$cg[$sig]['vers'][$vv]=1; }
+    $cgOut=array_values($cg); foreach($cgOut as &$g){ $g['vers']=implode(',',array_keys($g['vers'])); } unset($g);
+    usort($cgOut,function($a,$b){return $b['count']-$a['count'];});
+    $S['crashGroups']=array_slice($cgOut,0,15);
+
+    // ---- (30) referral leaderboard: kisne sabse zyada 'refer' kiya ----
+    $rl=array();
+    foreach($d['clients'] as $c){ if(!empty($c['blocked']))continue; $rc=intval(isset($c['feats']['refer'])?$c['feats']['refer']:0); if($rc>0) $rl[]=array('name'=>(trim($c['name'])!==''?$c['name']:'—'),'n'=>$rc,'cc'=>isset($c['country'])?$c['country']:''); }
+    usort($rl,function($a,$b){return $b['n']-$a['n'];});
+    $S['refLeaders']=array_slice($rl,0,12);
+
+    // ---- (26) server health: request-load + data-size trend ----
+    $rh=isset($d['reqHours'])&&is_array($d['reqHours'])?$d['reqHours']:array(); ksort($rh);
+    $S['reqHours']=array_slice($rh,-48,null,true);
+    $sd=isset($d['sizeDaily'])&&is_array($d['sizeDaily'])?$d['sizeDaily']:array(); ksort($sd);
+    $S['sizeDaily']=array_slice($sd,-30,null,true);
+
+    // ---- (3) audit log ----
+    $S['auditLog']=array_reverse(array_slice(isset($d['auditLog'])?$d['auditLog']:array(),-60));
 
     // health
     $S['fileKB']=file_exists($DATA_FILE)?round(filesize($DATA_FILE)/1024,1):0;
@@ -1154,6 +1223,10 @@ if (isset($_GET['admin'])) {
 
   <div class="card"><h3><span class="em">🕐</span> Busiest hours (all-time)</h3><div class="heat" id="heat"></div></div>
 
+  <div class="card"><h3><span class="em">🔥</span> Retention cohort heatmap <span style="color:var(--mut);font-weight:500;font-size:11px">— har hafte judне waale kitne hafte tak tike (%)</span></h3>
+    <div style="overflow-x:auto"><div id="retgrid"></div></div>
+  </div>
+
   <div class="sec"><span class="em">🌐</span> Deep Worldwide Analytics</div>
   <div class="kpis" id="kpis2" style="margin-bottom:16px"></div>
 
@@ -1210,12 +1283,21 @@ if (isset($_GET['admin'])) {
     <div class="card"><h3><span class="em">🎛</span> Mode pasand (Simple / Full)</h3><div id="modeP"></div></div>
   </div>
 
+  <div class="card"><h3><span class="em">📈</span> Feature adoption over time <span style="color:var(--mut);font-weight:500;font-size:11px">— roz kaunsa tool kitna use hua (top 5)</span></h3>
+    <canvas id="featAdopt" height="160"></canvas>
+  </div>
+
   </div><!-- /tools -->
 
   <div class="page" data-p="users">
   <div class="sec"><span class="em">👤</span> Users</div>
   <div class="card"><h3><span class="em">👤</span> Saare users (<span id="ucount"></span>) <span style="color:var(--mut);font-weight:500;font-size:11px">— header pe click = sort, naam pe click = details/manage</span></h3>
     <input id="usearch" class="no-print" placeholder="🔍 naam / desh / version / tag se dhoondo…" style="width:100%;margin-bottom:8px">
+    <div class="no-print" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">
+      <span style="font-size:11px;color:var(--mut)">📁 Segments:</span>
+      <span id="segbar" style="display:flex;flex-wrap:wrap;gap:5px"></span>
+      <button class="btn gray" style="padding:3px 9px;font-size:11px" onclick="saveSeg()">➕ Abhi ka filter save karo</button>
+    </div>
     <form method="post" id="bulkform" class="no-print" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;padding:8px;background:var(--card2);border-radius:8px">
       <input type="hidden" name="act" value="bulk"><input type="hidden" name="ids" id="bulkids">
       <b style="font-size:12px"><span id="bulkn">0</span> chune</b>
@@ -1261,6 +1343,11 @@ if (isset($_GET['admin'])) {
     <div class="card"><h3><span class="em">😟</span> Churn-risk (chhutne waale) <span style="color:var(--mut);font-weight:500;font-size:11px">— active the, 4–14 din se gayab</span></h3><div id="atr"></div></div>
     <div class="card"><h3><span class="em">🩺</span> Version quality (crash-rate)</h3><div id="vq"></div></div>
     <div class="card"><h3><span class="em">🔗</span> Feature jodi (jo X karte wo Y bhi)</h3><div id="fcorr"></div></div>
+    <div class="card"><h3><span class="em">💥</span> Crash groups (ek-jaisi errors) <span style="color:var(--mut);font-weight:500;font-size:11px">— milti-julti group karke</span></h3><div id="cg"></div></div>
+    <div class="card"><h3><span class="em">📣</span> Referral leaderboard <span style="color:var(--mut);font-weight:500;font-size:11px">— kisne sabse zyada share kiya</span></h3><div id="rf"></div></div>
+    <div class="card"><h3><span class="em">🏆</span> Top users leaderboard <span style="color:var(--mut);font-weight:500;font-size:11px">— sabse zyada scan</span></h3><div id="lb"></div></div>
+    <div class="card"><h3><span class="em">🩺</span> Server health (load + data-size)</h3><canvas id="hlc" height="120"></canvas><div id="hl" style="margin-top:6px"></div></div>
+    <div class="card"><h3><span class="em">📜</span> Audit log <span style="color:var(--mut);font-weight:500;font-size:11px">— admin ke saare actions</span></h3><div style="max-height:260px;overflow:auto"><div id="au"></div></div></div>
     <div class="card"><h3><span class="em">🏅</span> Records</h3><div id="rc"></div></div>
     <div class="card"><h3><span class="em">🔒</span> Admin logins (IP)</h3><div id="al"></div></div>
   </div>
@@ -1304,6 +1391,35 @@ if (isset($_GET['admin'])) {
         <button class="btn" style="margin-top:6px">Flags save karo</button>
       </form>
     </div>
+    <div class="card"><h3><span class="em">📋</span> Ready jawab (canned replies)</h3>
+      <div style="font-size:11px;color:var(--mut);margin-bottom:6px">Har line = ek ready jawab. Feedback reply me dropdown se chun sako (bar-bar na likhna pade).</div>
+      <form method="post"><input type="hidden" name="act" value="canned">
+        <textarea name="canned" id="cannedbox" rows="4" style="width:100%;font-size:11px" placeholder="Shukriya! Hum jald theek karenge.&#10;Ye feature agle update me aa raha hai."></textarea>
+        <button class="btn" style="margin-top:6px">Replies save karo</button>
+      </form>
+    </div>
+    <div class="card"><h3><span class="em">📰</span> Changelog (kya naya) <span style="color:var(--mut);font-weight:500;font-size:11px">— app/website me dikhega</span></h3>
+      <div style="font-size:11px;color:var(--mut);margin-bottom:6px">Naye update me kya-kya aaya, yahan likho. (App-side display v141 me.)</div>
+      <form method="post"><input type="hidden" name="act" value="changelog">
+        <textarea name="changelog" id="chlogbox" rows="4" style="width:100%;font-size:11px" placeholder="v141: Naya phone-scan, tez OCR…"></textarea>
+        <button class="btn" style="margin-top:6px">Changelog save karo</button>
+      </form>
+    </div>
+    <div class="card"><h3><span class="em">📢</span> News feed (app me khabrein)</h3>
+      <div style="font-size:11px;color:var(--mut);margin-bottom:6px">Har line = ek khabar/announcement. App me feed ki tarah chalegi. (App-side display v141 me.)</div>
+      <form method="post"><input type="hidden" name="act" value="news">
+        <textarea name="news" id="newsbox" rows="4" style="width:100%;font-size:11px" placeholder="Naya update aa gaya!&#10;Ab 12 bhasha me OCR."></textarea>
+        <button class="btn" style="margin-top:6px">News save karo</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- custom report builder (20) -->
+  <div class="card no-print"><h3><span class="em">🧮</span> Apni report banao (custom builder)</h3>
+    <div style="font-size:11px;color:var(--mut);margin-bottom:8px">Jo metrics chahiye tick karo → apni summary bane. Print/PDF bhi kar sako.</div>
+    <div id="rbpick" style="display:flex;flex-wrap:wrap;gap:6px 14px;margin-bottom:10px"></div>
+    <button class="btn" onclick="buildReport()">Report banao</button>
+    <div id="rbout" style="margin-top:12px"></div>
   </div>
 
   <!-- printable report -->
@@ -1334,7 +1450,7 @@ document.getElementById('tm').textContent=D.time;
 document.getElementById('rt').textContent='server '+D.respMs+'ms';
 function flag(cc){ if(!cc||cc.length!==2) return '🏳'; return String.fromCodePoint.apply(null,[].map.call(cc.toUpperCase(),function(ch){return 127397+ch.charCodeAt(0);})); }
 function fmt(n){ return (n||0).toLocaleString(); }
-function esc(s){ return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+function esc(s){ return (s==null?'':(''+s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
 function ago(ts){ if(!ts)return '—'; var s=Math.floor(Date.now()/1000)-ts; if(s<60)return s+'s'; if(s<3600)return Math.floor(s/60)+'m'; if(s<86400)return Math.floor(s/3600)+'h'; return Math.floor(s/86400)+'d'; }
 
 // theme
@@ -1441,7 +1557,9 @@ document.getElementById('chn').innerHTML=(D.churn&&D.churn.length)?'<table>'+D.c
 document.getElementById('arate').textContent=(D.avgRating||0)+' ('+(D.ratingCount||0)+')';
 var SENT={pos:{e:'😊',c:PAL.green,t:'Khush'},neg:{e:'😟',c:PAL.red,t:'Naraz'},req:{e:'💡',c:PAL.orange,t:'Farmaish'},neu:{e:'😐',c:'var(--mut)',t:'Neutral'}};
 (function(){var s=D.sentiment||{};var parts=['pos','neg','req','neu'].filter(function(k){return s[k];}).map(function(k){return '<span style="color:'+SENT[k].c+'">'+SENT[k].e+' '+s[k]+'</span>';});document.getElementById('sentsum').innerHTML=parts.length?('— '+parts.join(' · ')):'';})();
-document.getElementById('fb').innerHTML=(D.feedback&&D.feedback.length)?D.feedback.map(function(f,i){var se=SENT[f.sent||'neu'];return '<div style="border-bottom:1px solid var(--line);padding:6px 0"><b>'+('★'.repeat(f.rating||0)||'—')+'</b> '+esc(f.name||'—')+' <span style="color:var(--mut);font-size:11px">'+(f.v?'v'+f.v:'')+'</span> <span title="'+se.t+'" style="font-size:11px;color:'+se.c+'">'+se.e+'</span><div>'+esc(f.msg||'')+'</div>'+(f.reply?'<div style="margin:4px 0 2px;padding:5px 8px;background:var(--card2);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;font-size:12px">↩️ <b>Aapne kaha:</b> '+esc(f.reply)+'</div>':'<form method="post" class="no-print" style="margin-top:4px;display:flex;gap:4px"><input type="hidden" name="act" value="freply"><input type="hidden" name="fi" value="'+i+'"><input name="reply" placeholder="Jawab likho (user ki app me dikhega)…" style="flex:1;font-size:11px"><button class="btn" style="padding:4px 8px">↩️</button></form>')+'</div>';}).join(''):'<div style="color:var(--mut);font-size:12px">— abhi koi feedback nahi —</div>';
+var CANNED=[]; try{var _rc=JSON.parse(D.rconfigStr||'{}'); CANNED=_rc.canned||[];}catch(e){}
+function cannedSel(fi){ if(!CANNED.length) return ''; return '<select class="no-print" style="font-size:10px;max-width:120px" onchange="var f=this.closest(\'form\');if(f&&this.value)f.reply.value=this.value"><option value="">📋 Ready jawab…</option>'+CANNED.map(function(c){return '<option>'+esc(c)+'</option>';}).join('')+'</select>'; }
+document.getElementById('fb').innerHTML=(D.feedback&&D.feedback.length)?D.feedback.map(function(f){var se=SENT[f.sent||'neu'];var resolved=(f.status==='resolved');return '<div style="border-bottom:1px solid var(--line);padding:6px 0'+(resolved?';opacity:.55':'')+'"><b>'+('★'.repeat(f.rating||0)||'—')+'</b> '+esc(f.name||'—')+' <span style="color:var(--mut);font-size:11px">'+(f.v?'v'+f.v:'')+'</span> <span title="'+se.t+'" style="font-size:11px;color:'+se.c+'">'+se.e+'</span> <form method="post" class="no-print" style="display:inline"><input type="hidden" name="act" value="fstatus"><input type="hidden" name="fi" value="'+f.fi+'"><button class="btn" style="padding:1px 7px;font-size:10px;background:'+(resolved?'var(--accent2)':'var(--line)')+';color:'+(resolved?'#fff':'var(--fg)')+'">'+(resolved?'✅ Resolved':'⏳ Open')+'</button></form><div>'+esc(f.msg||'')+'</div>'+(f.reply?'<div style="margin:4px 0 2px;padding:5px 8px;background:var(--card2);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;font-size:12px">↩️ <b>Aapne kaha:</b> '+esc(f.reply)+'</div>':'<form method="post" class="no-print" style="margin-top:4px;display:flex;gap:4px;align-items:center;flex-wrap:wrap"><input type="hidden" name="act" value="freply"><input type="hidden" name="fi" value="'+f.fi+'"><input name="reply" placeholder="Jawab (user ki app me dikhega)…" style="flex:1;min-width:120px;font-size:11px">'+cannedSel(f.fi)+'<button class="btn" style="padding:4px 8px">↩️</button></form>')+'</div>';}).join(''):'<div style="color:var(--mut);font-size:12px">— abhi koi feedback nahi —</div>';
 document.getElementById('cr').innerHTML=(D.crashes&&D.crashes.length)?'<table>'+D.crashes.map(function(c){return '<tr><td>💥 '+esc((c.err||'').slice(0,60))+'</td><td style="text-align:right;color:var(--mut);white-space:nowrap">v'+(c.v||'?')+' · '+ago(c.t)+'</td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— koi crash nahi 🎉 —</div>';
 
 // churn-risk / at-risk (13)
@@ -1459,7 +1577,76 @@ document.getElementById('fcorr').innerHTML=(D.featCorr&&D.featCorr.length)?'<tab
   try{ document.getElementById('donbox').value=rc.donate_url||''; }catch(e){}
   try{ if(rc.tips&&rc.tips.length) document.getElementById('tipbox').value=rc.tips.join('\n'); }catch(e){}
   try{ if(rc.flags) document.getElementById('flagbox').value=JSON.stringify(rc.flags); }catch(e){}
+  try{ if(rc.canned&&rc.canned.length) document.getElementById('cannedbox').value=rc.canned.join('\n'); }catch(e){}
+  try{ document.getElementById('chlogbox').value=rc.changelog||''; }catch(e){}
+  try{ if(rc.news&&rc.news.length) document.getElementById('newsbox').value=rc.news.join('\n'); }catch(e){}
 })();
+
+// (27) crash groups
+document.getElementById('cg').innerHTML=(D.crashGroups&&D.crashGroups.length)?'<table>'+D.crashGroups.map(function(g){return '<tr><td>💥 '+esc(g.sample||g.sig)+(g.vers?' <span style="color:var(--mut);font-size:10px">v'+esc(g.vers)+'</span>':'')+'</td><td style="text-align:right;white-space:nowrap"><b>×'+g.count+'</b> · '+ago(g.last)+'</td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— koi crash nahi 🎉 —</div>';
+
+// (30) referral leaderboard
+document.getElementById('rf').innerHTML=(D.refLeaders&&D.refLeaders.length)?'<table>'+D.refLeaders.map(function(u,i){var m=(i<3?['🥇','🥈','🥉'][i]:(i+1)+'.');return '<tr><td>'+m+' '+esc(u.name)+(u.cc?' '+flag(u.cc):'')+'</td><td style="text-align:right"><b>'+u.n+'</b> share</td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— abhi kisi ne share nahi kiya —</div>';
+
+// (32) top users leaderboard (admin view; public opt-in v141 me)
+(function(){ var ul=(D.userList||[]).slice().filter(function(u){return u.scans>0;}).sort(function(a,b){return b.scans-a.scans;}).slice(0,12);
+  document.getElementById('lb').innerHTML=ul.length?'<table>'+ul.map(function(u,i){var m=(i<3?['🥇','🥈','🥉'][i]:(i+1)+'.');return '<tr><td>'+m+' '+esc(u.name)+(u.country?' '+flag(u.country):'')+'</td><td style="text-align:right"><b>'+fmt(u.scans)+'</b></td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— data nahi —</div>'; })();
+
+// (26) server health — request load chart + data-size trend
+(function(){
+  var rh=D.reqHours||{}, ks=Object.keys(rh); var lab=ks.map(function(k){return k.slice(11)+'h';}), val=ks.map(function(k){return rh[k];});
+  var sd=D.sizeDaily||{}, sk=Object.keys(sd); var last=sk.length?sd[sk[sk.length-1]]:(D.fileKB||0);
+  var hpk=Math.max.apply(null,val.concat([0]));
+  document.getElementById('hl').innerHTML='<table><tr><td>📦 Data file</td><td style="text-align:right"><b>'+last+' KB</b></td></tr>'+
+    '<tr><td>⚡ Peak req/ghanta</td><td style="text-align:right"><b>'+hpk+'</b></td></tr>'+
+    '<tr><td>⏱ Response abhi</td><td style="text-align:right"><b>'+D.respMs+' ms</b></td></tr></table>';
+  var c=document.getElementById('hlc'); if(c&&window.Chart) mkChart(c,{type:'bar',data:{labels:lab,datasets:[{data:val,backgroundColor:PAL.aqua}]},options:CO});
+})();
+
+// (3) audit log
+document.getElementById('au').innerHTML=(D.auditLog&&D.auditLog.length)?'<table>'+D.auditLog.map(function(a){return '<tr><td><b>'+esc(a.act)+'</b>'+(a.det?' <span style="color:var(--mut)">'+esc(a.det)+'</span>':'')+'</td><td style="text-align:right;color:var(--mut);white-space:nowrap">'+esc(a.ip)+' · '+ago(a.t)+'</td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— abhi koi action nahi —</div>';
+
+// (15) retention cohort heatmap grid
+(function(){ var R=D.retention||[]; if(!R.length){ document.getElementById('retgrid').innerHTML='<div style="color:var(--mut);font-size:12px">— abhi kaafi data nahi —</div>'; return; }
+  function hcol(p){ if(p<=0)return 'var(--line)'; var a=0.15+0.85*(p/100); return 'rgba(27,175,122,'+a.toFixed(2)+')'; }
+  var h='<table style="border-collapse:separate;border-spacing:2px;font-size:10px"><tr><th style="text-align:left">Cohort (naye)</th>';
+  for(var w=0;w<=7;w++) h+='<th style="width:34px;text-align:center;color:var(--mut)">W'+w+'</th>';
+  h+='</tr>';
+  R.forEach(function(r){ h+='<tr><td style="white-space:nowrap"><b>'+esc(r.label)+'</b> <span style="color:var(--mut)">('+r.size+')</span></td>';
+    r.pct.forEach(function(p){ h+='<td style="text-align:center;padding:4px 2px;border-radius:4px;color:'+(p>45?'#fff':'var(--fg2)')+';background:'+hcol(p)+'">'+(p>0?p:'·')+'</td>'; });
+    h+='</tr>'; });
+  document.getElementById('retgrid').innerHTML=h+'</table>';
+})();
+
+// (18) feature adoption over time (multi-line)
+(function(){ var FA=D.featAdopt||{days:[],series:{}}; var el=document.getElementById('featAdopt'); if(!el||!window.Chart) return;
+  var days=FA.days||[]; var series=FA.series||{}; var keys=Object.keys(series);
+  if(!keys.length){ el.parentNode.innerHTML+='<div style="color:var(--mut);font-size:12px">— abhi kaafi data nahi (feature use hote hi bharега) —</div>'; return; }
+  var cols=[PAL.blue,PAL.orange,PAL.aqua,PAL.violet,PAL.magenta];
+  var ds=keys.map(function(k,i){return {label:(FEATLBL[k]||k),data:series[k],borderColor:cols[i%cols.length],backgroundColor:cols[i%cols.length],borderWidth:2,tension:.35,pointRadius:0,fill:false};});
+  mkChart(el,{type:'line',data:{labels:days.map(function(x){return x.slice(5);}),datasets:ds},options:{plugins:{legend:{display:true,position:'bottom',labels:{boxWidth:10,font:{size:10}}}},scales:CO.scales}});
+})();
+
+// (20) custom report builder
+var RBM=[['total','Total scans'],['today','Aaj'],['weekTotal','Is hafte'],['monthTotal','Is mahine'],['users','Total users'],['newToday','Aaj naye'],['dau','DAU'],['wau','WAU'],['mau','MAU'],['powerUsers','Power users'],['avgRating','Avg rating'],['online','Online abhi'],['imports','Imports'],['prints','Prints'],['dailyAvg','Daily avg'],['forecastMonth','Forecast (mahina)']];
+(function(){ var p=document.getElementById('rbpick'); if(!p)return; p.innerHTML=RBM.map(function(m,i){return '<label style="font-size:11px;display:flex;align-items:center;gap:4px"><input type="checkbox" class="rbchk" value="'+m[0]+'" '+(i<8?'checked':'')+'>'+m[1]+'</label>';}).join(''); })();
+function buildReport(){ var sel=[].filter.call(document.querySelectorAll('.rbchk'),function(c){return c.checked;}).map(function(c){return c.value;});
+  var lbl={}; RBM.forEach(function(m){lbl[m[0]]=m[1];});
+  var h='<div style="font-weight:700;margin-bottom:6px">📊 ApneScan report — '+D.time+'</div><div class="kpis">';
+  sel.forEach(function(k){ h+='<div class="kpi"><div class="tx"><div class="n">'+fmt(D[k]||0)+'</div><div class="l">'+esc(lbl[k]||k)+'</div></div></div>'; });
+  h+='</div><button class="btn no-print" style="margin-top:8px" onclick="window.print()">🖨 Print / PDF</button>';
+  document.getElementById('rbout').innerHTML=h;
+}
+
+// (10) saved segments (per-browser, localStorage)
+function loadSegs(){ try{ return JSON.parse(localStorage.getItem('an_segs')||'[]'); }catch(e){ return []; } }
+function renderSegs(){ var segs=loadSegs(); var bar=document.getElementById('segbar'); if(!bar)return;
+  bar.innerHTML=segs.length?segs.map(function(s,i){return '<span class="tag" style="cursor:pointer" onclick="applySeg('+i+')">🔍 '+esc(s.q||'(sab)')+'</span><span onclick="delSeg('+i+')" style="cursor:pointer;color:var(--mut);margin-left:-3px;margin-right:4px" title="hatao">✕</span>';}).join(''):'<span style="font-size:11px;color:var(--mut)">— koi nahi —</span>';
+}
+function saveSeg(){ var q=(document.getElementById('usearch').value||'').trim(); var segs=loadSegs(); segs.push({q:q}); segs=segs.slice(-12); try{localStorage.setItem('an_segs',JSON.stringify(segs));}catch(e){} renderSegs(); }
+function applySeg(i){ var s=loadSegs()[i]; if(!s)return; document.getElementById('usearch').value=s.q||''; renderUsers(); }
+function delSeg(i){ var segs=loadSegs(); segs.splice(i,1); try{localStorage.setItem('an_segs',JSON.stringify(segs));}catch(e){} renderSegs(); }
+renderSegs();
 
 // records + admin logins
 document.getElementById('rc').innerHTML='<table>'+
@@ -1780,6 +1967,11 @@ if ($action === 'scan') {
             if (!isset($d['clients'][$client]['feats'])) $d['clients'][$client]['feats'] = array();
             $d['clients'][$client]['feats'][$feat] = intval(isset($d['clients'][$client]['feats'][$feat])?$d['clients'][$client]['feats'][$feat]:0) + 1;
         }
+        // (18) feature adoption over time — roz ka feature count
+        if(!isset($d['featDaily'])||!is_array($d['featDaily'])) $d['featDaily']=array();
+        if(!isset($d['featDaily'][$today])) $d['featDaily'][$today]=array();
+        $d['featDaily'][$today][$feat]=intval(isset($d['featDaily'][$today][$feat])?$d['featDaily'][$today][$feat]:0)+1;
+        if(count($d['featDaily'])>40){ ksort($d['featDaily']); $d['featDaily']=array_slice($d['featDaily'],-35,null,true); }
     }
     // numeric metrics
     if (!isset($d['metrics'])) $d['metrics'] = array();
@@ -1797,6 +1989,7 @@ if ($action === 'scan') {
     $d['feedback'][] = array('t'=>$now,'name'=>substr(isset($_REQUEST['u'])?$_REQUEST['u']:'',0,40),
         'v'=>substr(isset($_REQUEST['v'])?$_REQUEST['v']:'',0,10),'rating'=>max(0,min(5,intval(isset($_REQUEST['rating'])?$_REQUEST['rating']:0))),
         'msg'=>substr(isset($_REQUEST['msg'])?$_REQUEST['msg']:'',0,400),
+        'status'=>'open',                           // (22) ticket status: open/resolved
         'client'=>substr($client,0,40));            // reply is user tak pahunchane ke liye
     $d['feedback'] = array_slice($d['feedback'], -300);
     touch_client($d, $client, $_REQUEST, 0, $now, $today);
@@ -1809,6 +2002,13 @@ if ($imp) $d['imports'] = intval($d['imports']) + $imp;
 if ($prt) $d['prints']  = intval($d['prints'])  + $prt;
 
 foreach ($d['online'] as $id => $ts) { if ($now - intval($ts) > 86400) unset($d['online'][$id]); }
+// (26) server health: har ghante ki request-ginti + roz ki file-size (load/growth trend)
+if(!isset($d['reqHours'])||!is_array($d['reqHours'])) $d['reqHours']=array();
+$__rhk=date('Y-m-d-H'); $d['reqHours'][$__rhk]=(isset($d['reqHours'][$__rhk])?intval($d['reqHours'][$__rhk]):0)+1;
+if(count($d['reqHours'])>80){ ksort($d['reqHours']); $d['reqHours']=array_slice($d['reqHours'],-72,null,true); }
+if(!isset($d['sizeDaily'])||!is_array($d['sizeDaily'])) $d['sizeDaily']=array();
+if(!isset($d['sizeDaily'][$today]) && is_file($DATA_FILE)) $d['sizeDaily'][$today]=round(filesize($DATA_FILE)/1024,1);
+if(count($d['sizeDaily'])>70){ ksort($d['sizeDaily']); $d['sizeDaily']=array_slice($d['sizeDaily'],-60,null,true); }
 maybe_backup($DATA_FILE, $d);      // roz ek auto-backup (cron ke bina bhi)
 save_data($DATA_FILE, $d);
 
