@@ -176,7 +176,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "141"
+VERSION = "142"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6069,6 +6069,80 @@ def _dm_decode_codes(img):
     return bc, qr
 
 
+# ---- Naming-pattern learning (offline) --------------------------------------
+# Learns the fixed part of how the user names a document TYPE (e.g. every Aadhaar
+# is "<person> - Aadhaar") and applies it to a brand-new, never-seen document by
+# pulling the person/subject out of its OCR text. Pure functions -> easy to test.
+_DM_NONNAME = set((
+    "government india republic name naam patient holder card number no date dob "
+    "aadhaar aadhar pan invoice bill receipt hospital ward summary discharge "
+    "prescription report lab claim rghs echs the of male female address from amount "
+    "shri smt kumari doctor dr mr mrs total gst"
+).split())
+
+
+def _dm_clean_name(s):
+    """Keep up to 3 real name-words (drop labels/keywords), Title-Cased."""
+    words = [w for w in re.findall(r'[A-Za-z]+', s or "")
+             if len(w) >= 2 and w.lower() not in _DM_NONNAME][:3]
+    if len(words) < 2:
+        return ""
+    return " ".join(w[:1].upper() + w[1:].lower() for w in words)
+
+
+def _dm_guess_subject(text):
+    """Best-effort person/subject from OCR text (label-guided, else first clean
+    Title-Case run). Offline, heuristic — never raises."""
+    if not text:
+        return ""
+    try:
+        m = re.search(r'(?:patient\s+name|holder\s+name|\bname\b|\bnaam\b)\s*[:\-]\s*', text, re.I)
+        if m:
+            m2 = re.match(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})', text[m.end():m.end() + 40])
+            if m2:
+                c = _dm_clean_name(m2.group(1))
+                if c:
+                    return c
+        for m in re.finditer(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b', text):
+            c = _dm_clean_name(m.group(1))
+            if c:
+                return c
+    except Exception:
+        pass
+    return ""
+
+
+def _dm_affix_pattern(filenames, min_samples=3):
+    """From several filenames of ONE doc-type, find the shared leading/trailing
+    text around the variable slot. Returns (prefix, suffix) or None."""
+    fns = [re.sub(r'[_]+', ' ', f).strip() for f in filenames if f and f.strip()]
+    fns = [f for f in fns if f]
+    if len(fns) < min_samples:
+        return None
+
+    def lcp(strs):
+        s0 = strs[0]
+        n = min(len(s) for s in strs)
+        i = 0
+        while i < n and all(s[i].lower() == s0[i].lower() for s in strs):
+            i += 1
+        return s0[:i]
+    pre = lcp(fns)
+    suf = lcp([f[::-1] for f in fns])[::-1]
+    # snap to a word/separator boundary so a name isn't sliced mid-word
+    if pre and not pre.endswith((' ', '-', '.', '/')):
+        cut = max(pre.rfind(' '), pre.rfind('-'))
+        pre = pre[:cut + 1] if cut >= 0 else ""
+    if suf and not suf.startswith((' ', '-', '.', '/')):
+        cand = [x for x in (suf.find(' '), suf.find('-')) if x >= 0]
+        suf = suf[min(cand):] if cand else ""
+    if len(pre.strip()) + len(suf.strip()) < 2:
+        return None
+    if any(len(pre) + len(suf) >= len(f) for f in fns):   # no room for a variable
+        return None
+    return (pre, suf)
+
+
 class DocMemory(object):
     """Offline learning memory. Thread-safe. See module banner above."""
 
@@ -6116,7 +6190,8 @@ class DocMemory(object):
           ocr_conf REAL DEFAULT 0, barcode TEXT DEFAULT '', qrcode TEXT DEFAULT '',
           keywords TEXT DEFAULT '', tags TEXT DEFAULT '',
           file_size INTEGER DEFAULT 0, page_count INTEGER DEFAULT 0,
-          scanner_model TEXT DEFAULT '', resolution TEXT DEFAULT '', color_mode TEXT DEFAULT ''
+          scanner_model TEXT DEFAULT '', resolution TEXT DEFAULT '', color_mode TEXT DEFAULT '',
+          document_version INTEGER DEFAULT 1
         );
         CREATE INDEX IF NOT EXISTS ix_docs_phash ON docs(phash);
         CREATE INDEX IF NOT EXISTS ix_docs_dhash ON docs(dhash);
@@ -6139,7 +6214,21 @@ class DocMemory(object):
             self.fts = True
         except Exception:
             self.fts = False
+        self._ensure_columns()
         c.commit()
+
+    def _ensure_columns(self):
+        """Add any newer columns to an older DB (backward-compatible migration)."""
+        try:
+            have = {r[1] for r in self._db.execute("PRAGMA table_info(docs)").fetchall()}
+            for col, ddl in (("document_version", "document_version INTEGER DEFAULT 1"),):
+                if col not in have:
+                    try:
+                        self._db.execute("ALTER TABLE docs ADD COLUMN " + ddl)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     # --- meta ---
     def _mget(self, k, d=None):
@@ -6227,14 +6316,16 @@ class DocMemory(object):
                                        (doc_id, new_name)).fetchone()
                 if row:
                     self._db.execute("UPDATE names SET last_used=?, usage_count=usage_count+1 WHERE id=?", (now, row["id"]))
+                    bump_ver = ""     # same name reused -> not a new version
                 else:
                     self._db.execute("INSERT INTO names(doc_id,filename,folder,created,last_used,usage_count) VALUES(?,?,?,?,?,1)",
                                      (doc_id, new_name, folder or "", now, now))
+                    bump_ver = ", document_version=document_version+1"   # a genuinely new name
                 if folder:
-                    self._db.execute("UPDATE docs SET filename=?, folder=?, modified_date=?, last_used=? WHERE id=?",
+                    self._db.execute("UPDATE docs SET filename=?, folder=?, modified_date=?, last_used=?%s WHERE id=?" % bump_ver,
                                      (new_name, folder, now, now, doc_id))
                 else:
-                    self._db.execute("UPDATE docs SET filename=?, modified_date=?, last_used=? WHERE id=?",
+                    self._db.execute("UPDATE docs SET filename=?, modified_date=?, last_used=?%s WHERE id=?" % bump_ver,
                                      (new_name, now, now, doc_id))
                 self._reindex_row(doc_id)
                 self._db.commit()
@@ -6367,6 +6458,35 @@ class DocMemory(object):
         r = self._db.execute("SELECT * FROM docs WHERE id=?", (doc_id,)).fetchone()
         return dict(r) if r else None
 
+    # --- naming-pattern AI: suggest a name for a NEVER-SEEN document ---
+    def pattern_suggest(self, doc_type, ocr_text, min_samples=3):
+        """If past files of this doc-type share a naming pattern (e.g.
+        '<person> - Aadhaar'), apply it to the subject detected in this scan.
+        Returns a suggested filename or '' — for documents never scanned before."""
+        if not self.ok() or not doc_type or not ocr_text:
+            return ""
+        with self._lock:
+            try:
+                rows = self._db.execute(
+                    "SELECT DISTINCT filename FROM docs WHERE doc_type=? AND filename!='' "
+                    "ORDER BY last_used DESC LIMIT 200", (doc_type,)).fetchall()
+                fns = [r["filename"] for r in rows]
+                if len(fns) < min_samples:
+                    return ""
+                pat = _dm_affix_pattern(fns, min_samples)
+                if not pat:
+                    return ""
+                subj = _dm_guess_subject(ocr_text)
+                if not subj:
+                    return ""
+                pre, suf = pat
+                # don't repeat a subject that's already inside the fixed part
+                if subj.lower() in (pre + suf).lower():
+                    return ""
+                return re.sub(r'\s+', ' ', (pre + subj + suf).strip())
+            except Exception:
+                return ""
+
     # --- search ---
     def _reindex_row(self, did):
         if not self.fts:
@@ -6419,11 +6539,45 @@ class DocMemory(object):
         except Exception:
             return False
 
+    def dedupe(self):
+        """Remove duplicate learning records: collapse identical (doc_id,filename)
+        name rows (keep the most-recent), and drop stray exact-duplicate docs that
+        share a barcode/QR/OCR-hash (keep the most-used). Returns rows removed."""
+        if not self.ok():
+            return 0
+        removed = 0
+        with self._lock:
+            try:
+                cur = self._db.execute(
+                    "DELETE FROM names WHERE id NOT IN "
+                    "(SELECT MAX(id) FROM names GROUP BY doc_id, filename)")
+                removed += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                # duplicate docs by a strong key -> keep highest usage_count
+                for key in ("barcode", "qrcode", "ocr_hash"):
+                    dupes = self._db.execute(
+                        "SELECT %s AS k FROM docs WHERE %s!='' GROUP BY %s HAVING COUNT(*)>1" % (key, key, key)
+                    ).fetchall()
+                    for d in dupes:
+                        rows = self._db.execute(
+                            "SELECT id FROM docs WHERE %s=? ORDER BY usage_count DESC, last_used DESC" % key,
+                            (d["k"],)).fetchall()
+                        keep = rows[0]["id"]
+                        for r in rows[1:]:
+                            self._db.execute("UPDATE names SET doc_id=? WHERE doc_id=?", (keep, r["id"]))
+                            self._db.execute("DELETE FROM search WHERE rowid=?", (r["id"],)) if self.fts else None
+                            self._db.execute("DELETE FROM docs WHERE id=?", (r["id"],))
+                            removed += 1
+                self._db.commit()
+            except Exception:
+                pass
+        return removed
+
     def optimize(self):
         if not self.ok():
             return False
         with self._lock:
             try:
+                self.dedupe()   # remove duplicate learning records first
                 if self.fts:
                     try:
                         self._db.execute("INSERT INTO search(search) VALUES('optimize')")
@@ -6431,7 +6585,7 @@ class DocMemory(object):
                         pass
                 self._db.execute("ANALYZE")
                 self._db.commit()
-                self._db.execute("VACUUM")
+                self._db.execute("VACUUM")   # compress the database file
                 self._mset("last_optimize", int(time.time()))
                 self._db.commit()
                 return True
@@ -18005,14 +18159,15 @@ if the toggle is ticked).</p>
             except Exception:
                 pass
             m = self._ai_match_current(paths)
-            if not m or not m.get("similar"):
-                return res
-            conf = int(m.get("confidence", 0))
+            conf = int(m.get("confidence", 0)) if m else 0
             thr = self._ai_threshold()
-            best = m["similar"][0]
-            name = best.get("name") or ""
-            folder = best.get("folder") or ""
-            if not name:
+            best = (m.get("similar") or [None])[0] if m else None
+            name = (best.get("name") if best else "") or ""
+            folder = (best.get("folder") if best else "") or ""
+            # Never seen this exact document (no confident match) -> try applying a
+            # learned NAMING PATTERN for this document type (the "new AI" feature).
+            if (not best) or conf < 70 or not name:
+                self._ai_try_pattern(res)
                 return res
             if conf >= thr:
                 self._doc_match_id = best.get("id")
@@ -18048,9 +18203,30 @@ if the toggle is ticked).</p>
                     folder = picked.get("folder") or ""
                     tgt = folder if (folder and os.path.isdir(folder)) else self._target_folder()
                     res["default"] = os.path.join(tgt, underscore_name(picked["name"]) + ".pdf")
+                else:
+                    self._ai_try_pattern(res)   # user kept "New" -> offer a pattern name
         except Exception:
             pass
         return res
+
+    def _ai_try_pattern(self, res):
+        """Apply a learned naming pattern to a never-seen document (e.g. every
+        Aadhaar is '<name> - Aadhaar'; OCR sees 'Suresh Meena' -> suggest
+        'Suresh Meena - Aadhaar'). Only changes the default name, never auto-saves."""
+        if not self._opts.get("ai_auto_rename", True):
+            return
+        try:
+            f = self._doc_match_features or {}
+            sug = self._memory.pattern_suggest(f.get("doc_type", ""), f.get("ocr_text", ""))
+            if sug:
+                res["default"] = os.path.join(self._target_folder(), underscore_name(sug) + ".pdf")
+                try:
+                    self.status.showMessage(self.L("💡 Aapke naam-pattern se sujhav: %s",
+                                                   "💡 From your naming pattern: %s") % sug, 5000)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _ai_remember_saved(self, paths, out, npages):
         """After a successful save: remember/refresh this document and, if it was
@@ -18170,6 +18346,8 @@ if the toggle is ticked).</p>
                 meta.append(self.L("Folder: ", "Folder: ") + d["folder"])
             if d.get("usage_count"):
                 meta.append(self.L("Kitni baar: ", "Used: ") + str(d["usage_count"]))
+            if d.get("document_version"):
+                meta.append(self.L("Version: ", "Version: ") + str(d["document_version"]))
             if d.get("page_count"):
                 meta.append(self.L("Pages: ", "Pages: ") + str(d["page_count"]))
             if d.get("barcode"):
