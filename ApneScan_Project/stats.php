@@ -1803,10 +1803,56 @@ if (isset($_GET['admin'])) {
 
   <!-- ===== NEW PORTAL MODULES (client-side, D data se — backend untouched) ===== -->
   <div class="page" data-p="live">
-    <div class="sec"><span class="em">🟢</span> Live Monitoring <span style="text-transform:none;letter-spacing:0;font-weight:600">(har 30s khud refresh)</span></div>
+    <!-- ===== MISSION CONTROL: header strip ===== -->
+    <div class="card" style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:linear-gradient(120deg,rgba(37,99,235,.12),rgba(124,58,237,.07));border-color:rgba(59,130,246,.35)">
+      <div style="font-size:15px;font-weight:800">🛰 Mission Control</div>
+      <span class="live"><span class="dot"></span> LIVE</span>
+      <span style="color:var(--mut);font-size:10.5px">Auto-refresh: <b id="lvCount">30</b>s</span>
+      <span style="color:var(--mut);font-size:10.5px">Server: <b id="lvResp">—</b></span>
+      <span style="color:var(--mut);font-size:10.5px">🟢 <b id="lvOnN">0</b> online · 🖨 <b id="lvDevN">0</b> scanners</span>
+      <div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap" class="no-print">
+        <button class="btn gray" onclick="location.reload()">🔄 Refresh</button>
+        <button class="btn gray" onclick="jumpTo('overview','cardBroadcast')">📣 Broadcast</button>
+        <a class="btn gray" style="text-decoration:none" href="?admin=1&dl=data">🗄 Backup</a>
+        <button class="btn gray" onclick="lvCSV('all')">⬇ Export</button>
+        <a class="btn gray" style="text-decoration:none" href="?admin=1&report=1" target="_blank">📑 Report</a>
+      </div>
+    </div>
+    <!-- ===== KPI grid ===== -->
     <div class="kpis" id="liveKpis" style="margin-bottom:13px"></div>
-    <div class="card"><h3><span class="em">🟢</span> Abhi online</h3><div id="liveOn" class="skel"></div></div>
-    <div class="card"><h3><span class="em">⚪</span> Baaki users (offline)</h3><div id="liveOff" class="skel"></div></div>
+    <!-- ===== version coverage + alerts + insights ===== -->
+    <div class="grid3">
+      <div class="card"><h3><span class="em">🔢</span> Version coverage</h3><div id="lvVer" class="skel"></div></div>
+      <div class="card"><h3><span class="em">🚨</span> Alert Center <span class="no-print" style="margin-left:auto;display:flex;gap:4px" id="lvAlF">
+        <button class="ufc on" data-s="all">All</button><button class="ufc" data-s="crit">Critical</button><button class="ufc" data-s="warn">Warning</button><button class="ufc" data-s="info">Info</button></span></h3>
+        <div id="lvAlerts" class="skel" style="max-height:220px;overflow:auto"></div></div>
+      <div class="card"><h3><span class="em">🤖</span> AI Insights</h3><div id="lvAI" class="skel" style="max-height:220px;overflow:auto"></div></div>
+    </div>
+    <!-- ===== live grid ===== -->
+    <div class="card">
+      <h3><span class="em">🖥</span> Live devices &amp; users <span style="color:var(--mut);font-weight:500;font-size:10px">(naam par click = poora profile)</span></h3>
+      <div class="no-print" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
+        <input id="lvQ" placeholder="🔍 user / scanner / desh / IP / version…" style="flex:1;min-width:170px">
+        <button class="ufc on" data-lf="all">Sab</button>
+        <button class="ufc" data-lf="online">🟢 Online</button>
+        <button class="ufc" data-lf="offline">🔴 Offline</button>
+        <button class="ufc" data-lf="today">🖨 Aaj scan kiya</button>
+        <button class="ufc" data-lf="oldver">⚠ Purana ver</button>
+        <select id="lvScn" style="font-size:10.5px"><option value="">🖨 Sab scanner</option></select>
+        <button class="btn gray" onclick="lvCSV('online')">⬇ Online CSV</button>
+      </div>
+      <div id="lvGrid" class="skel"></div>
+    </div>
+    <!-- ===== charts + heatmap + timeline ===== -->
+    <div class="grid">
+      <div class="card"><h3><span class="em">🕒</span> Scans — pichhle 24 ghante</h3><canvas id="lv24" height="130"></canvas></div>
+      <div class="card"><h3><span class="em">📅</span> Scans — pichhle 14 din</h3><canvas id="lv14" height="130"></canvas></div>
+    </div>
+    <div class="grid">
+      <div class="card"><h3><span class="em">🔥</span> Hafta × Ghanta heatmap <span style="color:var(--mut);font-weight:500;font-size:10px">— gehra = zyada scan</span></h3><div id="lvHeat" class="skel"></div></div>
+      <div class="card"><h3><span class="em">🌍</span> Country distribution</h3><div id="lvGeo" class="skel"></div></div>
+    </div>
+    <div class="card"><h3><span class="em">📰</span> Live Activity Timeline</h3><div id="lvTime" class="skel" style="max-height:300px;overflow:auto"></div></div>
   </div>
   <div class="page" data-p="hw">
     <div class="sec"><span class="em">🖨</span> Devices — scanner ke hisaab se</div>
@@ -2548,15 +2594,194 @@ function jumpTo(page,cardId){ sbToggle(false);
 function jumpToPage(p){ var t=document.querySelector('.sb .tab[data-p='+p+']'); if(t)t.click(); }
 function _tbl(rows,heads){ return '<div style="max-height:420px;overflow:auto"><table><thead><tr>'+heads.map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>'; }
 function _kpi(cls,ic,n,l){ return '<div class="kpi '+cls+'"><div class="ic">'+ic+'</div><div class="tx"><div class="n">'+n+'</div><div class="l">'+l+'</div></div></div>'; }
-// ---- LIVE MONITORING ----
-(function(){ var U=D.userList||[]; var on=U.filter(function(u){return u.online&&!u.blocked;});
-  var off=U.filter(function(u){return !u.online&&!u.blocked;}).sort(function(a,b){return (b.last||0)-(a.last||0);}).slice(0,50);
-  var el=document.getElementById('liveKpis'); if(!el)return;
-  el.innerHTML=_kpi('g','🟢',on.length,'Online abhi')+_kpi('','👥',U.length,'Total users')+_kpi('p','🖨',(D.lastHour||0),'Scans — is ghante')+_kpi('y','⚡',(D.last24h||0),'Scans — 24h');
-  function row(u){ return '<tr onclick="openUser&&openUser(\''+esc(u.id)+'\')" style="cursor:pointer"><td>'+(u.online?'🟢':'⚪')+' <b>'+esc(u.name)+'</b></td><td>'+flag(u.country)+' '+esc(u.country||'—')+(u.region?' · '+esc(u.region):'')+'</td><td>'+esc(u.model||'—')+'</td><td>v'+esc(u.version||'?')+'</td><td>'+esc(u.ip||'—')+'</td><td style="text-align:right;color:var(--mut)">'+ago(u.last)+'</td><td style="text-align:right"><b>'+fmt(u.scans)+'</b></td></tr>'; }
-  document.getElementById('liveOn').innerHTML = on.length? _tbl(on.map(row),['User','Location','Scanner','Ver','IP','Heartbeat','Scans']) : '<div style="color:var(--mut)">— abhi koi online nahi —</div>';
-  document.getElementById('liveOff').innerHTML = off.length? _tbl(off.map(row),['User','Location','Scanner','Ver','IP','Last seen','Scans']) : '<div style="color:var(--mut)">—</div>';
-})();
+// ================= MISSION CONTROL (Live Monitoring) =================
+// Sab kuch ASLI data se: userList / recentScans300 / crashes / feedback /
+// hoursAll / daysMap / heat7x24 / usersByCountry / health. Koi fake metric nahi.
+function lvToday(u){ return uToday(u); }
+function lvActivity(u){
+  // aakhri asli scan-event se activity nikaalo (recentScans me naam-match)
+  var ev=(D.recentScans300||D.recentScans||[]).filter(function(x){return x.name&&u.name!=='—'&&x.name===u.name;})[0];
+  if(u.online){
+    if(ev&&(Date.now()/1000-(ev.t||0))<600) return '<span class="stb g">🖨 Scanning · '+ev.n+'p ('+ago(ev.t)+')</span>';
+    return '<span class="stb g">🟢 Idle (online)</span>';
+  }
+  if(ev&&(Date.now()/1000-(ev.t||0))<86400) return '<span class="stb y">🖨 Last scan '+ago(ev.t)+'</span>';
+  return '<span class="stb r">⚪ Offline</span>';
+}
+var _lf='all';
+function lvRows(){
+  var q=(document.getElementById('lvQ').value||'').toLowerCase();
+  var sc=(document.getElementById('lvScn')||{}).value||'';
+  return (D.userList||[]).filter(function(u){
+    if(q&&(u.name+' '+(u.model||'')+' '+(u.country||'')+' '+(u.region||'')+' '+(u.ip||'')+' '+(u.version||'')).toLowerCase().indexOf(q)<0)return false;
+    if(sc&&(u.model||'')!==sc)return false;
+    if(_lf==='online'&&!u.online)return false;
+    if(_lf==='offline'&&u.online)return false;
+    if(_lf==='today'&&lvToday(u)<=0)return false;
+    if(_lf==='oldver'&&!(u.version&&D.latestVersion&&String(u.version).trim()!==String(D.latestVersion).trim()))return false;
+    return true;
+  }).sort(function(a,b){ return (b.online-a.online)||((b.last||0)-(a.last||0)); });
+}
+function lvCSV(which){
+  var rows=lvRows(); if(which==='online')rows=rows.filter(function(u){return u.online;});
+  uCSV(rows);
+}
+function lvRender(){
+  var U=D.userList||[]; var on=U.filter(function(u){return u.online&&!u.blocked;});
+  var scanners={}; U.forEach(function(u){ if(u.model)scanners[u.model]=1; });
+  var activeScn={}; on.forEach(function(u){ if(u.model)activeScn[u.model]=1; });
+  // header strip
+  document.getElementById('lvResp').textContent=(D.respMs||0)+' ms';
+  document.getElementById('lvOnN').textContent=on.length;
+  document.getElementById('lvDevN').textContent=Object.keys(activeScn).length;
+  // scanner filter options
+  (function(){ var sel=document.getElementById('lvScn'); if(sel&&sel.options.length<=1)
+    Object.keys(scanners).sort().forEach(function(m){ var o=document.createElement('option');o.value=m;o.textContent='🖨 '+m;sel.appendChild(o); }); })();
+  // ---- KPIs (sab asli) ----
+  var today=D.today||0, yest=D.yesterday||0;
+  var trend=yest>0?Math.round((today-yest)*100/yest):null;
+  var crashesToday=(D.crashes||[]).filter(function(c){return (Date.now()/1000-(c.t||0))<86400;}).length;
+  var avgHealth=U.length?Math.round(U.reduce(function(a,u){return a+uHealth(u).s;},0)/U.length):100;
+  var H=D.health||{};
+  var bakAge=D.lastBackup?Math.floor((Date.now()/1000-D.lastBackup)/3600):null;
+  document.getElementById('liveKpis').innerHTML=
+    _kpi('','👥',fmt(U.length),'Registered users')
+    +_kpi('g','🟢',on.length,'Online abhi')
+    +_kpi('r','🔴',U.length-on.length,'Offline')
+    +_kpi('p','🖨',Object.keys(scanners).length,'Scanner models')
+    +_kpi('g','📄',fmt(today)+(trend!==null?' <small style="font-size:9px;color:'+(trend>=0?'var(--ok)':'var(--bad)')+'">'+(trend>=0?'▲':'▼')+Math.abs(trend)+'%</small>':''),"Aaj ke scans (pages)")
+    +_kpi('','📊',(D.avgPages||0),'Avg pages / scan')
+    +_kpi(avgHealth>=80?'g':(avgHealth>=60?'y':'r'),'⭐',avgHealth+'%','Fleet health score')
+    +_kpi('','💾',(D.fileKB||0)+' KB','JSON storage')
+    +_kpi(bakAge===null?'y':(bakAge<48?'g':'r'),'🛟',bakAge===null?'—':(bakAge<1?'<1h':bakAge+'h'),'Last backup')
+    +_kpi(D.bcMsg?'g':'','📢',D.bcMsg?'Active':'—','Broadcast')
+    +_kpi('p','💬',(D.feedback||[]).length,'Feedback stored')
+    +_kpi(crashesToday?'r':'g','💥',crashesToday,'Crashes — 24h');
+  // ---- version coverage ----
+  (function(){ var lat=String(D.latestVersion||'').trim(); var out=0,onl=0;
+    U.forEach(function(u){ if(u.version){ if(String(u.version).trim()===lat)onl++; else out++; } });
+    var tot=onl+out, pct=tot?Math.round(onl*100/tot):100;
+    document.getElementById('lvVer').innerHTML=
+     '<div style="font-size:26px;font-weight:900;color:'+(pct>=70?'var(--ok)':'var(--warn)')+'">'+pct+'%</div>'
+     +'<div style="color:var(--mut);font-size:10.5px;margin-bottom:6px">users latest v'+esc(lat||'?')+' par hain</div>'
+     +'<div class="hbar" style="width:100%;height:9px"><i style="width:'+pct+'%;background:linear-gradient(90deg,var(--accent),var(--accent2))"></i></div>'
+     +'<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--mut);margin-top:5px"><span>✓ '+onl+' latest</span><span>⚠ '+out+' purane</span></div>'
+     +(out?'<button class="btn" style="margin-top:8px;width:100%" onclick="jumpTo(\'overview\',\'cardBroadcast\')">📣 Update broadcast bhejo</button>':'');
+  })();
+  // ---- Alert Center (rules — sirf asli haalat par) ----
+  (function(){ var A=[];
+    var lat=String(D.latestVersion||'').trim();
+    var oldv=U.filter(function(u){return u.version&&String(u.version).trim()!==lat;}).length;
+    if(crashesToday) A.push(['crit','💥',crashesToday+' crash pichhle 24h me — Crash Center dekho']);
+    if(bakAge!==null&&bakAge>=48) A.push(['crit','🛟','Backup '+bakAge+' ghante purana — naya backup lo']);
+    if(oldv) A.push(['warn','⚠',oldv+' user purane version par — update broadcast bhejo']);
+    var inact=U.filter(function(u){return u.last&&(Date.now()/1000-u.last)>14*86400;}).length;
+    if(inact) A.push(['warn','😴',inact+' user 14+ din se offline']);
+    if((D.fileKB||0)>2048) A.push(['warn','💾','stats.json '+Math.round(D.fileKB/1024)+' MB ka ho gaya — purge/cleanup socho']);
+    if(H.lastRecovery) A.push(['info','♻️','Storage auto-recovery chali thi ('+new Date(H.lastRecovery*1000).toLocaleString()+') — sab theek hai']);
+    var blocked=U.filter(function(u){return u.blocked;}).length;
+    if(blocked) A.push(['info','🚫',blocked+' user blocked hain']);
+    if(!A.length) A.push(['info','✅','Koi alert nahi — sab systems normal 🎉']);
+    window._lvA=A; lvAlertsRender('all');
+  })();
+  // ---- AI Insights ----
+  (function(){ var I=[];
+    if(trend!==null&&Math.abs(trend)>=15) I.push([trend>0?'📈':'📉','Aaj scanning kal se <b>'+Math.abs(trend)+'% '+(trend>0?'zyada':'kam')+'</b> hai.']);
+    var lat=String(D.latestVersion||'').trim(); var tot=0,onl=0;
+    U.forEach(function(u){ if(u.version){tot++; if(String(u.version).trim()===lat)onl++;} });
+    if(tot) I.push(['🔢','<b>'+Math.round(onl*100/tot)+'%</b> users latest version par hain.']);
+    var topScn='',mx=0,cnt={}; U.forEach(function(u){ if(u.model){cnt[u.model]=(cnt[u.model]||0)+(u.scans||0); if(cnt[u.model]>mx){mx=cnt[u.model];topScn=u.model;}} });
+    if(topScn) I.push(['🖨','Sabse zyada kaam <b>'+esc(topScn)+'</b> par ho raha hai ('+fmt(mx)+' scans).']);
+    var hh=D.hoursAll||{}; var ph=-1,pm=0; Object.keys(hh).forEach(function(k){ var h=parseInt(k.slice(-2)); var v=parseInt(hh[k])||0; if(v>pm){pm=v;ph=h;} });
+    if(ph>=0) I.push(['🕒','Peak scanning time: <b>'+ph+':00–'+(ph+1)+':00</b> ke aas-paas.']);
+    var inact=U.filter(function(u){return u.last&&(Date.now()/1000-u.last)>7*86400;}).length;
+    if(inact) I.push(['😴','<b>'+inact+' user</b> 7+ din se nahi aaye — wapas laane ka message bhejo.']);
+    if(bakAge!==null&&bakAge>=24) I.push(['🛟','Aakhri backup <b>'+bakAge+'h</b> pehle — aaj ka backup le lo.']);
+    if(!I.length) I.push(['✅','Sab stable — koi khaas pattern nahi.']);
+    document.getElementById('lvAI').innerHTML=I.map(function(i){return '<div class="aii"><span>'+i[0]+'</span><div>'+i[1]+'</div></div>';}).join('');
+  })();
+  // ---- live grid ----
+  (function(){ var rows=lvRows();
+    var h='<div style="max-height:420px;overflow:auto"><table><thead><tr><th>User</th><th>Activity</th><th>Scanner</th><th>Aaj</th><th>Ver</th><th>Location</th><th>IP</th><th>Heartbeat</th><th>Health</th><th class="no-print">⚡</th></tr></thead><tbody>'
+     +(rows.length?rows.map(function(u){ var hh=uHealth(u).s, hc=hh>=80?'var(--ok)':(hh>=60?'var(--warn)':'var(--bad)');
+       return '<tr><td style="cursor:pointer;min-width:130px" onclick="showUser(lvFind(\''+esc(u.id)+'\'))"><div style="display:flex;gap:7px;align-items:center">'+uAvatar(u)+'<b>'+esc(u.name)+'</b></div></td>'
+        +'<td>'+lvActivity(u)+'</td><td>'+esc((u.model||'—').slice(0,20))+'</td>'
+        +'<td>'+(lvToday(u)?'<b style="color:var(--ok)">'+lvToday(u)+'p</b>':'<span style="color:var(--mut)">0</span>')+'</td>'
+        +'<td>'+(u.version?('v'+u.version+(D.latestVersion&&String(u.version).trim()!==String(D.latestVersion).trim()?' <span class="stb w">old</span>':'')):'—')+'</td>'
+        +'<td>'+(u.country?flag(u.country)+' '+u.country:'—')+(u.region?' · <span style="color:var(--mut)">'+esc(u.region)+'</span>':'')+'</td>'
+        +'<td style="font-size:9.5px;color:var(--mut)">'+esc(u.ip||'—')+'</td>'
+        +'<td>'+(u.online?'<span class="stb g">live</span>':ago(u.last))+'</td>'
+        +'<td><span class="hbar"><i style="width:'+hh+'%;background:'+hc+'"></i></span></td>'
+        +'<td class="no-print"><span class="uact"><button title="Message" onclick="event.stopPropagation();showUser(lvFind(\''+esc(u.id)+'\'));setTimeout(function(){var f=document.querySelector(\'#umbody input[name=msg]\');if(f)f.focus();},150)">📨</button></span></td></tr>';
+     }).join(''):'<tr><td colspan="10" style="text-align:center;color:var(--mut);padding:18px">— koi user match nahi hua —</td></tr>')
+     +'</tbody></table></div>';
+    document.getElementById('lvGrid').innerHTML=h;
+  })();
+  // ---- charts (Chart.js pehle se loaded; na ho to skip) ----
+  if(window.Chart){
+    try{
+      var hrs=[],vals=[]; for(var i=23;i>=0;i--){ var d=new Date(Date.now()-i*3600000);
+        var k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'-'+String(d.getHours()).padStart(2,'0');
+        hrs.push(d.getHours()+':00'); vals.push(parseInt((D.hoursAll||{})[k])||0); }
+      new Chart(document.getElementById('lv24'),{type:'bar',data:{labels:hrs,datasets:[{data:vals,backgroundColor:'rgba(59,130,246,.65)',borderRadius:4}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{maxTicksLimit:8,color:'#94A3B8'},grid:{display:false}},y:{ticks:{color:'#94A3B8'},grid:{color:'rgba(148,163,184,.12)'}}}}});
+      var days=[],dv=[]; for(var j=13;j>=0;j--){ var dd=new Date(Date.now()-j*86400000).toISOString().slice(0,10);
+        days.push(dd.slice(5)); dv.push(parseInt((D.daysMap||{})[dd])||0); }
+      new Chart(document.getElementById('lv14'),{type:'line',data:{labels:days,datasets:[{data:dv,fill:true,tension:.35,borderColor:'#3B82F6',backgroundColor:'rgba(59,130,246,.18)',pointRadius:2}]},options:{plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#94A3B8'},grid:{display:false}},y:{ticks:{color:'#94A3B8'},grid:{color:'rgba(148,163,184,.12)'}}}}});
+    }catch(e){}
+  }
+  // ---- heatmap 7x24 ----
+  (function(){ var hm=D.heat7x24; var el=document.getElementById('lvHeat'); if(!el)return;
+    if(!hm||!hm.length){ el.innerHTML='<div style="color:var(--mut);font-size:11px">— data nahi —</div>'; return; }
+    var mx=1; hm.forEach(function(r){ r.forEach(function(v){ if(v>mx)mx=v; }); });
+    var dn=['Som','Man','Bud','Gur','Shu','Sha','Rav'];
+    var h='<div style="display:grid;grid-template-columns:34px repeat(24,1fr);gap:2px;font-size:8px">';
+    h+='<span></span>'; for(var c=0;c<24;c++) h+='<span style="color:var(--mut);text-align:center">'+(c%4===0?c:'')+'</span>';
+    hm.forEach(function(row,ri){ h+='<span style="color:var(--mut);line-height:14px">'+dn[ri]+'</span>';
+      row.forEach(function(v,ci){ var a=v>0?(0.2+0.8*Math.min(1,v/mx)):0;
+        h+='<span title="'+dn[ri]+' '+ci+':00 — '+v+' scan" style="height:14px;border-radius:3px;background:'+(v>0?'rgba(59,130,246,'+a.toFixed(2)+')':'var(--line)')+'"></span>'; }); });
+    el.innerHTML=h+'</div>';
+  })();
+  // ---- country distribution ----
+  (function(){ var el=document.getElementById('lvGeo'); if(!el)return; var cc=D.usersByCountry||[];
+    if(!cc.length){ el.innerHTML='<div style="color:var(--mut);font-size:11px">— data nahi —</div>'; return; }
+    var mx=cc[0]&&cc[0][1]||1;
+    el.innerHTML=cc.slice(0,10).map(function(r){ var onc=(D.userList||[]).filter(function(u){return u.country===r[0]&&u.online;}).length;
+      return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:5px;font-size:11px">'
+       +'<span style="width:52px">'+flag(r[0])+' '+esc(r[0])+'</span>'
+       +'<span class="bar" style="flex:0 0 '+Math.max(6,Math.round(r[1]*100/mx))+'%;height:10px"></span>'
+       +'<b>'+r[1]+'</b>'+(onc?' <span class="stb g">'+onc+' online</span>':'')+'</div>'; }).join('');
+  })();
+  // ---- timeline (asli events merge) ----
+  (function(){ var el=document.getElementById('lvTime'); if(!el)return; var T=[];
+    (D.recentScans300||D.recentScans||[]).slice(0,25).forEach(function(x){ T.push({t:x.t,ic:'🖨',txt:'<b>'+esc(x.name||'user')+'</b> ne <b>'+x.n+'</b> page scan kiye'+(x.cc?' ('+flag(x.cc)+')':'')}); });
+    (D.crashes||[]).slice(0,6).forEach(function(c){ T.push({t:c.t,ic:'💥',txt:'Crash v'+esc(c.v||'?')+' — '+esc((c.err||'').slice(0,40))}); });
+    (D.feedback||[]).slice(0,6).forEach(function(f){ T.push({t:f.t,ic:'💬',txt:'<b>'+esc(f.name||'user')+'</b> ka feedback '+('★'.repeat(f.rating||0))}); });
+    (D.auditLog||[]).slice(0,6).forEach(function(a){ T.push({t:a.t,ic:'🛠',txt:'Admin: '+esc(a.act)+(a.det?' — '+esc(a.det):'')}); });
+    (D.adminLoginsFull||[]).slice(0,3).forEach(function(l){ if(l.t)T.push({t:l.t,ic:'🔐',txt:'Admin login ('+esc(l.ip||'?')+')'}); });
+    T.sort(function(a,b){return (b.t||0)-(a.t||0);});
+    el.innerHTML=T.length?T.slice(0,30).map(function(e){
+      return '<div class="aii"><span>'+e.ic+'</span><div>'+e.txt+'<div style="color:var(--mut);font-size:9px">'+(e.t?new Date(e.t*1000).toLocaleTimeString():'')+' · '+ago(e.t)+' pehle</div></div></div>'; }).join('')
+      :'<div style="color:var(--mut)">— abhi koi activity nahi —</div>';
+  })();
+}
+function lvFind(id){ return (D.userList||[]).filter(function(u){return String(u.id)===id;})[0]; }
+function lvAlertsRender(sev){
+  var A=window._lvA||[]; if(sev!=='all')A=A.filter(function(a){return a[0]===sev;});
+  var C={crit:'var(--bad)',warn:'var(--warn)',info:'var(--accent2)'};
+  document.getElementById('lvAlerts').innerHTML=A.length?A.map(function(a){
+    return '<div class="aii"><span style="color:'+C[a[0]]+'">'+a[1]+'</span><div>'+a[2]+' <span class="stb '+(a[0]==='crit'?'b':(a[0]==='warn'?'w':'g'))+'">'+a[0]+'</span></div></div>'; }).join('')
+    :'<div style="color:var(--mut);font-size:11px">— is severity ka koi alert nahi —</div>';
+}
+(function(){ var f=document.getElementById('lvAlF'); if(f) [].forEach.call(f.querySelectorAll('.ufc'),function(b){
+  b.onclick=function(){ [].forEach.call(f.querySelectorAll('.ufc'),function(x){x.classList.remove('on');}); b.classList.add('on'); lvAlertsRender(b.getAttribute('data-s')); }; }); })();
+(function(){ var q=document.getElementById('lvQ'); if(q){ q.addEventListener('input',function(){ lvRender(); });
+  var s=document.getElementById('lvScn'); if(s)s.addEventListener('change',lvRender);
+  [].forEach.call(document.querySelectorAll('[data-lf]'),function(b){ b.onclick=function(){
+    [].forEach.call(document.querySelectorAll('[data-lf]'),function(x){x.classList.remove('on');}); b.classList.add('on');
+    _lf=b.getAttribute('data-lf'); lvRender(); }; }); } })();
+// refresh countdown (page 30s par khud reload hoti hai)
+(function(){ var n=30,el=document.getElementById('lvCount'); if(el) setInterval(function(){ n--; if(n<0)n=0; el.textContent=n; },1000); })();
+try{ lvRender(); }catch(e){ if(window.jsonLog){} }
 // ---- DEVICES (scanner-wise) ----
 (function(){ var U=D.userList||[]; var g={};
   U.forEach(function(u){ var k=(u.model||'').trim()||'(Scanner naam nahi mila)';
