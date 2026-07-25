@@ -226,7 +226,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "155"
+VERSION = "156"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2192,9 +2192,27 @@ class ScanWorker(QtCore.QThread):
             # se print/PDF bante hain — compress sirf PDF banate waqt hota hai)
             # + dpi metadata, taaki PDF me page ka asli size sahi bane.
             try:
-                _dpi = (int(self.dpi), int(self.dpi))
+                _d = int(self.dpi)
             except Exception:
-                _dpi = (200, 200)
+                _d = 200
+            # Kam-dpi (150/200) scan ko bhi BEST banao: master ~300dpi tak
+            # smooth (LANCZOS) upscale + halka unsharp — print/PDF me text ke
+            # kinare 300dpi jaise saaf aate hain (printer ka apna rough
+            # upscale hatta hai). Page ka A4 size NAHI badalta — dpi metadata
+            # saath me utna hi badhta hai. B&W me ye threshold se PEHLE hota
+            # hai, isliye 1-bit kinare bhi smooth bante hain.
+            if 0 < _d < 300 and im.mode != "1":
+                try:
+                    _sc = min(2.0, 300.0 / _d)
+                    im = im.resize((max(1, int(im.width * _sc)),
+                                    max(1, int(im.height * _sc))),
+                                   Image.LANCZOS)
+                    im = im.filter(ImageFilter.UnsharpMask(
+                        radius=2, percent=110, threshold=3))
+                    _d = int(round(_d * _sc))
+                except Exception:
+                    pass
+            _dpi = (_d, _d)
             # User ne Grayscale chuna ho to file PAKKI gray bane — kuch driver
             # (jaise HP WIA) gray maangne par bhi colour dete hain; unki
             # colour-tint (pink cast) bhi isi se khatam ho jaati hai.
@@ -19572,6 +19590,17 @@ if the toggle is ticked).</p>
         if size.width() < img.width():
             img = img.scaled(size, QtCore.Qt.KeepAspectRatio,
                              QtCore.Qt.SmoothTransformation)
+        elif max(img.width(), img.height()) < 2400:
+            # Kam-res page (150/200dpi ki purani library files bhi): printer
+            # par bhejne se pehle ~2x smooth upscale — chhota beech-ka kadam
+            # jo halftone ko zyada data deta hai, print saaf aata hai.
+            # (Cap ~4800px: 32-bit memory-safe, ~35-60MB max.)
+            _f = min(2.0, 4800.0 / max(1, max(img.width(), img.height())),
+                     float(size.width()) / max(1, img.width()))
+            if _f > 1.2:
+                img = img.scaled(int(img.width() * _f), int(img.height() * _f),
+                                 QtCore.Qt.KeepAspectRatio,
+                                 QtCore.Qt.SmoothTransformation)
         x = target.x() + (target.width() - size.width()) // 2
         y = target.y() + (target.height() - size.height()) // 2
         painter.drawImage(QtCore.QRect(x, y, size.width(), size.height()), img)
