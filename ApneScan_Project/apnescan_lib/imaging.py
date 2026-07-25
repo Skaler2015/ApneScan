@@ -411,12 +411,22 @@ def restore_photo(img):
         return img
 
 
-def save_image_keep_ext(img, path, quality=92):
-    """Image ko uske extension ke hisaab se sahi format me save karo."""
+def save_image_keep_ext(img, path, quality=95):
+    """Image ko uske extension ke hisaab se sahi format me save karo.
+    HD: quality 95 (baar-baar edit-save par bhi quality na gire), page ka
+    GRAY mode aur dpi metadata surakshit rehte hain (PDF-size + print-size)."""
+    kw = {}
+    try:
+        d = img.info.get("dpi")
+        if d:
+            kw["dpi"] = (int(round(d[0])), int(round(d[1])))
+    except Exception:
+        pass
     if path.lower().endswith((".jpg", ".jpeg")):
-        img.convert("RGB").save(path, "JPEG", quality=quality)
+        out = img if img.mode == "L" else img.convert("RGB")
+        out.save(path, "JPEG", quality=quality, **kw)
     else:
-        img.save(path, "PNG")
+        img.save(path, "PNG", **kw)
 
 
 def apply_watermark(img, text):

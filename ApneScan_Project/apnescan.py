@@ -226,7 +226,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "154"
+VERSION = "155"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1373,7 +1373,15 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
     def _apply_quality(it):
         try:
             props = it.Properties
-            _wia_set(props, 4104, {"bw": 0, "gray": 2, "color": 3}.get(pixel_type, 3))
+            # Rang-mode ki SAHI WIA properties: 6146 = CUR_INTENT (1=colour,
+            # 2=grayscale, 4=text/BW), 4103 = DATATYPE (0=BW, 2=gray, 3=colour),
+            # 4104 = DEPTH (bits: 1/8/24). Pehle galti se DATATYPE ki values
+            # DEPTH (4104) me likhi ja rahi thin — HP jaise drivers use reject
+            # karke apne DEFAULT (Colour) me hi scan karte the, isliye Grayscale
+            # chunne par bhi Colour (aur kabhi pink-tint) file banti thi.
+            _wia_set(props, 6146, {"bw": 4, "gray": 2, "color": 1}.get(pixel_type, 1))
+            _wia_set(props, 4103, {"bw": 0, "gray": 2, "color": 3}.get(pixel_type, 3))
+            _wia_set(props, 4104, {"bw": 1, "gray": 8, "color": 24}.get(pixel_type, 24))
             dv = _wia_valid_dpi(props, int(dpi))
             _wia_set(props, 6147, dv)
             _wia_set(props, 6148, dv)
@@ -2180,7 +2188,21 @@ class ScanWorker(QtCore.QThread):
         def _save_and_emit(im):
             # Ek image ko temp file me save karke UI ko bhejo. JPEG encode ~5x
             # tez (bade scan me speed) — colour/grey ke liye JPEG, 1-bit B&W ke
-            # liye PNG.
+            # liye PNG. HD: master pages quality 95 par rakhe jaate hain (yahi
+            # se print/PDF bante hain — compress sirf PDF banate waqt hota hai)
+            # + dpi metadata, taaki PDF me page ka asli size sahi bane.
+            try:
+                _dpi = (int(self.dpi), int(self.dpi))
+            except Exception:
+                _dpi = (200, 200)
+            # User ne Grayscale chuna ho to file PAKKI gray bane — kuch driver
+            # (jaise HP WIA) gray maangne par bhi colour dete hain; unki
+            # colour-tint (pink cast) bhi isi se khatam ho jaati hai.
+            if self.pixel_type == "gray" and im.mode not in ("L", "1"):
+                try:
+                    im = im.convert("L")
+                except Exception:
+                    pass
             if self.pixel_type == "bw":
                 fd, out = tempfile.mkstemp(suffix=".png", dir=self.tmpdir)
                 os.close(fd)
@@ -2191,7 +2213,7 @@ class ScanWorker(QtCore.QThread):
                 except Exception:
                     pass
                 try:
-                    im.save(out, "PNG", compress_level=1)
+                    im.save(out, "PNG", compress_level=1, dpi=_dpi)
                 except Exception:
                     im.save(out, "PNG")
             else:
@@ -2199,11 +2221,11 @@ class ScanWorker(QtCore.QThread):
                 os.close(fd)
                 try:
                     if im.mode == "L":
-                        im.save(out, "JPEG", quality=88)
+                        im.save(out, "JPEG", quality=95, dpi=_dpi)
                     else:
-                        im.convert("RGB").save(out, "JPEG", quality=88)
+                        im.convert("RGB").save(out, "JPEG", quality=95, dpi=_dpi)
                 except Exception:
-                    im.convert("RGB").save(out, "JPEG", quality=85)
+                    im.convert("RGB").save(out, "JPEG", quality=90)
             self.kept += 1
             self.page_done.emit(out)
         self._save_and_emit = _save_and_emit
@@ -2277,7 +2299,7 @@ class EditProfileDialog(QtWidgets.QDialog):
         self.setWindowTitle("Profile settings")
         self.setMinimumWidth(420)
         self.profile = dict(profile) if profile else {
-            "name": "", "source_name": None, "dpi": 200, "color": "gray", "duplex": False}
+            "name": "", "source_name": None, "dpi": 300, "color": "gray", "duplex": False}
         form = QtWidgets.QFormLayout(self)
 
         def qh(text, tip):
@@ -4159,7 +4181,7 @@ class ImageEditor(QtWidgets.QDialog):
             return
         try:
             img = self._composited().convert("RGB")
-            img.save(out, "PDF", resolution=200) if out.lower().endswith(".pdf") else img.save(out, quality=92)
+            img.save(out, "PDF", resolution=200, quality=90) if out.lower().endswith(".pdf") else img.save(out, quality=92)
             self.win.status.showMessage(self.L("⇩ Save: ", "⇩ Saved: ") + os.path.basename(out), 6000)
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, APP_NAME, str(e))
@@ -6184,6 +6206,23 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._tmpdir = tempfile.mkdtemp(prefix="nobledoc_")
         self._config = load_config()
         self._profiles = self._config.get("profiles", [])
+        # HD scan (v155, one-time): purani profiles 150/200 dpi par chal rahi
+        # thin — sabko 300 dpi (HD) par le aao. User baad me kabhi bhi Settings
+        # se ghata sakta hai; ye upgrade dobara zabardasti nahi hota.
+        if not self._config.get("hd_dpi_upgraded"):
+            for _p in self._profiles:
+                try:
+                    if int(_p.get("dpi", 0) or 0) < 300:
+                        _p["dpi"] = 300
+                except Exception:
+                    _p["dpi"] = 300
+            self._config["hd_dpi_upgraded"] = True
+            if self._profiles:
+                self._config["profiles"] = self._profiles
+            try:
+                save_config(self._config)
+            except Exception:
+                pass
         self._opts = dict(DEFAULT_OPTIONS)
         self._opts.update(self._config.get("options", {}))
         self._recent = self._config.get("recent", [])
@@ -6522,7 +6561,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         self._profiles = [{
             "name": "Default",
-            "dpi": 150,
+            "dpi": 300,                # HD (pehle 150 tha — dhundhla scan)
             "color": "color",          # Colour
             "duplex": False,
             "page_size": "auto",       # Auto
@@ -6623,7 +6662,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self.cmb_dpi.insertItem(self.cmb_dpi.count() - 1, item)
             self.cmb_dpi.setCurrentText(item)
         else:
-            self.cmb_dpi.setCurrentText("200 dpi")
+            self.cmb_dpi.setCurrentText("300 dpi")
         self.cmb_dpi.blockSignals(False)
 
     def _panel_scan_params(self, prof):
@@ -6688,7 +6727,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
     # ================= Panel: doc-type presets / lock / simple / dup =========
     DOCTYPE_PRESETS = {
         "presc": {"dpi": 300, "color": "color", "page_size": "auto", "duplex": False},
-        "lab":   {"dpi": 200, "color": "gray",  "page_size": "a4",   "duplex": False},
+        "lab":   {"dpi": 300, "color": "gray",  "page_size": "a4",   "duplex": False},
         "id":    {"dpi": 300, "color": "color", "page_size": "auto", "duplex": True},
         "xray":  {"dpi": 300, "color": "gray",  "page_size": "auto", "duplex": False},
     }
@@ -10185,18 +10224,29 @@ class ScannerWindow(QtWidgets.QMainWindow):
             imgs = []
             try:
                 for p in img_paths:
-                    im = Image.open(p).convert("RGB")
+                    im = Image.open(p)
+                    im.load()
+                    if im.mode not in ("1", "L"):
+                        im = im.convert("RGB")
+                        try:
+                            # rang-heen page gray me — usi quality par kaafi
+                            # chhota (aur colour-noise bhi nahi dabana padta)
+                            if colorfulness(im) < 6.0:
+                                im = im.convert("L")
+                        except Exception:
+                            pass
                     if s < 1.0:
                         im = im.resize((max(1, int(im.width * s)),
                                         max(1, int(im.height * s))), Image.LANCZOS)
-                    b2 = io.BytesIO()
-                    im.save(b2, "JPEG", quality=q)
-                    im.close()
-                    b2.seek(0)
-                    im2 = Image.open(b2)
-                    im2.load()
-                    imgs.append(im2)
-                imgs[0].save(buf, "PDF", save_all=True, append_images=imgs[1:], resolution=200.0)
+                    imgs.append(im)
+                # encode sirf EK baar (PDF-save par quality=q) — pehle JPEG
+                # q par dabakar PDF me DOBARA 75 par dabta tha (quality x2 loss).
+                # 1-bit page ho to quality nahi bhejte (CCITT encoder crash).
+                _ckw = {}
+                if not any(i2.mode == "1" for i2 in imgs):
+                    _ckw["quality"] = q
+                imgs[0].save(buf, "PDF", save_all=True, append_images=imgs[1:],
+                             resolution=200.0, **_ckw)
             finally:
                 for im in imgs:
                     try:
@@ -10323,7 +10373,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             prof = self._selected_profile()
             if prof is None:
                 prof = {"name": "Default", "source_name": wiz.result_device_name,
-                        "dpi": 200, "color": "gray", "duplex": False}
+                        "dpi": 300, "color": "gray", "duplex": False}
                 self._profiles.append(prof)
             elif wiz.result_method == "twain" and wiz.result_device_name:
                 prof["source_name"] = wiz.result_device_name
@@ -10520,7 +10570,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                                 _setp(dev, 3096, 0)
                             it = dev.Items[1]
                             if setitem:
-                                _setp(it, 4104, 2)  # grayscale
+                                _setp(it, 6146, 2)  # intent: grayscale
+                                _setp(it, 4103, 2)  # datatype: grayscale
                                 dv = _valid_dpi(it, 200)
                                 _setp(it, 6147, dv); _setp(it, 6148, dv)
                             pages, err = _try_transfers(it, 3)
@@ -11554,7 +11605,7 @@ if the toggle is ticked).</p>
         _av.addWidget(QtWidgets.QLabel("Resolution:"))
         self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.addItems([d + " dpi" for d in RESOLUTIONS])
         self.cmb_dpi.addItem(self.L("Custom… (apni dpi)", "Custom…"))
-        self.cmb_dpi.setCurrentText("200 dpi")
+        self.cmb_dpi.setCurrentText("300 dpi")
         self.cmb_dpi.currentTextChanged.connect(self._on_panel_dpi_changed)
         _av.addWidget(self.cmb_dpi)
         _av.addWidget(QtWidgets.QLabel("Bit depth:"))
@@ -12523,7 +12574,7 @@ if the toggle is ticked).</p>
         (dpi + rang), taaki Enter bhi isi par scan kare."""
         presets = {
             "fast":   (150, "bw",    "150 dpi", "Black & White", False, False),
-            "normal": (200, "gray",  "200 dpi", "Grayscale",     False, False),
+            "normal": (300, "gray",  "300 dpi", "Grayscale",     False, False),
             "best":   (300, "color", "300 dpi", "24-bit Colour", True,  True),
         }
         p = presets.get(name)
@@ -17178,7 +17229,8 @@ if the toggle is ticked).</p>
             return
         try:
             imgs = [apply_watermark(Image.open(p).convert("RGB"), text.strip()) for p in pages]
-            imgs[0].save(out, "PDF", save_all=True, append_images=imgs[1:], resolution=200.0)
+            imgs[0].save(out, "PDF", save_all=True, append_images=imgs[1:],
+                         resolution=200.0, quality=85)
             for im in imgs:
                 im.close()
         except Exception:
@@ -17251,8 +17303,11 @@ if the toggle is ticked).</p>
         if not out:
             return
         try:
-            imgs = [Image.open(f).convert("RGB") for f in files]
-            imgs[0].save(out, "PDF", save_all=True, append_images=imgs[1:], resolution=200.0)
+            imgs, res = self._pdf_ready_pages(files)
+            _fkw = ({"quality": 85}
+                    if not any(im.mode == "1" for im in imgs) else {})
+            imgs[0].save(out, "PDF", save_all=True, append_images=imgs[1:],
+                         resolution=res, **_fkw)
             for im in imgs:
                 im.close()
         except Exception:
@@ -17381,10 +17436,13 @@ if the toggle is ticked).</p>
         if not out:
             return
         try:
-            imgs = [Image.open(p).convert("RGB") for p in paths]
+            # Archival: koi downscale nahi (max_side=0), quality 95
+            imgs, res = self._pdf_ready_pages(paths, max_side=0)
+            _akw = ({"quality": 95}
+                    if not any(im.mode == "1" for im in imgs) else {})
             tmp = out + ".tmp.pdf"
             imgs[0].save(tmp, "PDF", save_all=True, append_images=imgs[1:],
-                         resolution=300.0, quality=95)
+                         resolution=res, **_akw)
             for im in imgs:
                 im.close()
             reader = PdfReader(tmp)
@@ -18905,23 +18963,67 @@ if the toggle is ticked).</p>
                 QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes
         return True
 
+    def _pdf_ready_pages(self, paths, max_side=4400):
+        """PDF ke liye pages taiyaar karo — HD dikhe par file chhoti bane:
+        - gray/B&W pages apne HI mode me embed hote hain (RGB me phula kar
+          nahi — file kaafi chhoti),
+        - COLOUR page jisme asal me rang hai hi nahi → apne aap GRAY (chhota
+          + scanner ki colour-tint/pink cast bhi gayab),
+        - bahut badi image (600dpi+) PDF-copy me ~300dpi tak ghat jaati hai
+          (page ki original file waisi hi rehti hai),
+        - page ki asli dpi PDF me jaati hai taaki print-size sahi bane.
+        Returns (imgs, resolution)."""
+        imgs, res = [], 0
+        for p in paths:
+            im = Image.open(p)
+            im.load()
+            try:
+                d = int((im.info.get("dpi") or (0, 0))[0])
+            except Exception:
+                d = 0
+            if im.mode not in ("1", "L"):
+                im = im.convert("RGB")
+                try:
+                    if colorfulness(im) < 6.0:
+                        im = im.convert("L")
+                except Exception:
+                    pass
+            if max_side and max(im.size) > max_side:
+                sc = max_side / float(max(im.size))
+                im = im.resize((max(1, int(im.width * sc)),
+                                max(1, int(im.height * sc))), Image.LANCZOS)
+                if d:
+                    d = max(72, int(d * sc))
+            imgs.append(im)
+            if not res and d:
+                res = d
+        return imgs, float(res or 200)
+
     def _pages_as_pdf(self, paths, out, password=None):
+        # Auto-compress: encode ab sirf EK baar hota hai — PDF-save ki quality
+        # par. (Pehle page JPEG me daba kar PDF me DOBARA default-75 par
+        # dabta tha: quality bhi girti thi, size bhi barhta tha.)
         compress = self._opts.get("compress")
-        q = int(self._opts.get("jpeg_quality", 60))
+        q = int(self._opts.get("jpeg_quality", 60)) if compress else 80
         wm = self._opts.get("watermark")
         wt = self._opts.get("watermark_text", "")
-        imgs = []
-        for p in paths:
-            im = Image.open(p).convert("RGB")
-            if wm and wt:
-                im = apply_watermark(im, wt)
-            if compress:
-                buf = io.BytesIO(); im.save(buf, "JPEG", quality=q); buf.seek(0)
-                im2 = Image.open(buf); im2.load(); im = im2
-            imgs.append(im)
+        imgs, res = self._pdf_ready_pages(paths)
+        if wm and wt:
+            # watermark RGBA me lagta hai — gray page ko wapas gray kar do
+            # taaki file chhoti hi rahe
+            imgs = [im if im.mode == "1" else
+                    (apply_watermark(im, wt).convert("L") if im.mode == "L"
+                     else apply_watermark(im, wt))
+                    for im in imgs]
+        kw = dict(save_all=True, append_images=imgs[1:], resolution=res)
+        # NOTE: koi bhi page 1-bit B&W ho to 'quality' mat bhejo — Pillow
+        # B&W page CCITT (TIFF) encoder se likhta hai jo quality par crash
+        # karta hai. (B&W pages waise bhi bahut chhote hote hain.)
+        if not any(im.mode == "1" for im in imgs):
+            kw["quality"] = max(1, min(95, q))
         if password:
             tmp = out + ".tmp.pdf"
-            imgs[0].save(tmp, "PDF", save_all=True, append_images=imgs[1:], resolution=200.0)
+            imgs[0].save(tmp, "PDF", **kw)
             reader = PdfReader(tmp); writer = PdfWriter()
             for pg in reader.pages:
                 writer.add_page(pg)
@@ -18933,7 +19035,7 @@ if the toggle is ticked).</p>
             except Exception:
                 pass
         else:
-            imgs[0].save(out, "PDF", save_all=True, append_images=imgs[1:], resolution=200.0)
+            imgs[0].save(out, "PDF", **kw)
         for im in imgs:
             try:
                 im.close()
@@ -19463,6 +19565,13 @@ if the toggle is ticked).</p>
             return
         size = img.size()
         size.scale(target.size(), QtCore.Qt.KeepAspectRatio)
+        # HD print: DOWN-scale pehle hi smooth (bilinear) kar lo — warna printer
+        # par nearest-neighbour se text daanedar chhapta tha. UP-scale printer
+        # ke SmoothPixmapTransform hint se hota hai (600/1200dpi target par
+        # poori image pehle se banana 32-bit app me memory kha jaata).
+        if size.width() < img.width():
+            img = img.scaled(size, QtCore.Qt.KeepAspectRatio,
+                             QtCore.Qt.SmoothTransformation)
         x = target.x() + (target.width() - size.width()) // 2
         y = target.y() + (target.height() - size.height()) // 2
         painter.drawImage(QtCore.QRect(x, y, size.width(), size.height()), img)
@@ -19476,6 +19585,10 @@ if the toggle is ticked).</p>
         painter = QtGui.QPainter()
         if not painter.begin(printer):
             self._warn("Printer did not start."); return
+        # HD print: smooth scaling — iske bina Qt image ko nearest-neighbour se
+        # printer-resolution par khinchta tha (text ke kinare toote dikhte the).
+        painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
         try:
             page = painter.viewport()
             if per_page <= 1:
