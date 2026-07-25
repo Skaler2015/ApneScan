@@ -27,6 +27,7 @@ __all__ = [
     "trim_dark_borders",
     "autocrop",
     "deskew",
+    "flatten_background",
     "auto_enhance",
     "auto_brightness",
     "denoise",
@@ -177,6 +178,66 @@ def deskew(img):
         if abs(best_angle) < 0.25:
             return img
         return img.rotate(best_angle, resample=Image.BICUBIC, fillcolor=(255, 255, 255), expand=True)
+    except Exception:
+        return img
+
+
+def flatten_background(img, target=246):
+    """Photocopy/scan ki GRAY-maili background ko asli SAFED banao (HD print).
+
+    Kaise: background ko bade neighbourhood (max-filter + blur, chhote size par)
+    se estimate karke image ko usse DIVIDE karte hain — kagaz har jagah ek-jaisa
+    white ho jaata hai (streaks/shading bhi saaf), phir halki gamma se text
+    wapas gehra kiya jaata hai. Rang wali image me teeno channels par same gain
+    lagta hai (rang kharab nahi hote).
+
+    Surakshit: photo / X-ray jaise zyada-dark pages par apne aap NO-OP
+    (heuristic: kam-se-kam 55% pixels halke hone chahiye), aur pehle se safed
+    page par asar na ke barabar hota hai."""
+    try:
+        if not HAS_NUMPY:
+            return img
+        g = np.asarray(img.convert("L"), dtype=np.float32)
+        # Document heuristic — photo/X-ray (zyada dark) par haath mat lagao.
+        if float((g > 120).mean()) < 0.55:
+            return img
+        h, w = g.shape
+        # Background chhote size par nikalta hai (tez): max-filter text ke
+        # strokes ke UPAR se kagaz utha leta hai, blur use smooth karta hai.
+        small = img.convert("L").resize(
+            (max(1, w // 8), max(1, h // 8)), Image.BILINEAR)
+        # Pehle se SAFED page (naye 300dpi HD scan) par kaam hi mat karo —
+        # print ke waqt ye per-page bachat hai (no-op = same object return).
+        if float(np.percentile(np.asarray(small, dtype=np.float32), 80)) >= 243.0:
+            return img
+        bg = small.filter(ImageFilter.MaxFilter(9)).filter(
+            ImageFilter.GaussianBlur(6)).resize((w, h), Image.BILINEAR)
+        b = np.maximum(np.asarray(bg, dtype=np.float32), 40.0)
+        bgmean = float(b.mean())
+        gain = float(target) / b
+        # ADF ki KHADI (vertical) streak-lines: har column ka apna chhota
+        # correction — patli lines global blur me nahi pakdi jaati.
+        gray1 = np.clip(g * gain, 0.0, 255.0)
+        # (har 6th row kaafi hai — percentile hi sabse mehnga step tha)
+        col = np.percentile(gray1[::6], 85, axis=0)
+        cgain = np.clip(float(target) / np.maximum(col, 120.0), 0.95, 1.2)
+        gray1 *= cgain[None, :]
+        # Gamma LUT (np.power poori image par bahut dheema tha — LUT ~10x tez):
+        # jitni maili background thi utna text gehra hota hai; end me white-
+        # point stretch se kagaz PURA safed (255) tak pahunchta hai.
+        gamma = min(1.7, max(1.1, 1.1 + (235.0 - bgmean) * 0.008))
+        lut = np.power(np.arange(256, dtype=np.float32) / 255.0, gamma) * 255.0
+        wp = float(np.percentile(
+            lut[np.clip(gray1[::8, ::8], 0, 255).astype(np.uint8)], 90))
+        lut = np.clip(lut * min(1.15, 255.0 / max(wp, 200.0)), 0.0, 255.0)
+        lut = lut.astype(np.uint8)
+        if img.mode == "L":
+            out = np.clip(gray1, 0.0, 255.0).astype(np.uint8)
+            return Image.fromarray(lut[out], "L")
+        rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
+        out = np.clip(rgb * (gain * cgain[None, :])[..., None],
+                      0.0, 255.0).astype(np.uint8)
+        return Image.fromarray(lut[out], "RGB")
     except Exception:
         return img
 

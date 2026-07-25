@@ -40,7 +40,7 @@ from apnescan_lib.search_engine import _folder_search_score
 # _largest_gap) are used internally by their siblings inside that module.
 from apnescan_lib.imaging import (
     is_blank_page, whiten_dark_background, autocrop, deskew, auto_enhance,
-    denoise, apply_enhance_mode, clean_edges, split_two_pages,
+    denoise, apply_enhance_mode, clean_edges, split_two_pages, flatten_background,
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
 )
@@ -226,7 +226,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "156"
+VERSION = "157"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -455,6 +455,7 @@ DEFAULT_OPTIONS = {
     "auto_crop": False,
     "deskew": False,
     "quality_enhance": False,
+    "auto_flatten": True,        # gray/maili background apne aap asli SAFED (HD)
     "clean_edges": False,        # scan ki kaali border / kinare ke chhed saaf karo
     "split_two_page": False,     # ek glass par do page → apne aap alag karo
     "searchable_pdf": False,     # har save par PDF ke andar OCR text (Ctrl+F se dhoondo)
@@ -2138,6 +2139,12 @@ class ScanWorker(QtCore.QThread):
                     # size me sheet chhoti ho to backing dikhti hai; print me
                     # kala bilkul nahi aana chahiye.
                     img = whiten_dark_background(img)
+                    # Photocopy jaisi GRAY-maili background asli safed karo
+                    # (streak/shading bhi) — text gehra, print/PDF ekdam saaf.
+                    # Photo/X-ray par apne aap no-op. Settings se band ho
+                    # sakta hai (auto_flatten).
+                    if self.opts.get("auto_flatten", True):
+                        img = flatten_background(img)
                     # ---- Smart Orientation = FIRST processing stage (spec) ----
                     # Har page ko sabse pehle seedha karo taaki aage ke sab stage
                     # (crop/deskew/enhance) + thumbnail/OCR/PDF sahi orientation par chalein.
@@ -2550,6 +2557,9 @@ class OptionsDialog(QtWidgets.QDialog):
         form.addRow(chkrow(self.chk_deskew, 'हिन्दी: चालू करने पर: टेढ़ा स्कैन हुआ पेज अपने-आप सीधा हो जाएगा।\nEnglish: ON: straightens a tilted/skewed page automatically.'))
         self.chk_enhance = QtWidgets.QCheckBox("Auto quality improvement (clean faded documents)")
         self.chk_enhance.setChecked(self.opts["quality_enhance"]); form.addRow(chkrow(self.chk_enhance, 'हिन्दी: चालू करने पर: फीके/हल्के document साफ़ और गहरे दिखेंगे।\nEnglish: ON: brightens & sharpens faded documents.'))
+        self.chk_flatten = QtWidgets.QCheckBox("Auto white background — HD scan & print (Recommended)")
+        self.chk_flatten.setChecked(bool(self.opts.get("auto_flatten", True)))
+        form.addRow(chkrow(self.chk_flatten, 'हिन्दी: चालू रहने पर: photocopy जैसी gray/मैली background अपने-आप असली सफ़ेद हो जाती है और text गहरा — print और PDF एकदम साफ़। Photo/X-ray अपने-आप छोड़ दिए जाते हैं।\nEnglish: ON: photocopy-gray backgrounds become truly white and text darker — crisp prints & PDFs. Photos/X-rays are automatically left untouched.'))
         self.chk_clean_edges = QtWidgets.QCheckBox("Clean scan edges (black border / punch-holes)")
         self.chk_clean_edges.setChecked(bool(self.opts.get("clean_edges"))); form.addRow(chkrow(self.chk_clean_edges, 'हिन्दी: चालू करने पर: स्कैन के किनारों की काली border और किनारे के छेद (punch-hole) के निशान अपने-आप सफ़ेद हो जाएँगे। बीच का टेक्स्ट/स्टांप नहीं छुआ जाता।\nEnglish: ON: whitens the black scan border and edge punch-hole marks. The middle content is never touched.'))
         self.chk_split2 = QtWidgets.QCheckBox("Split two pages on one glass into two")
@@ -2697,6 +2707,7 @@ class OptionsDialog(QtWidgets.QDialog):
         o["auto_crop"] = self.chk_crop.isChecked()
         o["deskew"] = self.chk_deskew.isChecked()
         o["quality_enhance"] = self.chk_enhance.isChecked()
+        o["auto_flatten"] = self.chk_flatten.isChecked()
         o["clean_edges"] = self.chk_clean_edges.isChecked()
         o["split_two_page"] = self.chk_split2.isChecked()
         o["twain_file_xfer"] = self.chk_filexfer.isChecked()
@@ -19578,7 +19589,24 @@ if the toggle is ticked).</p>
     def _draw_fit(self, painter, path, target):
         """Draw the image at `path` scaled to fit inside `target` rect, centered,
         keeping aspect ratio."""
-        img = QtGui.QImage(path)
+        img = None
+        try:
+            # HD print: photocopy jaisi gray background pehle SAFED karo aur
+            # text gehra — purani (150/200dpi) library files par bhi. Photo/
+            # X-ray par flatten_background apne aap no-op deta hai (same
+            # object) to bina PNG-roundtrip ke seedha QImage(path) use hota hai.
+            if self._opts.get("auto_flatten", True):
+                with Image.open(path) as _pim:
+                    _pim.load()
+                    _fl = flatten_background(_pim)
+                    if _fl is not _pim:
+                        _b = io.BytesIO()
+                        _fl.save(_b, "PNG", compress_level=1)
+                        img = QtGui.QImage.fromData(_b.getvalue())
+        except Exception:
+            img = None
+        if img is None or img.isNull():
+            img = QtGui.QImage(path)
         if img.isNull():
             return
         size = img.size()
