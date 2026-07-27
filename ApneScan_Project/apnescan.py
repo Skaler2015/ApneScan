@@ -227,7 +227,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "162"
+VERSION = "163"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11732,8 +11732,14 @@ if the toggle is ticked).</p>
         self._an_world = {}
         self._an_update_box()
         self.btn_scan = QtWidgets.QPushButton("▶  " + tr("scan", self._lang)); self.btn_scan.setObjectName("primary")
-        self.btn_scan.setMinimumHeight(38); self.btn_scan.clicked.connect(self.do_scan); pl.addWidget(self.btn_scan)
-        self.btn_scan.setToolTip("Start scan (Enter / F-keys)")
+        self.btn_scan.setMinimumHeight(38)
+        # Panel ka Scan button = PANEL ki (manual) setting se scan;
+        # Enter = profile ki saved setting se (dono alag — user ki pasand).
+        self.btn_scan.clicked.connect(lambda: self.do_scan(use_panel=True))
+        pl.addWidget(self.btn_scan)
+        self.btn_scan.setToolTip(self.L(
+            "Is panel me dikh rahi setting se scan (Enter = profile ki setting se)",
+            "Scan with the settings shown in this panel (Enter = profile settings)"))
         self.claim_edit.setToolTip("Claim/Patient number (appears in the file name)")
         self.cmb_dpi.setToolTip("Resolution: lower dpi = faster scan")
         self.cmb_depth.setToolTip("Black & White is fastest, Colour is slower")
@@ -12644,7 +12650,7 @@ if the toggle is ticked).</p>
             "Profile setting: %s · %s" % (dpi, depth),
             "Profile settings: %s · %s" % (dpi, depth)), 4000)
 
-    def do_scan(self, _checked=False, dpi_override=None):
+    def do_scan(self, _checked=False, dpi_override=None, use_panel=False):
         # Startup guard: agar window abhi-abhi khuli hai to scan mat karo. Isse
         # app ko Enter dabakar launch karne par startup par galat scan-box nahi aata.
         try:
@@ -12683,9 +12689,34 @@ if the toggle is ticked).</p>
         self._scan_count = 0
         self._progress = ScanProgressDialog(self, prof.get("source_name") or self.L("Scan ho raha hai…", "Scanning…"), self._lang)
         self._progress.cancelled.connect(self._cancel_scan)
-        # Scan settings sirf PROFILE se (panel ke manual badlaav se nahi).
-        # dpi_override sirf DPI-shortcut wale ek scan ke liye.
-        dpi, color, duplex, page_size, source = self._profile_scan_params(prof or {}, dpi_override)
+        # PANEL ke bade "Scan" button se: jo setting panel me ABHI dikh rahi
+        # hai USI par scan (manual). Enter / toolbar / dashboard pehle ki
+        # tarah PROFILE ki saved setting se. dpi_override sirf DPI-shortcut
+        # wale ek scan ke liye.
+        if use_panel and hasattr(self, "cmb_dpi"):
+            dpi, color, duplex = self._panel_scan_params(prof or {})
+            _pstxt = ""
+            try:
+                _pstxt = self.cmb_pagesize.currentText().lower()
+            except Exception:
+                pass
+            page_size = ("a4" if _pstxt.startswith("a4")
+                         else "letter" if _pstxt.startswith("letter")
+                         else "legal" if _pstxt.startswith("legal")
+                         else "a5" if _pstxt.startswith("a5") else "auto")
+            try:
+                source = ("glass" if "glass" in self.cmb_source.currentText().lower()
+                          or "flatbed" in self.cmb_source.currentText().lower()
+                          else "feeder")
+            except Exception:
+                source = "feeder"
+            if dpi_override:
+                try:
+                    dpi = int(dpi_override)
+                except Exception:
+                    pass
+        else:
+            dpi, color, duplex, page_size, source = self._profile_scan_params(prof or {}, dpi_override)
         opts = self._opts
         if self.chk_fast.isChecked():
             dpi, color = 200, "bw"     # keep the profile's duplex (both-side) choice
@@ -19093,7 +19124,12 @@ if the toggle is ticked).</p>
         # wali lagti hai (quality hamesha size se pehle).
         if not compress and q == 95:
             try:
-                _needs = [smart_jpeg_quality(im)[0]
+                # 150dpi jaise kam-res pages par ladder q68 tak jaati hai —
+                # edge-guard phir bhi text/QR ke kinare TOOTNE se pehle rok
+                # deta hai (150dpi = chhoti file user ki pasand hai).
+                _lad = ((95, 92, 88, 84, 80, 76, 72, 68) if res <= 160
+                        else (95, 92, 88, 84, 80, 76))
+                _needs = [smart_jpeg_quality(im, _lad)[0]
                           for im in imgs if im.mode != "1"]
                 if _needs:
                     q = max(_needs)
@@ -19112,6 +19148,7 @@ if the toggle is ticked).</p>
         # karta hai. (B&W pages waise bhi bahut chhote hote hain.)
         if not any(im.mode == "1" for im in imgs):
             kw["quality"] = max(1, min(95, q))
+            kw["optimize"] = True     # muft ~3-8% chhoti (huffman optimize)
         if password:
             tmp = out + ".tmp.pdf"
             imgs[0].save(tmp, "PDF", **kw)
