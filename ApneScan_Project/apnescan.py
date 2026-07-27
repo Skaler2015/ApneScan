@@ -48,6 +48,7 @@ from apnescan_lib.imaging import (
 # Smart Orientation engine. auto_orient is the only entry point the pipeline
 # calls; the app's cached tesseract_available() is injected into the module a
 # few lines below (once it is defined) so orientation uses the identical check.
+from apnescan_lib import relay_client as _relay
 from apnescan_lib import orientation as _orientation
 from apnescan_lib.orientation import auto_orient
 # Intelligent Naming Engine (offline, pure text). Only the functions the app
@@ -227,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "163"
+VERSION = "164"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -478,6 +479,8 @@ DEFAULT_OPTIONS = {
     "daily_jpeg_backup": True,
     "daily_jpeg_folder": os.path.join(os.path.expanduser("~"), "Documents", "ApneScan_DailyScans"),
     "scanner_method": "twain",   # "twain" ya "wia"
+    # Phone se scan (internet): relay server — khaali karne par sirf local-WiFi mode
+    "phone_relay_url": "https://status.apnesoft.com/phone_relay.php",
     "twain_file_xfer": False,    # experimental: continuous ADF feed (TWAIN file transfer)
     "auto_orient": True,         # Always Auto Rotate — har page apne aap seedha (default ON)
     "auto_orient_mode": "accurate",  # "accurate" (OSD + text + layout) ya "fast" (OSD only)
@@ -5568,6 +5571,55 @@ function send(file){var d=document.createElement('div');d.textContent='⏳ Bhej 
 </script></body></html>"""
 
 
+class RelayPoller(QtCore.QObject):
+    """Internet phone-session ka PC-side engine: har kuchh second me server
+    se poochta hai; nayi file aate hi utaar leta hai (server se turant delete
+    ho jaati hai) aur signal deta hai. Saara network-kaam alag thread me —
+    UI kabhi nahi atakti. (Suraksha: KEY sirf is PC ke paas — QR me nahi.)"""
+    file_got = QtCore.pyqtSignal(str, str)    # (local_path, original_name)
+    info = QtCore.pyqtSignal(object)          # status dict / {"ok":0,"net":1}
+
+    def __init__(self, base, token, key, tmpdir, parent=None):
+        super().__init__(parent)
+        self.base, self.token, self.key = base, token, key
+        self.tmpdir = tmpdir
+        self._busy = False
+        self.stopped = False
+
+    def poll(self):
+        if self._busy or self.stopped:
+            return
+        self._busy = True
+        threading.Thread(target=self._work, daemon=True).start()
+
+    def _work(self):
+        try:
+            st = _relay.status(self.base, self.token, self.key)
+            if not self.stopped:
+                self.info.emit(st)
+            for f in (st.get("files") or []):
+                if self.stopped:
+                    break
+                try:
+                    p = _relay.take(self.base, self.token, self.key,
+                                    f.get("id", ""), f.get("name", ""), self.tmpdir)
+                    self.file_got.emit(p, f.get("name", ""))
+                except Exception:
+                    pass
+        except Exception:
+            if not self.stopped:
+                self.info.emit({"ok": 0, "net": 1})
+        finally:
+            self._busy = False
+
+    def shutdown(self):
+        """Session band — server par bachi files + session delete (bg me)."""
+        self.stopped = True
+        threading.Thread(
+            target=lambda: _relay.stop(self.base, self.token, self.key),
+            daemon=True).start()
+
+
 class PhoneServer(QtCore.QObject):
     """Local web-server (background thread) — phone se photo PC par laata hai."""
     photo = QtCore.pyqtSignal(str)          # aayi hui photo ka temp path
@@ -7617,9 +7669,147 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
     # ===================== PHONE COMPANION (feature 9) =====================
     def phone_scan(self):
-        """Phone se scan: QR dikhao, phone camera se photo seedhe PC par."""
+        """Phone se scan — INTERNET se (kahin se bhi; same WiFi zaroori NahI).
+        Relay session bane to internet-mode dialog; na bane (net band /
+        server down / URL khaali) to purana local-WiFi mode."""
         L = self.L
         self._an_event("phonescan")
+        base = (self._opts.get("phone_relay_url") or "").strip()
+        sess = None
+        if base:
+            try:
+                QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+                try:
+                    sess = _relay.create_session(base, ttl=1800)
+                finally:
+                    QtWidgets.QApplication.restoreOverrideCursor()
+            except Exception:
+                sess = None
+        if sess is None:
+            self._phone_scan_local()
+            return
+
+        url = sess["url"]
+        poller = RelayPoller(base, sess["token"], sess["key"], self._tmpdir, self)
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(L("📱 Phone se scan — kahin se bhi", "📱 Scan from phone — anywhere"))
+        dlg.setMinimumWidth(400)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel(L(
+            "<b>Internet se — phone kahin bhi ho, chalega.</b><br>"
+            "Phone ke camera se ye QR scan karo:",
+            "<b>Works over the internet — the phone can be anywhere.</b><br>"
+            "Scan this QR with the phone camera:")))
+        try:
+            qimg = self._app_qr_image(url=url, box=8)
+        except Exception:
+            qimg = None
+        if qimg is not None:
+            try:
+                data = qimg.tobytes("raw", "RGB")
+                qim = QtGui.QImage(data, qimg.width, qimg.height, 3 * qimg.width, QtGui.QImage.Format_RGB888)
+                lab = QtWidgets.QLabel(); lab.setAlignment(QtCore.Qt.AlignCenter)
+                lab.setPixmap(QtGui.QPixmap.fromImage(qim.copy()).scaled(
+                    250, 250, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+                v.addWidget(lab)
+            except Exception:
+                pass
+        lrow = QtWidgets.QHBoxLayout()
+        link = QtWidgets.QLabel("<b>%s</b>" % url)
+        link.setWordWrap(True); link.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        link.setStyleSheet("color:#475569;font-size:11px")
+        bcopy = QtWidgets.QPushButton(L("📋 Copy link", "📋 Copy link"))
+        bcopy.setFixedWidth(110)
+
+        def _copy():
+            try:
+                QtWidgets.QApplication.clipboard().setText(url)
+                bcopy.setText(L("✅ Copy ho gayi", "✅ Copied"))
+                QtCore.QTimer.singleShot(1800, lambda: bcopy.setText(L("📋 Copy link", "📋 Copy link")))
+            except Exception:
+                pass
+        bcopy.clicked.connect(_copy)
+        lrow.addWidget(link, 1); lrow.addWidget(bcopy)
+        lw = QtWidgets.QWidget(); lw.setLayout(lrow); v.addWidget(lw)
+        status_lbl = QtWidgets.QLabel(L("🟡 Intezaar… (link WhatsApp se bhi bhej sakte ho)",
+                                        "🟡 Waiting… (you can also send the link on WhatsApp)"))
+        status_lbl.setWordWrap(True)
+        status_lbl.setStyleSheet("color:#64748b;font-size:11.5px"); v.addWidget(status_lbl)
+        count_lbl = QtWidgets.QLabel(L("Abhi tak 0 file aayi", "0 files received"))
+        count_lbl.setStyleSheet("font-weight:700;color:#0f766e;margin-top:4px"); v.addWidget(count_lbl)
+        exp_lbl = QtWidgets.QLabel("")
+        exp_lbl.setStyleSheet("color:#94a3b8;font-size:11px"); v.addWidget(exp_lbl)
+
+        self._phone_n = 0
+        self._relay_left = int(sess.get("ttl") or 1800)
+
+        def on_file(path, name):
+            added = 0
+            try:
+                if str(name or path).lower().endswith(".pdf"):
+                    for pg in (pdf_to_images(path, self._tmpdir) or []):
+                        self._add_item_for_path(pg); added += 1
+                else:
+                    self._add_item_for_path(path); added = 1
+            except Exception:
+                status_lbl.setText(L("⚠ '%s' import nahi hui (format support nahi)",
+                                     "⚠ Could not import '%s' (unsupported format)") % (name or "file"))
+                return
+            if added:
+                self._phone_n += added
+                count_lbl.setText(L("✅ %d file/page aa gayi — aur bhej sakte ho",
+                                    "✅ %d file(s)/page(s) received — send more anytime") % self._phone_n)
+                try:
+                    QtWidgets.QApplication.beep()
+                except Exception:
+                    pass
+
+        def on_info(st):
+            try:
+                if st.get("ok"):
+                    self._relay_left = int(st.get("left") or self._relay_left)
+                    if st.get("files"):
+                        status_lbl.setText(L("📥 File aa rahi hai…", "📥 Receiving…"))
+                    elif self._phone_n:
+                        status_lbl.setText(L("🟢 Jude hue — aur files ka intezaar",
+                                             "🟢 Connected — waiting for more"))
+                    else:
+                        status_lbl.setText(L("🟡 Intezaar… QR scan hone ka",
+                                             "🟡 Waiting for the QR to be scanned…"))
+                elif st.get("net"):
+                    status_lbl.setText(L("🌐 Internet me rukavat — dobara koshish ho rahi…",
+                                         "🌐 Network hiccup — retrying…"))
+                else:
+                    status_lbl.setText(L("⛔ Link expire ho gayi — dobara kholo",
+                                         "⛔ Link expired — open again"))
+                    poll_t.stop(); tick_t.stop()
+            except Exception:
+                pass
+        poller.file_got.connect(on_file)     # thread -> queued (main thread)
+        poller.info.connect(on_info)
+
+        def _tick():
+            self._relay_left = max(0, self._relay_left - 1)
+            mm, ss = divmod(self._relay_left, 60)
+            exp_lbl.setText(L("⏱ Link %d:%02d me apne aap band ho jayegi · files server se turant delete hoti hain",
+                              "⏱ Link auto-expires in %d:%02d · files are deleted from the server immediately") % (mm, ss))
+            if self._relay_left <= 0:
+                tick_t.stop()
+        poll_t = QtCore.QTimer(dlg); poll_t.timeout.connect(poller.poll); poll_t.start(3000)
+        tick_t = QtCore.QTimer(dlg); tick_t.timeout.connect(_tick); tick_t.start(1000)
+        _tick(); poller.poll()
+
+        b = QtWidgets.QPushButton(L("Ho gaya (session band karo)", "Done (close session)"))
+        b.clicked.connect(dlg.accept); v.addWidget(b)
+        dlg.exec_()
+        poll_t.stop(); tick_t.stop()
+        poller.shutdown()
+        if self._phone_n:
+            self.status.showMessage(L("📱 %d file phone se aayi.", "📱 %d file(s) from phone.") % self._phone_n, 6000)
+
+    def _phone_scan_local(self):
+        """Purana LOCAL WiFi mode (internet/relay na ho to) — same-WiFi QR."""
+        L = self.L
         srv = PhoneServer(self._tmpdir, self)
         try:
             ip, port = srv.start()
