@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "183"
+VERSION = "184"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13030,8 +13030,7 @@ if the toggle is ticked).</p>
         self._nav_docs_badge = _badge
         QtCore.QTimer.singleShot(2500, self._nav_count_docs)
         _nbtn("clock", "Recent Files", self._show_recent_files)
-        _nbtn("star", "Favourites",
-              lambda: (self.files_panel.setVisible(True), self.fav_combo.showPopup()))
+        _nbtn("star", "Favourites", self._nav_show_favs)
         _nbtn("camera", self.L("History", "Scan History"), self.show_history)
         _nbtn("chart", "Analytics", self.show_analytics)
         _ncap("LIBRARY")
@@ -16528,6 +16527,41 @@ if the toggle is ticked).</p>
         self.files_panel.setVisible(vis)
         self._opts["show_files_panel"] = vis
         self._save_opts()
+        if vis:
+            # (v184) khulte hi zyada CHAUDI na ho — compact 230px se khule;
+            # bachi jagah pages-column ko (user chahe to kheench kar badi kare)
+            try:
+                spl = self._body_split
+                sizes = spl.sizes()
+                idx = spl.indexOf(self.files_panel)
+                pidx = spl.indexOf(self._pages_col)
+                if 0 <= idx < len(sizes) and 0 <= pidx < len(sizes) and pidx != idx:
+                    extra = sizes[idx] - 230
+                    sizes[pidx] += extra
+                    sizes[idx] = 230
+                    spl.setSizes(sizes)
+            except Exception:
+                pass
+
+    def _nav_show_favs(self):
+        """(v184) Sidebar ke 'Favourites' par click — favourite folders ki
+        LIST kholo; chunte hi My Files me seedha us folder par."""
+        favs = [p for p in (self._opts.get("fav_folders") or []) if os.path.isdir(p)]
+        if not favs:
+            self.status.showMessage(self.L(
+                "⭐ Abhi koi favourite folder nahi — My Files me folder chun kar ⭐ dabao",
+                "⭐ No favourite folders yet — pick a folder in My Files and press ⭐"), 7000)
+            return
+        m = QtWidgets.QMenu(self)
+
+        def _go(pp):
+            if not self.files_panel.isVisible():
+                self.toggle_files_panel()
+            self._jump_to_folder(pp)
+        for p in favs:
+            m.addAction("⭐ " + (os.path.basename(p) or p),
+                        lambda _c=False, pp=p: _go(pp))
+        m.exec_(QtGui.QCursor.pos())
 
     def keyPressEvent(self, e):
         # Esc = Meri Files panel band (agar khula ho) — user ki request.
