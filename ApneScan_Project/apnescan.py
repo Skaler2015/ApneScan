@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "181"
+VERSION = "182"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -12043,8 +12043,14 @@ if the toggle is ticked).</p>
         self.left_panel = scanbar     # purane F9 / show_left_panel toggle isi par
         if not self._opts.get("show_left_panel", True):
             scanbar.hide()
-        sb = QtWidgets.QHBoxLayout(scanbar)
-        sb.setContentsMargins(16, 7, 16, 9); sb.setSpacing(13)
+        # ✨ do line: upar mukhya patti, ⚙ Advanced kholne par uski
+        # settings ISI KE NEECHE dusri line me (aage/side me nahi)
+        _sbv = QtWidgets.QVBoxLayout(scanbar)
+        _sbv.setContentsMargins(16, 7, 16, 9); _sbv.setSpacing(7)
+        _sbrow1 = QtWidgets.QWidget()
+        sb = QtWidgets.QHBoxLayout(_sbrow1)
+        sb.setContentsMargins(0, 0, 0, 0); sb.setSpacing(13)
+        _sbv.addWidget(_sbrow1)
 
         def _col(caption, w, width=None):
             # chhota caption UPAR + control NEECHE — ribbon jaisi ek line
@@ -12208,7 +12214,9 @@ if the toggle is ticked).</p>
         _av.addWidget(_col(self.L("Baad me", "After"), self.cmb_after_scan, 100))
         # ⚙ toggle + Advanced box (chips ke baad, ek saath)
         sb.addWidget(self.btn_adv)
-        sb.addWidget(self._adv_box)
+        # Advanced settings ab NEECHE ki dusri line me khulti hain
+        _av.addStretch(1)
+        _sbv.addWidget(self._adv_box)
         self._adv_box.setVisible(self.btn_adv.isChecked())
         self._refresh_adv_toggle_text()
 
