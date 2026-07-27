@@ -672,6 +672,12 @@ if (isset($_GET['admin'])) {
         if ($act==='config') { $cfg=json_decode(isset($_POST['json'])?$_POST['json']:'',true); if(is_array($cfg)) $d['rconfig']=$cfg; }
         if ($act==='purge')  { $days=max(30,intval($_POST['days'])); $cut=date('Y-m-d',time()-$days*86400); foreach($d['days'] as $k=>$v){ if($k<$cut) unset($d['days'][$k]); } }
         if ($act==='clearcrashes') $d['crashes']=array();
+        // (v2) crash resolve/reopen — group-signature (md5) par fix-status
+        if ($act==='fixcrash')   { if(!isset($d['crashFixed'])||!is_array($d['crashFixed']))$d['crashFixed']=array();
+            $h=substr(preg_replace('/[^0-9a-f]/','',isset($_POST['sig'])?$_POST['sig']:''),0,32);
+            if($h!=='')$d['crashFixed'][$h]=time(); $d['crashFixed']=array_slice($d['crashFixed'],-100,null,true); }
+        if ($act==='unfixcrash') { $h=substr(preg_replace('/[^0-9a-f]/','',isset($_POST['sig'])?$_POST['sig']:''),0,32);
+            if(isset($d['crashFixed'][$h]))unset($d['crashFixed'][$h]); }
         if ($act==='clearfeedback') $d['feedback']=array();
         // targeted message ek user ko (1) — app broadcast ki tarah dikhata hai
         if ($act==='umsg' && isset($d['clients'][$id])) $d['clients'][$id]['msg']=array('t'=>substr(trim($_POST['msg']),0,200),'id'=>time());
@@ -723,6 +729,20 @@ if (isset($_GET['admin'])) {
         if ($e==='users'){ header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename="apnescan-users.csv"'); echo "name,scans,first_seen,last_seen,version,country,method,model,tags\n";
             foreach ($d['clients'] as $c){ echo '"'.str_replace('"','""',trim(isset($c['name'])?$c['name']:'')).'",'.intval(isset($c['scans'])?$c['scans']:0).','.date('Y-m-d H:i',intval(isset($c['first'])?$c['first']:0)).','.date('Y-m-d H:i',intval(isset($c['last'])?$c['last']:0)).','.trim(isset($c['version'])?$c['version']:'').','.trim(isset($c['country'])?$c['country']:'').','.trim(isset($c['method'])?$c['method']:'').',"'.str_replace('"','""',trim(isset($c['model'])?$c['model']:'')).'","'.str_replace('"','""',trim(isset($c['tags'])?$c['tags']:'')).'"'."\n"; }
             exit; }
+        // (v2) aur reports: monthly / country-wise / crashes / scans / feedback
+        if ($e==='months'){ header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename="apnescan-monthly.csv"');
+            $mm=array(); foreach($d['days'] as $dt=>$c){ $k=substr($dt,0,7); if(!isset($mm[$k]))$mm[$k]=0; $mm[$k]+=intval($c); } ksort($mm);
+            echo "month,scans\n"; foreach($mm as $k=>$c) echo $k.",".$c."\n"; exit; }
+        if ($e==='countries'){ header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename="apnescan-countries.csv"');
+            $cc=array(); foreach($d['clients'] as $c){ $k=trim(isset($c['country'])?$c['country']:''); if($k==='')$k='?';
+                if(!isset($cc[$k]))$cc[$k]=array(0,0); $cc[$k][0]++; $cc[$k][1]+=intval(isset($c['scans'])?$c['scans']:0); } arsort($cc);
+            echo "country,users,scans\n"; foreach($cc as $k=>$v) echo '"'.str_replace('"','""',$k).'",'.$v[0].','.$v[1]."\n"; exit; }
+        if ($e==='crashes'){ header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename="apnescan-crashes.csv"');
+            echo "time,version,error\n"; foreach((isset($d['crashes'])?$d['crashes']:array()) as $c){ echo date('Y-m-d H:i',intval(isset($c['t'])?$c['t']:0)).','.trim(isset($c['v'])?$c['v']:'').',"'.str_replace('"','""',substr(isset($c['err'])?$c['err']:'',0,300)).'"'."\n"; } exit; }
+        if ($e==='scans'){ header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename="apnescan-scans.csv"');
+            echo "time,user,pages,scanner,country\n"; foreach((isset($d['recentScans'])?$d['recentScans']:array()) as $r){ echo date('Y-m-d H:i',intval(isset($r['t'])?$r['t']:0)).',"'.str_replace('"','""',trim(isset($r['name'])?$r['name']:'')).'",'.intval(isset($r['n'])?$r['n']:0).',"'.str_replace('"','""',trim(isset($r['sm'])?$r['sm']:'')).'",'.trim(isset($r['cc'])?$r['cc']:'')."\n"; } exit; }
+        if ($e==='feedback'){ header('Content-Type: text/csv; charset=utf-8'); header('Content-Disposition: attachment; filename="apnescan-feedback.csv"');
+            echo "time,name,rating,status,message\n"; foreach((isset($d['feedback'])?$d['feedback']:array()) as $f){ echo date('Y-m-d H:i',intval(isset($f['t'])?$f['t']:0)).',"'.str_replace('"','""',trim(isset($f['name'])?$f['name']:'')).'",'.intval(isset($f['stars'])?$f['stars']:0).','.(isset($f['status'])?$f['status']:'open').',"'.str_replace('"','""',substr(isset($f['msg'])?$f['msg']:'',0,300)).'"'."\n"; } exit; }
     }
 
     // self-update ka result message (redirect ke baad ek baar dikhao)
@@ -1082,11 +1102,12 @@ if (isset($_GET['admin'])) {
 
     // ---- (27) crash grouping: same error ko group karke count ----
     $cg=array();
+    $cfix=isset($d['crashFixed'])&&is_array($d['crashFixed'])?$d['crashFixed']:array();
     foreach($d['crashes'] as $cr){ $e=isset($cr['err'])?$cr['err']:''; $sig=preg_replace('/0x[0-9a-fA-F]+|\d+/','#',$e); $sig=trim(substr($sig,0,80)); if($sig==='')$sig='(unknown)';
-        if(!isset($cg[$sig]))$cg[$sig]=array('sig'=>$sig,'sample'=>substr($e,0,80),'count'=>0,'last'=>0,'vers'=>array());
+        if(!isset($cg[$sig]))$cg[$sig]=array('sig'=>$sig,'h'=>md5($sig),'sample'=>substr($e,0,80),'count'=>0,'last'=>0,'vers'=>array());
         $cg[$sig]['count']++; $cg[$sig]['last']=max($cg[$sig]['last'],intval(isset($cr['t'])?$cr['t']:0));
         $vv=trim(isset($cr['v'])?$cr['v']:''); if($vv!=='')$cg[$sig]['vers'][$vv]=1; }
-    $cgOut=array_values($cg); foreach($cgOut as &$g){ $g['vers']=implode(',',array_keys($g['vers'])); } unset($g);
+    $cgOut=array_values($cg); foreach($cgOut as &$g){ $g['vers']=implode(',',array_keys($g['vers'])); $g['fixed']=isset($cfix[$g['h']])?1:0; } unset($g);
     usort($cgOut,function($a,$b){return $b['count']-$a['count'];});
     $S['crashGroups']=array_slice($cgOut,0,15);
 
@@ -1177,6 +1198,28 @@ if (isset($_GET['admin'])) {
     $S['recentScans300']=array_reverse(array_slice(isset($d['recentScans'])?$d['recentScans']:array(),-300));
     if (!empty($GLOBALS['HAS_STORAGE'])) { $S['health']=storageHealth($DATA_FILE); }
     $S['adminLoginsFull']=array_reverse(array_slice(isset($d['adminLogins'])?$d['adminLogins']:array(),-20));
+    // ---- (v2) REAL server metrics (sirf admin-blob me; kabhi fake nahi —
+    // jo function host par uplabdh nahi, wo field aati hi nahi) ----
+    $sys=array('php'=>PHP_VERSION);
+    if (function_exists('sys_getloadavg')) { $la=@sys_getloadavg(); if(is_array($la)&&isset($la[0])) $sys['load']=round($la[0],2); }
+    $df=@disk_free_space(__DIR__); $dt=@disk_total_space(__DIR__);
+    if ($df!==false && $dt) { $sys['diskFreeGB']=round($df/1073741824,2); $sys['diskTotalGB']=round($dt/1073741824,2); $sys['diskFreePct']=round($df/$dt*100,1); }
+    $sys['memMB']=round(memory_get_peak_usage(true)/1048576,1);
+    $sys['dataKB']=round((@filesize($DATA_FILE)?:0)/1024,1);
+    $bk=array();
+    foreach(array('.bak','.bak1','.bak2','.bak3','.bak4') as $sfx){ $f=$DATA_FILE.$sfx; if(@is_file($f)) $bk[]=array('n'=>basename($f),'kb'=>round((@filesize($f)?:0)/1024,1),'t'=>@filemtime($f)?:0); }
+    $bdir=__DIR__.'/backups';
+    if (@is_dir($bdir)) { $bl=@scandir($bdir); if(is_array($bl)){ foreach($bl as $f){ if(strpos($f,'stats-')===0) $bk[]=array('n'=>'backups/'.$f,'kb'=>round((@filesize($bdir.'/'.$f)?:0)/1024,1),'t'=>@filemtime($bdir.'/'.$f)?:0); } } }
+    usort($bk,function($a,$b){return $b['t']-$a['t'];});
+    $sys['backups']=array_slice($bk,0,10);
+    $lg=__DIR__.'/logs/error.log'; $sys['logTail']=array();
+    if (@is_file($lg)) { $lsz=@filesize($lg)?:0; $sys['logKB']=round($lsz/1024,1);
+        $fh=@fopen($lg,'r'); if($fh){ if($lsz>16384) @fseek($fh,-16384,SEEK_END); $txt=@stream_get_contents($fh); @fclose($fh);
+            $lines=preg_split('/\r?\n/',trim((string)$txt)); $sys['logTail']=array_slice($lines,-40); } }
+    $S['sys']=$sys;
+    // security: haal ki galat-password koshishen (admin-only)
+    $flr=array(); foreach(array_reverse(array_slice(isset($d['failLog'])?$d['failLog']:array(),-15)) as $f){ if(is_array($f))$flr[]=array('t'=>intval(isset($f['t'])?$f['t']:0),'ip'=>isset($f['ip'])?$f['ip']:'?'); }
+    $S['failLogRecent']=$flr;
     $J=json_encode($S);
     ?><!doctype html>
 <html lang="hi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1880,7 +1923,12 @@ if (isset($_GET['admin'])) {
       <div class="card"><h3><span class="em">📊</span> CSV / JSON export</h3>
         <div style="color:var(--mut);margin-bottom:8px">Excel me kholne layak CSV, ya poora JSON backup.</div>
         <a class="rbtn d" href="?admin=1&export=days">Daily CSV</a>
+        <a class="rbtn d" href="?admin=1&export=months">Monthly CSV</a>
         <a class="rbtn d" href="?admin=1&export=users">Users CSV</a>
+        <a class="rbtn d" href="?admin=1&export=countries">Country CSV</a>
+        <a class="rbtn d" href="?admin=1&export=scans">Scans CSV</a>
+        <a class="rbtn d" href="?admin=1&export=crashes">Crash CSV</a>
+        <a class="rbtn d" href="?admin=1&export=feedback">Feedback CSV</a>
         <a class="rbtn d" href="?admin=1&export=json">Backup (JSON)</a>
         <a class="rbtn d" href="?admin=1&dl=data">stats.json (dated)</a></div>
       <div class="card"><h3><span class="em">🖨</span> Print dashboard</h3>
@@ -1895,12 +1943,17 @@ if (isset($_GET['admin'])) {
     <div class="sec"><span class="em">❤️</span> System Health</div>
     <div class="kpis" id="healthKpis" style="margin-bottom:13px"></div>
     <div class="card"><h3><span class="em">🗄️</span> JSON storage layer</h3><div id="healthStore" class="skel"></div></div>
+    <div class="grid" style="margin-top:13px">
+      <div class="card"><h3><span class="em">🛟</span> Backups (server par asli files)</h3><div id="healthBk" class="skel"></div></div>
+      <div class="card"><h3><span class="em">🧾</span> error.log (aakhri lines)</h3><div id="healthLog" class="skel"></div></div>
+    </div>
   </div>
   <div class="page" data-p="logs">
     <div class="sec"><span class="em">🧾</span> Activity Logs</div>
     <div class="grid">
       <div class="card"><h3><span class="em">🔐</span> Admin logins</h3><div id="logLogins" class="skel"></div></div>
       <div class="card"><h3><span class="em">🛠</span> Admin actions (audit)</h3><div id="logAudit" class="skel"></div></div>
+      <div class="card"><h3><span class="em">🚨</span> Failed login attempts (security)</h3><div id="logFails" class="skel"></div></div>
     </div>
   </div>
 
@@ -2046,7 +2099,16 @@ document.getElementById('fcorr').innerHTML=(D.featCorr&&D.featCorr.length)?'<tab
 })();
 
 // (27) crash groups
-document.getElementById('cg').innerHTML=(D.crashGroups&&D.crashGroups.length)?'<table>'+D.crashGroups.map(function(g){return '<tr><td>💥 '+esc(g.sample||g.sig)+(g.vers?' <span style="color:var(--mut);font-size:10px">v'+esc(g.vers)+'</span>':'')+'</td><td style="text-align:right;white-space:nowrap"><b>×'+g.count+'</b> · '+ago(g.last)+'</td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— koi crash nahi 🎉 —</div>';
+window.crashFix=function(h,un){ var f=document.createElement('form'); f.method='post'; f.style.display='none';
+  f.innerHTML='<input name="act" value="'+(un?'unfixcrash':'fixcrash')+'"><input name="sig" value="'+h+'">';
+  document.body.appendChild(f); f.submit(); };
+document.getElementById('cg').innerHTML=(D.crashGroups&&D.crashGroups.length)?'<table>'+D.crashGroups.map(function(g){
+  return '<tr'+(g.fixed?' style="opacity:.55"':'')+'><td>'+(g.fixed?'✅':'💥')+' '+esc(g.sample||g.sig)
+    +(g.vers?' <span style="color:var(--mut);font-size:10px">v'+esc(g.vers)+'</span>':'')
+    +(g.fixed?' <span style="color:var(--ok);font-size:10px;font-weight:700">RESOLVED</span>':'')
+    +'</td><td style="text-align:right;white-space:nowrap"><b>×'+g.count+'</b> · '+ago(g.last)
+    +(g.h?' <button class="btn gray" style="padding:2px 7px;font-size:10px" onclick="crashFix(\''+g.h+'\','+(g.fixed?1:0)+')">'+(g.fixed?'Reopen':'✔ Resolve')+'</button>':'')
+    +'</td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— koi crash nahi 🎉 —</div>';
 
 // (30) referral leaderboard
 document.getElementById('rf').innerHTML=(D.refLeaders&&D.refLeaders.length)?'<table>'+D.refLeaders.map(function(u,i){var m=(i<3?['🥇','🥈','🥉'][i]:(i+1)+'.');return '<tr><td>'+m+' '+esc(u.name)+(u.cc?' '+flag(u.cc):'')+'</td><td style="text-align:right"><b>'+u.n+'</b> share</td></tr>';}).join('')+'</table>':'<div style="color:var(--mut);font-size:12px">— abhi kisi ne share nahi kiya —</div>';
@@ -2556,6 +2618,8 @@ function jumpTo(page,cardId){ sbToggle(false);
 (function(){ var items=[];
   (D.feedback||[]).slice(0,6).forEach(function(f){ items.push({t:f.t||0,ic:'💬',txt:(f.name||'user')+': '+String(f.msg||'').slice(0,60)}); });
   (D.crashes||[]).slice(0,6).forEach(function(c){ items.push({t:c.t||0,ic:'💥','txt':'Crash v'+(c.v||'?')+': '+String(c.err||'').slice(0,60)}); });
+  (D.failLogRecent||[]).slice(0,4).forEach(function(f){ items.push({t:f.t||0,ic:'🚨',txt:'Galat admin-password koshish ('+(f.ip||'?')+')'}); });
+  var SYB=D.sys||{}; if(SYB.diskFreePct!==undefined&&SYB.diskFreePct<10) items.push({t:Date.now()/1000,ic:'💽',txt:'Server disk sirf '+SYB.diskFreePct+'% khaali!'});
   items.sort(function(a,b){return (b.t||0)-(a.t||0);}); items=items.slice(0,10);
   var seen=0; try{ seen=parseInt(localStorage.getItem('an_nseen')||'0'); }catch(e){}
   var unread=items.filter(function(i){return (i.t||0)>seen;}).length;
@@ -2678,6 +2742,16 @@ function lvRender(){
     var inact=U.filter(function(u){return u.last&&(Date.now()/1000-u.last)>14*86400;}).length;
     if(inact) A.push(['warn','😴',inact+' user 14+ din se offline']);
     if((D.fileKB||0)>2048) A.push(['warn','💾','stats.json '+Math.round(D.fileKB/1024)+' MB ka ho gaya — purge/cleanup socho']);
+    // (v2) naye REAL rules: disk, crash-spike, failed logins, CPU load
+    var SY=D.sys||{};
+    if(SY.diskFreePct!==undefined&&SY.diskFreePct<10) A.push(['crit','💽','Server disk sirf '+SY.diskFreePct+'% khaali ('+SY.diskFreeGB+' GB) — jagah banao']);
+    if(SY.load!==undefined&&SY.load>2) A.push(['warn','🧮','Server CPU load high hai ('+SY.load+')']);
+    (function(){ var now=Date.now()/1000, c24=0, c7=0;
+      (D.crashes||[]).forEach(function(c){ var a=now-(c.t||0); if(a<86400)c24++; if(a<7*86400)c7++; });
+      var avg=(c7-c24)/6;
+      if(c24>=3&&c24>2*Math.max(0.5,avg)) A.push(['crit','📈','CRASH SPIKE: aaj '+c24+' crash (7-din avg ~'+avg.toFixed(1)+'/din) — nayi release jaancho']); })();
+    (function(){ var now=Date.now()/1000, f=(D.failLogRecent||[]).filter(function(x){return now-(x.t||0)<3600;}).length;
+      if(f>=3) A.push(['crit','🚨','Suraksha: pichhle ghante me '+f+' galat-password koshish — Activity Logs dekho']); })();
     if(H.lastRecovery) A.push(['info','♻️','Storage auto-recovery chali thi ('+new Date(H.lastRecovery*1000).toLocaleString()+') — sab theek hai']);
     var blocked=U.filter(function(u){return u.blocked;}).length;
     if(blocked) A.push(['info','🚫',blocked+' user blocked hain']);
@@ -2837,13 +2911,16 @@ function sgCSV(){ var rows=_sgData();
   sgRender(); })();
 // ---- SYSTEM HEALTH ----
 (function(){ var el=document.getElementById('healthKpis'); if(!el)return;
-  var H=D.health||{};
-  el.innerHTML=_kpi('g','🌐','OK','Server — PHP '+esc(D.srv||'?'))
+  var H=D.health||{}, SY=D.sys||{};
+  el.innerHTML=_kpi('g','🌐','OK','Server — PHP '+esc(SY.php||D.srv||'?'))
     +_kpi('','⚡',(D.respMs||0)+' ms','API response')
+    +(SY.load!==undefined?_kpi(SY.load>2?'r':(SY.load>1?'y':'g'),'🧮',SY.load,'CPU load (1 min)'):'')
+    +(SY.diskFreePct!==undefined?_kpi(SY.diskFreePct<10?'r':(SY.diskFreePct<25?'y':'g'),'💽',SY.diskFreePct+'%','Disk free ('+SY.diskFreeGB+'/'+SY.diskTotalGB+' GB)'):'')
     +_kpi('p','📄',(D.fileKB||0)+' KB','stats.json size')
     +_kpi('y','🗂',(H.backupKB||0)+' KB','Backups size')
-    +_kpi('','🧠',(H.memMB||0)+' MB','Memory (peak)')
-    +_kpi('g','🧾',fmt(H.records||0),'Total records');
+    +_kpi('','🧠',(SY.memMB||H.memMB||0)+' MB','Memory (peak)')
+    +(SY.logKB!==undefined?_kpi(SY.logKB>400?'y':'','🧾',SY.logKB+' KB','error.log size'):'')
+    +_kpi('g','🗃',fmt(H.records||0),'Total records');
   document.getElementById('healthStore').innerHTML = D.health?
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;font-size:11.5px">'
     +'<div>💾 Last save<br><b>'+(H.lastSave?new Date(H.lastSave*1000).toLocaleString():'—')+'</b></div>'
@@ -2853,6 +2930,16 @@ function sgCSV(){ var rows=_sgData();
     +'<div>🔒 Locking<br><b>flock (exclusive RMW)</b></div>'
     +'<div>🗄️ Backups<br><b>.bak ×5 + daily ×14</b></div></div>'
     : '<div style="color:var(--mut)">json_storage.php upload karke poori health dekho (System page → Storage module)</div>';
+  // (v2) asli backup files + error.log tail
+  var SY2=D.sys||{};
+  var bkEl=document.getElementById('healthBk');
+  if(bkEl) bkEl.innerHTML=(SY2.backups&&SY2.backups.length)?
+    _tbl(SY2.backups.map(function(b){return '<tr><td>🛟 '+esc(b.n)+'</td><td style="text-align:right">'+b.kb+' KB</td><td style="text-align:right;color:var(--mut)">'+(b.t?ago(b.t):'—')+'</td></tr>';}),['File','Size','When'])
+    :'<div style="color:var(--mut)">— koi backup file nahi mili —</div>';
+  var lgEl=document.getElementById('healthLog');
+  if(lgEl) lgEl.innerHTML=(SY2.logTail&&SY2.logTail.length)?
+    '<pre style="max-height:240px;overflow:auto;font-size:10.5px;line-height:1.5;white-space:pre-wrap;margin:0;color:var(--mut)">'+SY2.logTail.map(function(l){return esc(l);}).join('\n')+'</pre>'
+    :'<div style="color:var(--mut)">— log khaali hai (koi error nahi) 🎉 —</div>';
 })();
 // ---- ACTIVITY LOGS ----
 (function(){ var el=document.getElementById('logLogins'); if(!el)return;
@@ -2864,6 +2951,11 @@ function sgCSV(){ var rows=_sgData();
   document.getElementById('logAudit').innerHTML = A.length? _tbl(A.map(function(a){
     return '<tr><td><b>'+esc(a.act)+'</b>'+(a.det?' <span style="color:var(--mut)">'+esc(a.det)+'</span>':'')+'</td><td>'+esc(a.ip||'?')+'</td><td style="text-align:right;color:var(--mut)">'+ago(a.t)+'</td></tr>';}),['Action','IP','When'])
     : '<div style="color:var(--mut)">— abhi koi admin action nahi —</div>';
+  var F=D.failLogRecent||[];
+  var fe=document.getElementById('logFails');
+  if(fe) fe.innerHTML = F.length? _tbl(F.map(function(x){
+    return '<tr><td>🚨 Galat password</td><td>'+esc(x.ip||'?')+'</td><td style="text-align:right;color:var(--mut)">'+(x.t?ago(x.t):'—')+'</td></tr>';}),['Event','IP','When'])
+    : '<div style="color:var(--mut)">— koi galat koshish nahi 🎉 —</div>';
 })();
 // ================= COMMAND PALETTE (Ctrl+K) =================
 (function(){ var pal=document.createElement('div'); pal.id='cpal';
@@ -2875,8 +2967,18 @@ function sgCSV(){ var rows=_sgData();
   var q=document.getElementById('cpq'),res=document.getElementById('cpres'),sel=0,items=[];
   function build(){ var v=(q.value||'').toLowerCase(); items=[];
     MODS.forEach(function(m){ if(!v||m[1].toLowerCase().indexOf(v)>-1) items.push({ic:m[0],t:m[1],k:'Module',fn:(function(p){return function(){jumpToPage(p);};})(m[2])}); });
-    if(v.length>=2)(D.userList||[]).forEach(function(u){ if((u.name||'').toLowerCase().indexOf(v)>-1&&items.length<14)
+    if(v.length>=2)(D.userList||[]).forEach(function(u){ if(((u.name||'')+' '+(u.cc||'')+' '+(u.version||'')+' '+(u.gip||'')).toLowerCase().indexOf(v)>-1&&items.length<14)
       items.push({ic:u.online?'🟢':'👤',t:u.name+' · '+fmt(u.scans)+' scans',k:'User',fn:(function(id){return function(){ jumpToPage('users'); if(window.openUser)setTimeout(function(){openUser(id);},200);};})(u.id)}); });
+    // (v2) GLOBAL DATA SEARCH: scans / crashes / feedback bhi
+    if(v.length>=2){
+      var seen={};
+      (D.recentScans300||[]).forEach(function(x){ if(items.length<16&&x.name&&!seen['s'+x.name]&&(x.name+' '+(x.sm||'')).toLowerCase().indexOf(v)>-1){ seen['s'+x.name]=1;
+        items.push({ic:'📄',t:x.name+' · '+x.n+' pages · '+ago(x.t),k:'Scan',fn:function(){jumpToPage('scans');}}); } });
+      (D.crashes||[]).forEach(function(c){ if(items.length<18&&((c.err||'')+' '+(c.v||'')).toLowerCase().indexOf(v)>-1)
+        items.push({ic:'💥',t:'Crash v'+(c.v||'?')+': '+String(c.err||'').slice(0,45),k:'Crash',fn:function(){jumpTo('system','cg');}}); });
+      (D.feedback||[]).forEach(function(f){ if(items.length<20&&((f.msg||'')+' '+(f.name||'')).toLowerCase().indexOf(v)>-1)
+        items.push({ic:'💬',t:(f.name||'user')+': '+String(f.msg||'').slice(0,45),k:'Feedback',fn:function(){jumpToPage('system');}}); });
+    }
     sel=0; render(); }
   function render(){ res.innerHTML=items.map(function(i,ix){ return '<div class="ri'+(ix===sel?' sel':'')+'" onclick="void(0)" data-ix="'+ix+'"><span>'+i.ic+'</span> '+esc(i.t)+'<span class="k">'+i.k+'</span></div>'; }).join('')||'<div class="ri" style="color:var(--mut)">— kuch nahi mila —</div>';
     [].slice.call(res.children).forEach(function(el){ el.addEventListener('click',function(){ var i=items[parseInt(el.getAttribute('data-ix')||'-1')]; if(i){close();i.fn();} }); }); }
