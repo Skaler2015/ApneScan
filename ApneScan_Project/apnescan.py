@@ -228,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "167"
+VERSION = "168"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -562,7 +562,7 @@ DEFAULT_OPTIONS = {
     "win_geometry": "",           # (auto) saved window geometry
     "auto_update_check": True,    # apne aap update jaanchna
     "dbl_action": "edit",         # thumbnail double-click: edit / preview
-    "files_panel_side": "right",  # 'Meri Files' panel right / left
+    "files_panel_side": "left",   # 'Meri Files' panel left (default) / right
     "sound_on_done": False,       # scan poora hote hi 'ting'
     "confirm_exit": False,        # band karte samay pucho
     "footer_clock": False,        # status-bar: ghadi/date
@@ -6359,6 +6359,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 save_config(self._config)
             except Exception:
                 pass
+        # Layout v168 (one-time): scan-settings ab TOOLBAR ke neeche ek patti
+        # me aur 'Meri Files' BAAYIN taraf — purani saved 'right' side ek baar
+        # left kar rahe hain (Customize se wapas badla ja sakta hai).
+        if not self._config.get("layout_v168"):
+            self._config["layout_v168"] = True
+            _lo = self._config.get("options")
+            if isinstance(_lo, dict):
+                _lo["files_panel_side"] = "left"
+            try:
+                save_config(self._config)
+            except Exception:
+                pass
         self._opts = dict(DEFAULT_OPTIONS)
         self._opts.update(self._config.get("options", {}))
         self._recent = self._config.get("recent", [])
@@ -11806,24 +11818,35 @@ if the toggle is ticked).</p>
         self._rebuild_jobs_bar()
         hr = QtWidgets.QFrame(); hr.setObjectName("hr"); hr.setFrameShape(QtWidgets.QFrame.HLine); outer.addWidget(hr)
 
-        # ---------- Body: left settings panel | thumbnails ----------
-        body = QtWidgets.QHBoxLayout(); body.setContentsMargins(0, 0, 0, 0); body.setSpacing(0)
-        self._body_layout = body   # files-panel side swap ke liye reference
-        panel = QtWidgets.QWidget(); panel.setObjectName("panel"); panel.setFixedWidth(252)
-        self.left_panel = panel
+        # ---------- SCAN BAR: saari scan-settings TOOLBAR ke JUST NEECHE,
+        #            EK LINE me (user ki request) — neeche body me My Files |
+        #            pages | preview ek RESIZABLE splitter me. ----------
+        scanbar = QtWidgets.QWidget(); scanbar.setObjectName("panel")
+        self.left_panel = scanbar     # purane F9 / show_left_panel toggle isi par
         if not self._opts.get("show_left_panel", True):
-            panel.hide()
-        pl = QtWidgets.QVBoxLayout(panel); pl.setContentsMargins(12, 10, 12, 10); pl.setSpacing(3)
+            scanbar.hide()
+        sb = QtWidgets.QHBoxLayout(scanbar)
+        sb.setContentsMargins(10, 3, 10, 5); sb.setSpacing(8)
 
-        pl.addWidget(QtWidgets.QLabel(tr("profile", self._lang)))
-        # Profile ka poora naam ek full-width line me
+        def _col(caption, w, width=None):
+            # chhota caption UPAR + control NEECHE — ribbon jaisi ek line
+            if width:
+                w.setFixedWidth(width)
+            _cbox = QtWidgets.QVBoxLayout(); _cbox.setContentsMargins(0, 0, 0, 0); _cbox.setSpacing(0)
+            _cl = QtWidgets.QLabel(caption)
+            _cl.setStyleSheet("font-size:9.5px;color:#64748b;")
+            _cbox.addWidget(_cl); _cbox.addWidget(w)
+            _cw = QtWidgets.QWidget(); _cw.setLayout(_cbox)
+            return _cw
+
+        # Profile + uske buttons (ek hi chhoti row)
         self.cmb_profile = QtWidgets.QComboBox(); self.cmb_profile.currentTextChanged.connect(self._on_profile_changed)
-        pl.addWidget(self.cmb_profile)          # poori width — poora naam dikhe
-        # Buttons uske JUST neeche ek row me
-        prow = QtWidgets.QHBoxLayout(); prow.setSpacing(4)
-        bnew = QtWidgets.QPushButton("➕"); bnew.setFixedWidth(38); bnew.setToolTip(self.L("Naya profile", "New profile")); bnew.clicked.connect(self._quick_new_profile); prow.addWidget(bnew)
-        bedit = QtWidgets.QPushButton("✏️"); bedit.setFixedWidth(38); bedit.setToolTip(self.L("Profile badlo", "Edit profile")); bedit.clicked.connect(self._quick_edit_profile); prow.addWidget(bedit)
-        bdup = QtWidgets.QPushButton("📋"); bdup.setFixedWidth(38); bdup.setToolTip(self.L("Is profile ki nakal", "Duplicate this profile")); bdup.clicked.connect(self._duplicate_profile); prow.addWidget(bdup)
+        self.cmb_profile.setMinimumWidth(120)
+        prow = QtWidgets.QHBoxLayout(); prow.setContentsMargins(0, 0, 0, 0); prow.setSpacing(2)
+        prow.addWidget(self.cmb_profile, 1)
+        bnew = QtWidgets.QPushButton("➕"); bnew.setFixedWidth(26); bnew.setToolTip(self.L("Naya profile", "New profile")); bnew.clicked.connect(self._quick_new_profile); prow.addWidget(bnew)
+        bedit = QtWidgets.QPushButton("✏️"); bedit.setFixedWidth(26); bedit.setToolTip(self.L("Profile badlo", "Edit profile")); bedit.clicked.connect(self._quick_edit_profile); prow.addWidget(bedit)
+        bdup = QtWidgets.QPushButton("📋"); bdup.setFixedWidth(26); bdup.setToolTip(self.L("Is profile ki nakal", "Duplicate this profile")); bdup.clicked.connect(self._duplicate_profile); prow.addWidget(bdup)
         # lock hone par inhe bhi disable karna hai (sirf scanner-change khula rahe)
         self._profile_edit_btns = [bnew, bedit, bdup]
         self.btn_lock = QtWidgets.QToolButton(); self.btn_lock.setCheckable(True); self.btn_lock.setFixedWidth(38)
@@ -11831,32 +11854,35 @@ if the toggle is ticked).</p>
         self.btn_lock.setToolTip(self.L("Profile lock — galti se setting na badle",
                                         "Lock profile — prevent accidental changes"))
         self.btn_lock.toggled.connect(self._toggle_profile_lock)
-        prow.addWidget(self.btn_lock); prow.addStretch(1)
-        pw = QtWidgets.QWidget(); pw.setLayout(prow); pl.addWidget(pw)
+        prow.addWidget(self.btn_lock)
+        pw = QtWidgets.QWidget(); pw.setLayout(prow)
+        sb.addWidget(_col(tr("profile", self._lang), pw, 240))
 
-        _devrow = QtWidgets.QHBoxLayout(); _devrow.setSpacing(4)
-        _devrow.addWidget(QtWidgets.QLabel("Device:"))
+        # Device (status-dot + naam + 🔄) — caption ki jagah "Connected via"
         self.dev_status = QtWidgets.QLabel("● ")
         self.dev_status.setToolTip(self.L("Scanner ki halat: 🟢 taiyar · 🟡 busy · 🔴 band",
                                           "Scanner status: 🟢 ready · 🟡 busy · 🔴 offline"))
-        _devrow.addWidget(self.dev_status); _devrow.addStretch(1)
-        _devw = QtWidgets.QWidget(); _devw.setLayout(_devrow); pl.addSpacing(4); pl.addWidget(_devw)
         self.dev_lbl = QtWidgets.QLabel(self._opts.get("scanner_name") or "(no device)")
-        self.dev_lbl.setObjectName("dev"); self.dev_lbl.setWordWrap(True)
-        pl.addWidget(self.dev_lbl)
-        self._set_dev_status("unknown")
-        # 🔄 Scanner badlo (kai scanner ho to) — auto-detect list dikhata hai
-        self.btn_change_dev = QtWidgets.QPushButton(
-            self.L("🔄 Scanner badlo / dhoondo", "🔄 Change / find scanner"))
+        self.dev_lbl.setObjectName("dev"); self.dev_lbl.setWordWrap(False)
+        self.dev_lbl.setMaximumWidth(160)
+        self.btn_change_dev = QtWidgets.QPushButton("🔄")
+        self.btn_change_dev.setFixedWidth(30)
         self.btn_change_dev.setToolTip(self.L(
-            "Sabhi scanner (LAN + USB) KHUD dhoondh kar list dikhata hai — kai "
-            "scanner ho to yahan se badlo.",
-            "Auto-detects all scanners (LAN + USB) and lists them — switch here "
-            "if you use more than one."))
+            "Scanner badlo / dhoondo — sabhi scanner (LAN + USB) KHUD dhoondh "
+            "kar list dikhata hai.",
+            "Change / find scanner — auto-detects all scanners (LAN + USB)."))
         self.btn_change_dev.clicked.connect(lambda: self.pick_scanner_dialog())
-        pl.addWidget(self.btn_change_dev)
+        _devrow = QtWidgets.QHBoxLayout(); _devrow.setContentsMargins(0, 0, 0, 0); _devrow.setSpacing(3)
+        _devrow.addWidget(self.dev_status); _devrow.addWidget(self.dev_lbl, 1)
+        _devrow.addWidget(self.btn_change_dev)
+        _devw = QtWidgets.QWidget(); _devw.setLayout(_devrow)
         self.method_lbl = QtWidgets.QLabel(""); self.method_lbl.setObjectName("dev")
-        pl.addWidget(self.method_lbl)
+        self.method_lbl.setStyleSheet("font-size:9.5px;")
+        _dbox = QtWidgets.QVBoxLayout(); _dbox.setContentsMargins(0, 0, 0, 0); _dbox.setSpacing(0)
+        _dbox.addWidget(self.method_lbl); _dbox.addWidget(_devw)
+        _dcw = QtWidgets.QWidget(); _dcw.setLayout(_dbox)
+        sb.addWidget(_dcw)
+        self._set_dev_status("unknown")
 
         # Claim No. field panel se hata diya (user ki request). Object rehta hai
         # taaki file-naam banane wala purana code na toote — par dikhta nahi.
@@ -11867,34 +11893,31 @@ if the toggle is ticked).</p>
         self.btn_adv.setChecked(not bool(self._opts.get("panel_simple", False)))
         self.btn_adv.setStyleSheet("QToolButton{border:none;color:#64748b;font-size:11px;padding:2px;}")
         self.btn_adv.toggled.connect(self._toggle_adv_panel)
-        pl.addWidget(self.btn_adv)
+        sb.addWidget(self.btn_adv)
         self._adv_box = QtWidgets.QWidget()
-        _av = QtWidgets.QVBoxLayout(self._adv_box); _av.setContentsMargins(0, 0, 0, 0); _av.setSpacing(4)
-        _av.addWidget(QtWidgets.QLabel("Paper source:"))
-        self.cmb_source = QtWidgets.QComboBox(); self.cmb_source.addItems(["Feeder (ADF)", "Glass (Flatbed)"]); _av.addWidget(self.cmb_source)
-        _av.addWidget(QtWidgets.QLabel("Scan sides:"))
+        _av = QtWidgets.QHBoxLayout(self._adv_box); _av.setContentsMargins(0, 0, 0, 0); _av.setSpacing(8)
+        self.cmb_source = QtWidgets.QComboBox(); self.cmb_source.addItems(["Feeder (ADF)", "Glass (Flatbed)"])
+        _av.addWidget(_col("Paper source", self.cmb_source, 108))
         self.cmb_sides = QtWidgets.QComboBox()
         self.cmb_sides.addItems(["Single side", "Both sides (duplex)"])
         self.cmb_sides.setToolTip("Both side = scan both sides of the paper (duplex)")
-        _av.addWidget(self.cmb_sides)
-        _av.addWidget(QtWidgets.QLabel("Page size:"))
-        self.cmb_pagesize = QtWidgets.QComboBox(); self.cmb_pagesize.addItems(["Auto (detect each page's size)", "A4 (210x297 mm)", "Letter", "Legal", "A5"]); _av.addWidget(self.cmb_pagesize)
+        _av.addWidget(_col("Scan sides", self.cmb_sides, 100))
+        self.cmb_pagesize = QtWidgets.QComboBox(); self.cmb_pagesize.addItems(["Auto (detect each page's size)", "A4 (210x297 mm)", "Letter", "Legal", "A5"])
         self.cmb_pagesize.setToolTip("Auto = detect each page's real size (mixed sizes / ID card / half page too). A4/Letter/Legal = fixed size.")
-        _av.addWidget(QtWidgets.QLabel("Resolution:"))
+        _av.addWidget(_col("Page size", self.cmb_pagesize, 110))
         self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.addItems([d + " dpi" for d in RESOLUTIONS])
         self.cmb_dpi.addItem(self.L("Custom… (apni dpi)", "Custom…"))
         self.cmb_dpi.setCurrentText("300 dpi")
         self.cmb_dpi.currentTextChanged.connect(self._on_panel_dpi_changed)
-        _av.addWidget(self.cmb_dpi)
-        _av.addWidget(QtWidgets.QLabel("Bit depth:"))
-        self.cmb_depth = QtWidgets.QComboBox(); self.cmb_depth.addItems(["24-bit Colour", "Grayscale", "Black & White"]); self.cmb_depth.setCurrentText("Grayscale"); _av.addWidget(self.cmb_depth)
-        pl.addWidget(self._adv_box)
+        _av.addWidget(_col("Resolution", self.cmb_dpi, 90))
+        self.cmb_depth = QtWidgets.QComboBox(); self.cmb_depth.addItems(["24-bit Colour", "Grayscale", "Black & White"]); self.cmb_depth.setCurrentText("Grayscale")
+        _av.addWidget(_col("Bit depth", self.cmb_depth, 112))
+        sb.addWidget(self._adv_box)
         self._adv_box.setVisible(self.btn_adv.isChecked())
         self._refresh_adv_toggle_text()
 
         # ---- ⚙ Auto-fixes quick chips (yahin on/off) ----
-        pl.addWidget(QtWidgets.QLabel(self.L("Auto sudhaar:", "Auto fixes:")))
-        _ocrow = QtWidgets.QHBoxLayout(); _ocrow.setSpacing(3)
+        _ocrow = QtWidgets.QHBoxLayout(); _ocrow.setContentsMargins(0, 0, 0, 0); _ocrow.setSpacing(3)
         self._opt_chips = {}
         for _key, _lbl, _tip in (("auto_crop", "Crop", "Auto-crop the border"),
                                  ("deskew", "Straight", "Auto-straighten (deskew)"),
@@ -11908,11 +11931,10 @@ if the toggle is ticked).</p>
                               "QToolButton:checked{background:#0f766e;color:#fff;border-color:#0f766e;}")
             _cb.toggled.connect(lambda on, k=_key: self._set_scan_opt(k, on))
             self._opt_chips[_key] = _cb; _ocrow.addWidget(_cb)
-        _ocw = QtWidgets.QWidget(); _ocw.setLayout(_ocrow); pl.addWidget(_ocw)
+        _ocw = QtWidgets.QWidget(); _ocw.setLayout(_ocrow)
+        sb.addWidget(_col(self.L("Auto sudhaar", "Auto fixes"), _ocw))
 
-        # ---- 📂 "Scan ke baad" + save-folder jhalak ----
-        _asrow = QtWidgets.QHBoxLayout(); _asrow.setSpacing(4)
-        _asrow.addWidget(QtWidgets.QLabel(self.L("Baad me:", "After:")))
+        # ---- 📂 "Scan ke baad" ----
         self.cmb_after_scan = QtWidgets.QComboBox()
         for _v, _t in (("nothing", self.L("Kuch nahi", "Nothing")),
                        ("folder", self.L("Folder kholo", "Open folder")),
@@ -11923,10 +11945,9 @@ if the toggle is ticked).</p>
         self.cmb_after_scan.setCurrentIndex(_ix if _ix >= 0 else 0)
         self.cmb_after_scan.currentIndexChanged.connect(
             lambda _i: (self._opts.__setitem__("after_scan_panel", self.cmb_after_scan.currentData()), self._save_opts()))
-        _asrow.addWidget(self.cmb_after_scan, 1)
-        _asw = QtWidgets.QWidget(); _asw.setLayout(_asrow); pl.addWidget(_asw)
+        sb.addWidget(_col(self.L("Baad me", "After"), self.cmb_after_scan, 100))
 
-        pl.addStretch(1)
+        sb.addStretch(1)
         # UPDATE BANNER: naya version website par aate hi yahan dikhta hai —
         # ek click me download + install + restart (chhupa rehta hai warna).
         self.update_box = QtWidgets.QPushButton()
@@ -11938,7 +11959,7 @@ if the toggle is ticked).</p>
             "#updatebox:disabled{background:#fbbf24; color:#6b7280;}")
         self.update_box.clicked.connect(self._sidebar_update_clicked)
         self.update_box.hide()
-        pl.addWidget(self.update_box)
+        sb.addWidget(self.update_box)
         self.stats_box = QtWidgets.QLabel()
         self.stats_box.setTextFormat(QtCore.Qt.RichText)
         self.stats_box.setObjectName("statsbox")
@@ -11961,25 +11982,31 @@ if the toggle is ticked).</p>
                                       "Click for full Analytics"))
         self.an_box.setCursor(QtCore.Qt.PointingHandCursor)
         self.an_box.mousePressEvent = lambda _e: self.show_analytics()
-        pl.addWidget(self.an_box)
+        # an_box yahan ADD nahi hota — wo PREVIEW ke neeche jaata hai
+        # (user ki request); preview band ho to Meri Files ke neeche.
         self._an_world = {}
         self._an_update_box()
         self.btn_scan = QtWidgets.QPushButton("▶  " + tr("scan", self._lang)); self.btn_scan.setObjectName("primary")
-        self.btn_scan.setMinimumHeight(38)
+        self.btn_scan.setMinimumHeight(40); self.btn_scan.setMinimumWidth(120)
         # Panel ka Scan button = PANEL ki (manual) setting se scan;
         # Enter = profile ki saved setting se (dono alag — user ki pasand).
         self.btn_scan.clicked.connect(lambda: self.do_scan(use_panel=True))
-        pl.addWidget(self.btn_scan)
+        sb.addWidget(self.btn_scan)
         self.btn_scan.setToolTip(self.L(
-            "Is panel me dikh rahi setting se scan (Enter = profile ki setting se)",
-            "Scan with the settings shown in this panel (Enter = profile settings)"))
+            "Is patti me dikh rahi setting se scan (Enter = profile ki setting se)",
+            "Scan with the settings shown in this bar (Enter = profile settings)"))
         self.claim_edit.setToolTip("Claim/Patient number (appears in the file name)")
         self.cmb_dpi.setToolTip("Resolution: lower dpi = faster scan")
         self.cmb_depth.setToolTip("Black & White is fastest, Colour is slower")
         self.setAcceptDrops(True)
-        body.addWidget(panel)
+        outer.addWidget(scanbar)
+        _sbhr = QtWidgets.QFrame(); _sbhr.setObjectName("hr"); _sbhr.setFrameShape(QtWidgets.QFrame.HLine)
+        outer.addWidget(_sbhr)
 
-        vline = QtWidgets.QFrame(); vline.setObjectName("hr"); vline.setFrameShape(QtWidgets.QFrame.VLine); body.addWidget(vline)
+        # ---------- BODY: My Files | pages | preview — RESIZABLE splitter ----------
+        spl = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        spl.setChildrenCollapsible(False)
+        self._body_split = spl
 
         self.list = PagesList(lambda files: self._start_import(files, "normal"))
         self.list.setViewMode(QtWidgets.QListView.IconMode)
@@ -12060,7 +12087,8 @@ if the toggle is ticked).</p>
         _pc.setContentsMargins(0, 0, 0, 0); _pc.setSpacing(4)
         _pc.addWidget(self._build_pages_bar())
         _pc.addWidget(self.list, 1)
-        body.addWidget(pages_col, 1)
+        spl.addWidget(pages_col)
+        self._pages_col = pages_col
 
         # ---------- Right sidebar: "Meri Files" (folder list + save-here) ----------
         self.files_panel = QtWidgets.QWidget()
@@ -12274,15 +12302,20 @@ if the toggle is ticked).</p>
             "Save the currently scanned/imported pages as a PDF straight into the selected folder."))
         self.btn_save_here.clicked.connect(self.save_into_selected_folder)
         fp.addWidget(self.btn_save_here)
-        self.files_panel.setFixedWidth(250)
-        body.addWidget(self.files_panel)
+        self.files_panel.setMinimumWidth(180)
+        # user ki request: My Files ab BAAYIN taraf (jahan pehle settings-panel
+        # tha); customize se right bhi ho sakta hai
+        if (self._opts.get("files_panel_side") or "left") == "left":
+            spl.insertWidget(0, self.files_panel)
+        else:
+            spl.addWidget(self.files_panel)
         if not self._opts.get("show_files_panel", True):
             self.files_panel.hide()
 
         # ---- UI #3: Preview panel (page click → badi jhalak + quick-edit) ----
         self.preview_panel = QtWidgets.QWidget()
         self.preview_panel.setObjectName("panel")
-        self.preview_panel.setFixedWidth(310)
+        self.preview_panel.setMinimumWidth(230)
         self._pv_zoom = 1.0
         pv = QtWidgets.QVBoxLayout(self.preview_panel)
         pv.setContentsMargins(8, 8, 8, 8); pv.setSpacing(4)
@@ -12415,12 +12448,41 @@ if the toggle is ticked).</p>
             "QPushButton:hover{background:#0d5f58;}")
         _edit_btn.clicked.connect(lambda: self._pv_open_image_editor())
         pv.addWidget(_edit_btn)
-        body.addWidget(self.preview_panel)      # pehle parent, phir visibility
+        spl.addWidget(self.preview_panel)       # pehle parent, phir visibility
         self.preview_panel.setVisible(bool(self._opts.get("ui_preview", False)))
         self.list.currentItemChanged.connect(lambda cur, prev: self._update_preview_panel())
         self.pv_scroll.viewport().installEventFilter(self)   # Ctrl+scroll zoom
 
-        outer.addLayout(body, 1)
+        outer.addWidget(spl, 1)
+        # ANALYTICS card: PREVIEW ke JUST NEECHE (user ki request); preview
+        # band ho to Meri Files panel ke neeche — kahin na kahin hamesha.
+        self._place_an_box()
+        # Splitter = panels ki size KHEENCH kar chhoti/badi (yaad bhi rehti hai)
+        try:
+            spl.setStretchFactor(spl.indexOf(pages_col), 1)
+            _sz = []
+            for _i in range(spl.count()):
+                _w = spl.widget(_i)
+                _sz.append(int(self._opts.get("files_panel_w", 250) or 250) if _w is self.files_panel
+                           else int(self._opts.get("preview_panel_w", 310) or 310) if _w is self.preview_panel
+                           else 720)
+            spl.setSizes(_sz)
+        except Exception:
+            pass
+
+        def _save_split():
+            try:
+                sz = spl.sizes()
+                if self.files_panel.isVisible():
+                    self._opts["files_panel_w"] = max(180, sz[spl.indexOf(self.files_panel)])
+                if self.preview_panel.isVisible():
+                    self._opts["preview_panel_w"] = max(230, sz[spl.indexOf(self.preview_panel)])
+                self._save_opts()
+            except Exception:
+                pass
+        self._split_save_t = QtCore.QTimer(self); self._split_save_t.setSingleShot(True)
+        self._split_save_t.timeout.connect(_save_split)
+        spl.splitterMoved.connect(lambda *_a: self._split_save_t.start(800))
 
         # ---- Footer AD strip: official site + ApneSoftware.com ka ad ----
         self.ad_footer = self._build_ad_footer()
@@ -14863,6 +14925,7 @@ if the toggle is ticked).</p>
         if not self.preview_panel.isVisible():
             self.preview_panel.setVisible(True)
             self._opts["ui_preview"] = True
+            self._place_an_box()
         name = os.path.basename(path)
         try:
             self.pv_tabs.setCurrentIndex(0)
@@ -16605,15 +16668,28 @@ if the toggle is ticked).</p>
                 getattr(self, attr).setVisible(bool(o.get(key, True)))
             except Exception:
                 pass
-        # 7) Panel widths
-        for attr, key, dflt in (("left_panel", "left_panel_w", 252),
-                                ("files_panel", "files_panel_w", 250),
-                                ("preview_panel", "preview_panel_w", 310)):
-            try:
-                getattr(self, attr).setFixedWidth(
-                    max(160, min(520, int(o.get(key, dflt) or dflt))))
-            except Exception:
-                pass
+        # 7) Panel widths — ab SPLITTER ke through (fixed nahi; kheench kar
+        # bhi badla ja sakta hai, ye sirf pasandida chaudai lagata hai)
+        try:
+            spl = getattr(self, "_body_split", None)
+            if spl is not None:
+                sz = spl.sizes(); tot = sum(sz) or 1
+                fi = spl.indexOf(self.files_panel); pi = spl.indexOf(self.preview_panel)
+                if fi >= 0 and self.files_panel.isVisible():
+                    sz[fi] = max(180, min(520, int(o.get("files_panel_w", 250) or 250)))
+                if pi >= 0 and self.preview_panel.isVisible():
+                    sz[pi] = max(230, min(560, int(o.get("preview_panel_w", 310) or 310)))
+                ci = spl.indexOf(self._pages_col)
+                if ci >= 0:
+                    sz[ci] = max(300, tot - sum(s for i2, s in enumerate(sz) if i2 != ci))
+                spl.setSizes(sz)
+        except Exception:
+            pass
+        # analytics card apni sahi jagah par (preview ke neeche / files ke neeche)
+        try:
+            self._place_an_box()
+        except Exception:
+            pass
         # 8) Thumbnail size + page-grid spacing
         try:
             self._apply_thumb_zoom(int(o.get("thumb_size", self.THUMB_W) or self.THUMB_W))
@@ -16725,22 +16801,39 @@ if the toggle is ticked).</p>
 
     def _apply_files_side(self):
         """'Meri Files' panel ko dayein ya bayein rakho (customize se)."""
-        body = getattr(self, "_body_layout", None)
-        if body is None:
+        spl = getattr(self, "_body_split", None)
+        if spl is None:
             return
         try:
-            want_left = (self._opts.get("files_panel_side") == "left")
-            idx = body.indexOf(self.files_panel)
+            want_left = (self._opts.get("files_panel_side", "left") == "left")
+            idx = spl.indexOf(self.files_panel)
             if idx < 0:
                 return
             is_left = (idx == 0)
             if want_left == is_left:
                 return   # pehle se sahi jagah — kuch mat karo
-            body.removeWidget(self.files_panel)
             if want_left:
-                body.insertWidget(0, self.files_panel)
+                spl.insertWidget(0, self.files_panel)
             else:
-                body.addWidget(self.files_panel)
+                spl.addWidget(self.files_panel)
+            spl.setStretchFactor(spl.indexOf(self._pages_col), 1)
+        except Exception:
+            pass
+
+    def _place_an_box(self):
+        """ANALYTICS card ko sahi ghar do: PREVIEW panel ke sabse neeche
+        (user ki pasand); preview band ho to Meri Files ke neeche."""
+        try:
+            target = (self.preview_panel
+                      if (self.preview_panel.isVisible()
+                          or bool(self._opts.get("ui_preview", False)))
+                      else self.files_panel)
+            if self.an_box.parentWidget() is not target:
+                self.an_box.setParent(None)
+                lay = target.layout()
+                if lay is not None:
+                    lay.addWidget(self.an_box)
+            self.an_box.setVisible(bool(self._opts.get("ui_analytics", True)))
         except Exception:
             pass
 
@@ -16752,6 +16845,7 @@ if the toggle is ticked).</p>
                 if not self.preview_panel.isVisible():
                     self._opts["ui_preview"] = True
                     self.preview_panel.setVisible(True)
+                    self._place_an_box()
                 self.list.setCurrentItem(item)
                 try:
                     self._update_preview_panel()
