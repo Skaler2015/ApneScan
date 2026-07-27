@@ -228,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "173"
+VERSION = "174"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8938,10 +8938,58 @@ class ScannerWindow(QtWidgets.QMainWindow):
             if hasattr(self, "_dash"):
                 self._dash.setGeometry(r)
                 try:
-                    names = [os.path.basename(p) for p in (self._recent or [])[:3]]
-                    self._dash_recent.setText(("Recent: " + "  ·  ".join(names)) if names else "")
+                    self._dash_fill_recent()
                 except Exception:
                     pass
+
+    def _dash_fill_recent(self):
+        """Dashboard ke 'Recent Files' cards ko taaza karo — naam, samay,
+        size ke saath; card par click = file kholo (mockup jaisa look)."""
+        lay = getattr(self, "_dash_recent_lay", None)
+        if lay is None:
+            return
+        while lay.count():
+            it = lay.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.deleteLater()
+        paths = [p for p in (self._recent or []) if p and os.path.exists(p)][:4]
+        self._dash_recent_cap.setVisible(bool(paths))
+        self._dash_recent_row.setVisible(bool(paths))
+        for p in paths:
+            try:
+                st = os.stat(p)
+                kb = st.st_size / 1024.0
+                sz = ("%.1f MB" % (kb / 1024.0)) if kb >= 1024 else ("%.0f KB" % kb)
+                when = datetime.datetime.fromtimestamp(st.st_mtime).strftime("%d-%b · %I:%M %p")
+            except Exception:
+                sz, when = "", ""
+            b = QtWidgets.QPushButton()
+            b.setFixedHeight(84)
+            b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setToolTip(p)
+            b.setStyleSheet(
+                "QPushButton{border:1px solid #E5E7EB;border-radius:13px;background:#fff;}"
+                "QPushButton:hover{border-color:#C7D2FE;background:#FBFAFF;}")
+            _h = QtWidgets.QHBoxLayout(b); _h.setContentsMargins(10, 8, 10, 8); _h.setSpacing(10)
+            _th = QtWidgets.QLabel("📄"); _th.setFixedSize(50, 64)
+            _th.setAlignment(QtCore.Qt.AlignCenter)
+            _th.setStyleSheet("background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;font-size:20px;")
+            _vv = QtWidgets.QVBoxLayout(); _vv.setSpacing(2)
+            name = os.path.basename(p)
+            _nm = QtWidgets.QLabel(name)
+            _nm.setStyleSheet("font-size:11.5px;font-weight:700;color:#111827;background:transparent;border:none;")
+            _fm = QtGui.QFontMetrics(_nm.font())
+            _nm.setText(_fm.elidedText(name, QtCore.Qt.ElideMiddle, 150))
+            _sm = QtWidgets.QLabel(("%s\n%s" % (when, sz)).strip())
+            _sm.setStyleSheet("font-size:10px;color:#6B7280;background:transparent;border:none;")
+            _vv.addWidget(_nm); _vv.addWidget(_sm); _vv.addStretch(1)
+            _h.addWidget(_th); _h.addLayout(_vv, 1)
+            for _w9 in (_th, _nm, _sm):
+                _w9.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
+            b.clicked.connect(lambda _c=False, path=p: self._open_path(path))
+            lay.addWidget(b)
 
     def _zoom_thumbs(self, factor):
         self._apply_thumb_zoom(self._thumb_w * factor)
@@ -11680,6 +11728,12 @@ if the toggle is ticked).</p>
             s = self._vsep(); tb.addWidget(s); self._tb_seps.append(s)
 
         self.btn_scan_top = tbtn("scan", tr("scan", self._lang), self.do_scan, key="scan")
+        # ✨ redesign: toolbar ka Scan = gradient tile (mockup jaisa), white icon
+        self.btn_scan_top.setIcon(_make_icon("scan", "#ffffff"))
+        self.btn_scan_top.setStyleSheet(
+            "QToolButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #4F46E5,stop:1 #7C3AED);"
+            "color:#fff;border:none;border-radius:11px;font-weight:700;padding:2px 8px;}"
+            "QToolButton:hover{background:#4338CA;}QToolButton:pressed{background:#3730A3;}")
         self.btn_profiles = tbtn("profiles", tr("profiles", self._lang).replace("…", ""), self.open_profiles, advanced=True, key="profiles")
         self.chk_ocr = tbtn("ocr", "OCR", None, checkable=True, key="ocr")
         if not HAS_OCR_LIBS:
@@ -11867,10 +11921,10 @@ if the toggle is ticked).</p>
         #            pages | preview ek RESIZABLE splitter me. ----------
         scanbar = QtWidgets.QWidget(); scanbar.setObjectName("scanbar")
         scanbar.setStyleSheet(
-            "#scanbar{background:#f8fafc;}"
-            "#scanbar QComboBox{border:1px solid #cbd5e1;border-radius:8px;padding:3px 8px;background:#fff;}"
-            "#scanbar QPushButton{border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:4px 8px;}"
-            "#scanbar QPushButton:hover{border-color:#94a3b8;}"
+            "#scanbar{background:#FFFFFF;}"
+            "#scanbar QComboBox{border:1px solid #E5E7EB;border-radius:9px;padding:3px 8px;background:#F9FAFB;}"
+            "#scanbar QPushButton{border:1px solid #E5E7EB;border-radius:9px;background:#F9FAFB;padding:4px 8px;}"
+            "#scanbar QPushButton:hover{border-color:#C7D2FE;background:#EEF2FF;}"
             "#scanbar QPushButton#primary{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #4F46E5,stop:1 #7C3AED);border:none;color:#fff;font-weight:800;"
             "font-size:13.5px;padding:9px 30px;border-radius:10px;}"
             "#scanbar QPushButton#primary:hover{background:#4338CA;}")
@@ -12097,62 +12151,135 @@ if the toggle is ticked).</p>
         self._empty_lbl.setAlignment(QtCore.Qt.AlignCenter)
         self._empty_lbl.setStyleSheet("color:#94a3b8; font-size:15px;")
         # ---- UI #2: Start-dashboard (khaali screen par bade action-cards) ----
-        # ✨ HERO dashboard (redesign): "Ready to Scan" + bada gol gradient
-        # Scan-button + quick-action cards — khaali screen ka naya chehra.
+        # ✨ HERO dashboard (redesign, mockup jaisa): white lehron-wali hero
+        # card + gol gradient Scan-button + rangin quick-action cards +
+        # asli Recent-Files cards — khaali screen ka naya chehra.
         self._dash = QtWidgets.QWidget(self.list.viewport())
         _dv = QtWidgets.QVBoxLayout(self._dash)
-        _dv.addStretch(5)
+        _dv.setContentsMargins(24, 12, 24, 8); _dv.setSpacing(0)
+        _dv.addStretch(2)
+
+        class _HeroCard(QtWidgets.QFrame):
+            # mockup jaisi neeche lehron (waves) wali white card
+            def paintEvent(hc, ev):
+                super().paintEvent(ev)
+                try:
+                    p = QtGui.QPainter(hc)
+                    p.setRenderHint(QtGui.QPainter.Antialiasing)
+                    w, h = float(hc.width()), float(hc.height())
+                    clip = QtGui.QPainterPath()
+                    clip.addRoundedRect(QtCore.QRectF(1, 1, w - 2, h - 2), 15, 15)
+                    p.setClipPath(clip)
+                    for dy, col in ((0.74, QtGui.QColor(79, 70, 229, 12)),
+                                    (0.82, QtGui.QColor(124, 58, 237, 15)),
+                                    (0.89, QtGui.QColor(79, 70, 229, 20))):
+                        path = QtGui.QPainterPath(QtCore.QPointF(0, h * dy))
+                        path.cubicTo(w * .18, h * (dy - .16), w * .34, h * (dy + .12), w * .52, h * dy)
+                        path.cubicTo(w * .72, h * (dy - .12), w * .88, h * (dy - .04), w, h * (dy + .04))
+                        path.lineTo(w, h); path.lineTo(0, h); path.closeSubpath()
+                        p.fillPath(path, col)
+                    p.end()
+                except Exception:
+                    pass
+
+        _hero = _HeroCard(); _hero.setObjectName("herocard")
+        _hero.setStyleSheet("#herocard{background:#FFFFFF;border:1px solid #E5E7EB;border-radius:16px;}")
+        _hero.setMinimumHeight(252); _hero.setMaximumHeight(276); _hero.setMaximumWidth(1000)
+        _hv = QtWidgets.QVBoxLayout(_hero); _hv.setContentsMargins(20, 18, 20, 12); _hv.setSpacing(0)
         _dt = QtWidgets.QLabel(self.L("Scan ke liye taiyaar", "Ready to Scan"))
         _dt.setAlignment(QtCore.Qt.AlignCenter)
-        _dt.setStyleSheet("color:#111827;font-size:27px;font-weight:800;letter-spacing:-1px;background:transparent;")
-        _dv.addWidget(_dt)
+        _dt.setStyleSheet("color:#111827;font-size:26px;font-weight:800;letter-spacing:-1px;background:transparent;border:none;")
+        _hv.addWidget(_dt)
         _dsub = QtWidgets.QLabel(self.L("Document feeder me rakho aur Scan dabao",
-                                        "Place your document and press Scan"))
+                                        "Place your document in the feeder and press Scan"))
         _dsub.setAlignment(QtCore.Qt.AlignCenter)
-        _dsub.setStyleSheet("color:#6B7280;font-size:13px;background:transparent;")
-        _dv.addWidget(_dsub)
-        _dv.addSpacing(20)
+        _dsub.setStyleSheet("color:#6B7280;font-size:13px;background:transparent;border:none;")
+        _hv.addWidget(_dsub)
+        _hv.addSpacing(16)
         _hb = QtWidgets.QPushButton("🖨\nSCAN")
-        _hb.setFixedSize(132, 132)
+        _hb.setFixedSize(118, 118)
         _hb.setCursor(QtCore.Qt.PointingHandCursor)
         _hb.setToolTip(self.L("Panel ki setting se scan (Enter = profile se)",
                               "Scan with panel settings (Enter = profile)"))
         _hb.setStyleSheet(
-            "QPushButton{border-radius:66px;border:8px solid #EEF2FF;"
+            "QPushButton{border-radius:59px;border:8px solid #EEF2FF;"
             "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #4F46E5,stop:1 #7C3AED);"
-            "color:#fff;font-size:17px;font-weight:800;}"
+            "color:#fff;font-size:16px;font-weight:800;}"
             "QPushButton:hover{border:8px solid #E0E7FF;background:#4338CA;}"
             "QPushButton:pressed{background:#3730A3;}")
         _hb.clicked.connect(lambda: self.do_scan(use_panel=True))
         _hr2 = QtWidgets.QHBoxLayout(); _hr2.addStretch(1); _hr2.addWidget(_hb); _hr2.addStretch(1)
-        _dv.addLayout(_hr2)
-        _dv.addSpacing(26)
-        _dr = QtWidgets.QHBoxLayout(); _dr.setSpacing(10)
-        _dr.addStretch(1)
+        _hv.addLayout(_hr2)
+        _hv.addStretch(1)
+        _hint = QtWidgets.QLabel(self.L(
+            "Enter = profile se scan  ·  F3–F6 = quick DPI  ·  Ctrl+P = print",
+            "Press Enter to scan with profile  ·  F3–F6 quick DPI  ·  Ctrl+P print"))
+        _hint.setAlignment(QtCore.Qt.AlignCenter)
+        _hint.setStyleSheet("color:#9CA3AF;font-size:11px;background:transparent;border:none;")
+        _hv.addWidget(_hint)
+        _hrow = QtWidgets.QHBoxLayout(); _hrow.addStretch(1); _hrow.addWidget(_hero, 8); _hrow.addStretch(1)
+        _dv.addLayout(_hrow)
+        _dv.addSpacing(16)
 
-        def _dbtn(icon, text, sub, slot):
-            b = QtWidgets.QPushButton("%s\n%s\n%s" % (icon, text, sub))
-            b.setMinimumSize(148, 96)
+        # -- Quick Actions: rangin icon-chip wale cards (mockup jaisa) --
+        _qwrap = QtWidgets.QWidget(); _qwrap.setMaximumWidth(1000)
+        _qv = QtWidgets.QVBoxLayout(_qwrap); _qv.setContentsMargins(0, 0, 0, 0); _qv.setSpacing(9)
+        _qcap = QtWidgets.QLabel("Quick Actions")
+        _qcap.setStyleSheet("color:#111827;font-size:15px;font-weight:700;background:transparent;")
+        _qv.addWidget(_qcap)
+        _dr = QtWidgets.QHBoxLayout(); _dr.setSpacing(11)
+
+        def _dbtn(icon, chipbg, chipfg, text, sub, slot):
+            b = QtWidgets.QPushButton()
+            b.setMinimumSize(146, 102); b.setMaximumHeight(112)
+            b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             b.setCursor(QtCore.Qt.PointingHandCursor)
             b.setStyleSheet(
-                "QPushButton{font-size:12.5px;font-weight:700;border:1px solid #E5E7EB;"
-                "border-radius:13px;background:#fff;padding:10px;color:#111827;}"
-                "QPushButton:hover{border-color:#C7D2FE;color:#4F46E5;background:#FBFAFF;}")
+                "QPushButton{border:1px solid #E5E7EB;border-radius:13px;background:#fff;}"
+                "QPushButton:hover{border-color:#C7D2FE;background:#FBFAFF;}")
+            _bv = QtWidgets.QVBoxLayout(b); _bv.setContentsMargins(13, 11, 10, 9); _bv.setSpacing(3)
+            _ic = QtWidgets.QLabel(icon); _ic.setFixedSize(34, 34)
+            _ic.setAlignment(QtCore.Qt.AlignCenter)
+            _ic.setStyleSheet("background:%s;color:%s;border-radius:9px;font-size:15px;border:none;" % (chipbg, chipfg))
+            _tt = QtWidgets.QLabel(text)
+            _tt.setStyleSheet("font-size:12.5px;font-weight:700;color:#111827;background:transparent;border:none;")
+            _ss = QtWidgets.QLabel(sub)
+            _ss.setStyleSheet("font-size:10.5px;color:#6B7280;background:transparent;border:none;")
+            for _w9 in (_ic, _tt, _ss):
+                _w9.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
+            _bv.addWidget(_ic); _bv.addStretch(1); _bv.addWidget(_tt); _bv.addWidget(_ss)
             b.clicked.connect(slot)
             _dr.addWidget(b)
-        _dbtn("📥", "Import", self.L("file/photo jodo", "add files"), self.import_images)
-        _dbtn("📱", self.L("Phone se", "Phone"), self.L("kahin se bhi", "from anywhere"), self.phone_scan)
-        _dbtn("📷", "Photo→PDF", self.L("camera photo", "camera shots"), self.import_photos)
-        _dbtn("🕘", "History", self.L("purani PDF", "saved PDFs"), self.show_history)
-        _dbtn("🧰", "Tools", self.L("merge · split…", "merge · split…"), self._tools_catalog_dialog)
-        _dr.addStretch(1)
-        _dv.addLayout(_dr)
-        _dv.addSpacing(10)
-        self._dash_recent = QtWidgets.QLabel("")
-        self._dash_recent.setAlignment(QtCore.Qt.AlignCenter)
-        self._dash_recent.setStyleSheet("color:#9CA3AF;font-size:11px;background:transparent;")
-        _dv.addWidget(self._dash_recent)
-        _dv.addStretch(6)
+        _dbtn("🖨", "#EEF2FF", "#4F46E5", self.L("New Scan", "New Scan"),
+              self.L("panel setting se", "feeder ready"), lambda: self.do_scan(use_panel=True))
+        _dbtn("📱", "#F5F3FF", "#7C3AED", self.L("Phone se", "Phone to PC"),
+              self.L("QR se, kahin se bhi", "QR · from anywhere"), self.phone_scan)
+        _dbtn("📥", "#ECFEFF", "#0891B2", "Import",
+              self.L("file/photo jodo", "add files"), self.import_images)
+        _dbtn("📷", "#FFF7ED", "#B45309", "Photo→PDF",
+              self.L("camera photo", "camera shots"), self.import_photos)
+        _dbtn("🕘", "#F0FDF4", "#15803D", "History",
+              self.L("purani PDF", "saved PDFs"), self.show_history)
+        _dbtn("🧰", "#FEF2F2", "#DC2626", "Tools",
+              self.L("merge · split…", "merge · split…"), self._tools_catalog_dialog)
+        _qv.addLayout(_dr)
+        _qrow2 = QtWidgets.QHBoxLayout(); _qrow2.addStretch(1); _qrow2.addWidget(_qwrap, 8); _qrow2.addStretch(1)
+        _dv.addLayout(_qrow2)
+        _dv.addSpacing(16)
+
+        # -- Recent Files: asli cards (naam + samay + size), click = kholo --
+        _rwrap = QtWidgets.QWidget(); _rwrap.setMaximumWidth(1000)
+        _rv = QtWidgets.QVBoxLayout(_rwrap); _rv.setContentsMargins(0, 0, 0, 0); _rv.setSpacing(9)
+        self._dash_recent_cap = QtWidgets.QLabel("Recent Files")
+        self._dash_recent_cap.setStyleSheet("color:#111827;font-size:15px;font-weight:700;background:transparent;")
+        _rv.addWidget(self._dash_recent_cap)
+        self._dash_recent_row = QtWidgets.QWidget()
+        self._dash_recent_lay = QtWidgets.QHBoxLayout(self._dash_recent_row)
+        self._dash_recent_lay.setContentsMargins(0, 0, 0, 0); self._dash_recent_lay.setSpacing(11)
+        _rv.addWidget(self._dash_recent_row)
+        _rrow2 = QtWidgets.QHBoxLayout(); _rrow2.addStretch(1); _rrow2.addWidget(_rwrap, 8); _rrow2.addStretch(1)
+        _dv.addLayout(_rrow2)
+        _dv.addStretch(3)
         self._dash.hide()
         self.list.viewport().installEventFilter(self)
         self.list.itemDoubleClicked.connect(self._on_thumb_dblclick)
@@ -12536,7 +12663,94 @@ if the toggle is ticked).</p>
         self.list.currentItemChanged.connect(lambda cur, prev: self._update_preview_panel())
         self.pv_scroll.viewport().installEventFilter(self)   # Ctrl+scroll zoom
 
-        outer.addWidget(spl, 1)
+        # ---------- ✨ NAV SIDEBAR (redesign): mockup jaisi left navigation ----------
+        nav = QtWidgets.QFrame(); nav.setObjectName("navside")
+        nav.setFixedWidth(202)
+        nav.setStyleSheet(
+            "#navside{background:#FFFFFF;border-right:1px solid #E5E7EB;}"
+            "#navside QPushButton{border:none;border-radius:10px;text-align:left;"
+            "padding:7px 11px;font-size:12.5px;color:#374151;background:transparent;}"
+            "#navside QPushButton:hover{background:#F3F4F6;}"
+            "#navside QPushButton#navon{background:#EEF2FF;color:#4F46E5;font-weight:700;}"
+            "#navside QPushButton#navon:hover{background:#E0E7FF;}"
+            "#navside QLabel{background:transparent;border:none;}")
+        nv = QtWidgets.QVBoxLayout(nav); nv.setContentsMargins(11, 13, 11, 9); nv.setSpacing(2)
+        _lg = QtWidgets.QHBoxLayout(); _lg.setSpacing(9)
+        _mark = QtWidgets.QLabel("🖨"); _mark.setFixedSize(38, 38)
+        _mark.setAlignment(QtCore.Qt.AlignCenter)
+        _mark.setStyleSheet(
+            "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #4F46E5,stop:1 #7C3AED);"
+            "border-radius:11px;font-size:17px;color:#fff;")
+        _lg.addWidget(_mark)
+        _lt = QtWidgets.QLabel(
+            "<b style='font-size:14px'>ApneScan</b><br>"
+            "<span style='font-size:10px;color:#6B7280'>Smart Document Suite</span>")
+        _lg.addWidget(_lt, 1)
+        nv.addLayout(_lg); nv.addSpacing(8)
+
+        def _ncap(txt):
+            c = QtWidgets.QLabel(txt)
+            c.setStyleSheet("color:#9CA3AF;font-size:9px;font-weight:700;letter-spacing:1px;")
+            c.setContentsMargins(10, 9, 0, 3)
+            nv.addWidget(c)
+
+        def _nbtn(icon, txt, slot, on=False):
+            b = QtWidgets.QPushButton("%s  %s" % (icon, txt))
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            if on:
+                b.setObjectName("navon")
+            b.clicked.connect(slot)
+            nv.addWidget(b)
+            return b
+
+        _ncap("WORKSPACE")
+        _nbtn("🏠", "Dashboard", lambda: self.list.setFocus(), on=True)
+        _nbtn("📁", self.L("Meri Files", "My Documents"),
+              lambda: (self.files_panel.setVisible(True), self.files_panel.setFocus()))
+        _nbtn("🕘", "Recent Files", self._show_recent_files)
+        _nbtn("📚", self.L("History", "Scan History"), self.show_history)
+        _nbtn("📊", "Analytics", self.show_analytics)
+        _ncap("LIBRARY")
+        _nbtn("🗂", "Profiles", self.open_profiles)
+        _nbtn("📱", self.L("Phone se Scan", "Phone to PC"), self.phone_scan)
+        _nbtn("🧰", "Tools", self._tools_catalog_dialog)
+        _ncap("SYSTEM")
+        _nbtn("⚙", "Settings", self.open_options)
+        _nbtn("📖", self.L("Guide", "Help & Guide"), self.show_guide)
+        nv.addStretch(1)
+        _store = QtWidgets.QFrame()
+        _store.setStyleSheet("background:#F9FAFB;border:1px solid #E5E7EB;border-radius:11px;")
+        _sv = QtWidgets.QVBoxLayout(_store); _sv.setContentsMargins(10, 8, 10, 8); _sv.setSpacing(3)
+        try:
+            _du = shutil.disk_usage(os.path.expanduser("~"))
+            _free = self.L("Disk: %.0f GB khaali", "Disk: %.0f GB free") % (_du.free / (1024 ** 3))
+        except Exception:
+            _free = ""
+        _s1 = QtWidgets.QLabel("💾 " + _free)
+        _s1.setStyleSheet("font-size:10.5px;color:#374151;")
+        _s2 = QtWidgets.QLabel("🟢 Scanner · WIA")
+        _s2.setStyleSheet("font-size:10.5px;color:#374151;")
+        _sv.addWidget(_s1); _sv.addWidget(_s2)
+        nv.addWidget(_store)
+        _ver = QtWidgets.QLabel("ApneScan · v%s · 100%% Free" % VERSION)
+        _ver.setAlignment(QtCore.Qt.AlignCenter)
+        _ver.setStyleSheet("color:#9CA3AF;font-size:9.5px;")
+        nv.addSpacing(6); nv.addWidget(_ver)
+        self.nav_side = nav
+        # chhoti screen par jagah bachao — nav apne aap chhupa; F8 = dikha/chhupa
+        try:
+            _scrw = QtWidgets.QApplication.primaryScreen().availableGeometry().width()
+        except Exception:
+            _scrw = 1920
+        if _scrw < 1450:
+            nav.hide()
+        QtWidgets.QShortcut(QtGui.QKeySequence("F8"), self,
+                            lambda: self.nav_side.setVisible(not self.nav_side.isVisible()))
+        _bodyrow = QtWidgets.QWidget()
+        _bh = QtWidgets.QHBoxLayout(_bodyrow)
+        _bh.setContentsMargins(0, 0, 0, 0); _bh.setSpacing(0)
+        _bh.addWidget(nav); _bh.addWidget(spl, 1)
+        outer.addWidget(_bodyrow, 1)
         # ANALYTICS card: PREVIEW ke JUST NEECHE (user ki request); preview
         # band ho to Meri Files panel ke neeche — kahin na kahin hamesha.
         self._place_an_box()
@@ -12857,6 +13071,8 @@ if the toggle is ticked).</p>
                 QScrollBar::handle:horizontal { background:#D1D5DB; border-radius:5px; min-width:30px; }
                 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width:0; }
                 #statsbox { border:1px solid #E5E7EB; border-radius:10px; padding:8px; color:#374151; background:#fff; }
+                QStatusBar { background:#FFFFFF; border-top:1px solid #E5E7EB; color:#6B7280; }
+                QStatusBar QLabel { color:#6B7280; font-size:11px; }
             """)
 
 
