@@ -228,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "175"
+VERSION = "176"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8973,9 +8973,26 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 "QPushButton{border:1px solid #E5E7EB;border-radius:13px;background:#fff;}"
                 "QPushButton:hover{border-color:#C7D2FE;background:#FBFAFF;}")
             _h = QtWidgets.QHBoxLayout(b); _h.setContentsMargins(10, 8, 10, 8); _h.setSpacing(10)
-            _th = QtWidgets.QLabel("📄"); _th.setFixedSize(50, 64)
-            _th.setAlignment(QtCore.Qt.AlignCenter)
-            _th.setStyleSheet("background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;font-size:20px;")
+            # mockup jaisa mini-document thumbnail (heading-bar + lines)
+            _th = QtWidgets.QLabel(); _th.setFixedSize(50, 64)
+            _pm = QtGui.QPixmap(50, 64); _pm.fill(QtCore.Qt.transparent)
+            try:
+                _pp = QtGui.QPainter(_pm)
+                _pp.setRenderHint(QtGui.QPainter.Antialiasing)
+                _pp.setPen(QtGui.QPen(QtGui.QColor("#E5E7EB"), 1))
+                _pp.setBrush(QtGui.QColor("#FFFFFF"))
+                _pp.drawRoundedRect(QtCore.QRectF(0.5, 0.5, 49, 63), 6, 6)
+                _pp.setPen(QtCore.Qt.NoPen)
+                _hcol = "#4F46E5" if (paths.index(p) % 2 == 0) else "#111827"
+                _pp.setBrush(QtGui.QColor(_hcol))
+                _pp.drawRoundedRect(QtCore.QRectF(7, 8, 26, 4), 2, 2)
+                _pp.setBrush(QtGui.QColor("#D1D5DB"))
+                for _yy in (18, 25, 32, 39, 46):
+                    _pp.drawRoundedRect(QtCore.QRectF(7, _yy, 36, 2.4), 1, 1)
+                _pp.end()
+            except Exception:
+                pass
+            _th.setPixmap(_pm)
             _vv = QtWidgets.QVBoxLayout(); _vv.setSpacing(2)
             name = os.path.basename(p)
             _nm = QtWidgets.QLabel(name)
@@ -11800,6 +11817,15 @@ if the toggle is ticked).</p>
         tbtn("guide", self.L("Guide", "Guide"), self.show_guide, key="guide")
         tbtn("language", "Language", self.choose_language, key="language")
         tbtn("about", tr("about", self._lang), self.show_about, key="about")
+        # ✨ redesign: right-side buttons chhote icon-only (mockup ke icobtn jaise)
+        for _k in ("guide", "language", "about"):
+            _bt = self._tb_buttons.get(_k)
+            if _bt is not None:
+                _bt.setToolButtonStyle(QtCore.Qt.ToolButtonIconOnly)
+                _bt.setFixedSize(38, 38); _bt.setMinimumWidth(38)
+        _bt = self._tb_buttons.get("tools")
+        if _bt is not None:
+            _bt.setText("🧰"); _bt.setFixedSize(38, 38); _bt.setMinimumWidth(38)
         pdfmenu = QtWidgets.QMenu(self.btn_save_pdf); pdfmenu.setToolTipsVisible(True)
         self._ma(pdfmenu, self.L("📄 PDF — sabhi pages", "📄 PDF — all pages"), self.save_pdf_all,
                  "हिन्दी: सभी पेजों की एक PDF बनाओ।\nEnglish: Save all pages as one PDF.")
@@ -11906,6 +11932,11 @@ if the toggle is ticked).</p>
             "Change these in Settings → Keyboard Shortcuts — this line always shows "
             "your current keys."))
         outer.addWidget(self.lbl_shortcuts)
+        # ✨ redesign: mockup me ye line nahi hai — default chhupi (F1 Guide me
+        # sab shortcuts hain); zaroorat par Alt+K se dikha/chhupa sakte hain.
+        self.lbl_shortcuts.setVisible(False)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Alt+K"), self,
+                            lambda: self.lbl_shortcuts.setVisible(not self.lbl_shortcuts.isVisible()))
         # ---- UI #7: Status-header card (toolbar ke neeche patli smart patti) ----
         self.ui_header = QtWidgets.QWidget()
         self.ui_header.setObjectName("uiheader")
@@ -11997,7 +12028,7 @@ if the toggle is ticked).</p>
                                           "Scanner status: 🟢 ready · 🟡 busy · 🔴 offline"))
         self.dev_lbl = QtWidgets.QLabel(self._opts.get("scanner_name") or "(no device)")
         self.dev_lbl.setObjectName("dev"); self.dev_lbl.setWordWrap(False)
-        self.dev_lbl.setMaximumWidth(230)
+        self.dev_lbl.setMaximumWidth(170)
         self.btn_change_dev = QtWidgets.QPushButton("🔄")
         self.btn_change_dev.setFixedWidth(30)
         self.btn_change_dev.setToolTip(self.L(
@@ -12010,7 +12041,7 @@ if the toggle is ticked).</p>
         _devrow.addWidget(self.btn_change_dev)
         _devw = QtWidgets.QWidget(); _devw.setLayout(_devrow)
         self.method_lbl = QtWidgets.QLabel(""); self.method_lbl.setObjectName("dev")
-        self.method_lbl.setStyleSheet("font-size:9.5px;")
+        self.method_lbl.setStyleSheet("font-size:9px;color:#9CA3AF;font-weight:700;")
         _dbox = QtWidgets.QVBoxLayout(); _dbox.setContentsMargins(0, 0, 0, 0); _dbox.setSpacing(0)
         _dbox.addWidget(self.method_lbl); _dbox.addWidget(_devw)
         _dcw = QtWidgets.QWidget(); _dcw.setLayout(_dbox)
@@ -12034,7 +12065,11 @@ if the toggle is ticked).</p>
         self.cmb_dpi.currentTextChanged.connect(self._on_panel_dpi_changed)
         sb.addWidget(_col("Resolution", self.cmb_dpi, 88))
         self.cmb_depth = QtWidgets.QComboBox(); self.cmb_depth.addItems(["24-bit Colour", "Grayscale", "Black & White"]); self.cmb_depth.setCurrentText("Grayscale")
-        sb.addWidget(_col("Bit depth", self.cmb_depth, 110))
+        sb.addWidget(_col("Color", self.cmb_depth, 110))
+        # ✨ redesign: PAPER (page size) ab mockup jaisa MAIN bar par
+        self.cmb_pagesize = QtWidgets.QComboBox(); self.cmb_pagesize.addItems(["Auto (detect each page's size)", "A4 (210x297 mm)", "Letter", "Legal", "A5"])
+        self.cmb_pagesize.setToolTip("Auto = detect each page's real size (mixed sizes / ID card / half page too). A4/Letter/Legal = fixed size.")
+        sb.addWidget(_col("Paper", self.cmb_pagesize, 96))
         # baaki sab ⚙ Advanced ke andar (default band)
         self._adv_box = QtWidgets.QWidget()
         _av = QtWidgets.QHBoxLayout(self._adv_box); _av.setContentsMargins(0, 0, 0, 0); _av.setSpacing(8)
@@ -12045,9 +12080,6 @@ if the toggle is ticked).</p>
         self.cmb_sides.addItems(["Single side", "Both sides (duplex)"])
         self.cmb_sides.setToolTip("Both side = scan both sides of the paper (duplex)")
         _av.addWidget(_col("Scan sides", self.cmb_sides, 100))
-        self.cmb_pagesize = QtWidgets.QComboBox(); self.cmb_pagesize.addItems(["Auto (detect each page's size)", "A4 (210x297 mm)", "Letter", "Legal", "A5"])
-        self.cmb_pagesize.setToolTip("Auto = detect each page's real size (mixed sizes / ID card / half page too). A4/Letter/Legal = fixed size.")
-        _av.addWidget(_col("Page size", self.cmb_pagesize, 110))
 
         # ---- ⚙ Auto-fixes quick chips (yahin on/off) ----
         _ocrow = QtWidgets.QHBoxLayout(); _ocrow.setContentsMargins(0, 0, 0, 0); _ocrow.setSpacing(9)
@@ -12614,19 +12646,26 @@ if the toggle is ticked).</p>
             return b
         self._mk_pv_btn = _mkbtn
 
-        # zoom row
-        _zr = QtWidgets.QHBoxLayout(); _zr.setSpacing(4)
-        for _ic, _lb, _tip, _fn in (
-                ("➖", self.L("Chhota", "Zoom −"), self.L("Zoom kam", "Zoom out"),
-                 lambda: self._pv_do_zoom(0.8)),
-                ("🔳", self.L("Fit", "Fit"), self.L("Panel me fit", "Fit to panel"),
-                 self._pv_fit),
-                ("➕", self.L("Bada", "Zoom +"), self.L("Zoom zyada", "Zoom in"),
-                 lambda: self._pv_do_zoom(1.25)),
-                ("⛶", self.L("Screen", "Full"), self.L("Poori screen", "Full screen"),
-                 self._pv_fullscreen)):
-            _zr.addWidget(_mkbtn(_ic, _lb, _tip, _fn, h=38, grp="slate"))
-        _p1l.addLayout(_zr)
+        # zoom row — ✨ redesign: mockup jaisi DARK gol pill (− Fit + ⛶)
+        _zw = QtWidgets.QFrame(); _zw.setObjectName("pvzoom")
+        _zw.setStyleSheet(
+            "#pvzoom{background:#1F2937;border-radius:15px;}"
+            "#pvzoom QPushButton{background:transparent;border:none;color:#E5E7EB;"
+            "font-size:11px;font-weight:600;padding:4px 11px;border-radius:11px;}"
+            "#pvzoom QPushButton:hover{background:rgba(255,255,255,0.16);color:#fff;}")
+        _zr = QtWidgets.QHBoxLayout(_zw)
+        _zr.setContentsMargins(5, 3, 5, 3); _zr.setSpacing(1)
+        for _lb, _tip, _fn in (
+                ("−", self.L("Zoom kam", "Zoom out"), lambda: self._pv_do_zoom(0.8)),
+                ("Fit", self.L("Panel me fit", "Fit to panel"), self._pv_fit),
+                ("+", self.L("Zoom zyada", "Zoom in"), lambda: self._pv_do_zoom(1.25)),
+                ("⛶", self.L("Poori screen", "Full screen"), self._pv_fullscreen)):
+            _zb = QtWidgets.QPushButton(_lb); _zb.setToolTip(_tip)
+            _zb.setCursor(QtCore.Qt.PointingHandCursor)
+            _zb.clicked.connect(_fn); _zr.addWidget(_zb)
+        _zrow = QtWidgets.QHBoxLayout()
+        _zrow.addStretch(1); _zrow.addWidget(_zw); _zrow.addStretch(1)
+        _p1l.addLayout(_zrow)
         self.pv_tabs.addTab(_p1, self.L("👁 Jhalak", "👁 Preview"))
         # Text tab
         _p2 = QtWidgets.QWidget(); _p2l = QtWidgets.QVBoxLayout(_p2)
@@ -12790,6 +12829,11 @@ if the toggle is ticked).</p>
             nav.hide()
         QtWidgets.QShortcut(QtGui.QKeySequence("F8"), self,
                             lambda: self.nav_side.setVisible(not self.nav_side.isVisible()))
+        # ✨ redesign: mockup me upar wali menu-patti (File/Edit/…) nahi hai —
+        # default chhupi; SAB shortcuts phir bhi chalte hain. Alt+M = dikhao.
+        self.menuBar().setVisible(False)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Alt+M"), self,
+                            lambda: self.menuBar().setVisible(not self.menuBar().isVisible()))
         # nav sabse LEFT me poori height par (toolbar bhi iske right me)
         self._root_h.insertWidget(0, nav)
         outer.addWidget(spl, 1)
