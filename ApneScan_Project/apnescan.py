@@ -227,7 +227,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "158"
+VERSION = "159"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -14816,6 +14816,14 @@ if the toggle is ticked).</p>
             return
         SE = FileSearchEngine
         t0 = time.time()
+        # halki telemetry: 'search' feature — zyada se zyada 10 min me 1 baar
+        # (har keystroke par nahi; sirf ginti jaati hai, query kabhi nahi)
+        try:
+            if t0 - getattr(self, "_an_search_t", 0) > 600:
+                self._an_search_t = t0
+                self._an_event("search")
+        except Exception:
+            pass
         terms, filters = SE.parse_query(q)
         scope = self._panel_current_dir()
         if not (scope and os.path.isdir(scope)):
@@ -19100,6 +19108,11 @@ if the toggle is ticked).</p>
         # pages ab SCAN par gine jaate hain (upar), isliye yahan sirf PDF ki
         # ginti — warna double count ho jaata.
         self._pstats_bump(pdfs=1, doc_type=dt)
+        # worldwide analytics: PDF-save feature ki ginti (naam/content nahi jaata)
+        try:
+            self._an_event("save")
+        except Exception:
+            pass
         # recent
         self._add_recent(out)
         # used claims (duplicate detection)

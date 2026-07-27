@@ -807,7 +807,12 @@ if (isset($_GET['admin'])) {
     $userList=array(); $onlineNames=array();
     foreach ($d['clients'] as $id=>$c) {
         $nm=trim(isset($c['name'])?$c['name']:''); $last=intval(isset($c['last'])?$c['last']:0);
+        // (v2.2) feature-counts (top 8) + timeline (aakhri 10) — profile/champions ke liye
+        $fc=isset($c['feats'])&&is_array($c['feats'])?$c['feats']:array(); arsort($fc);
+        $fcp=array(); $fi2=0; foreach($fc as $fk=>$fv){ if($fi2++>=8)break; $fcp[]=array((string)$fk,intval($fv)); }
+        $evu=array(); foreach(array_slice(isset($c['ev'])&&is_array($c['ev'])?$c['ev']:array(),-10) as $e2){ if(is_array($e2)&&count($e2)>=2)$evu[]=array(intval($e2[0]),(string)$e2[1]); }
         $userList[]=array('id'=>(string)$id,'name'=>($nm!==''?$nm:'—'),'scans'=>intval(isset($c['scans'])?$c['scans']:0),
+            'featc'=>$fcp,'ev'=>array_reverse($evu),
             'first'=>intval(isset($c['first'])?$c['first']:0),'last'=>$last,'version'=>trim(isset($c['version'])?$c['version']:''),
             'country'=>trim(isset($c['country'])?$c['country']:''),'method'=>trim(isset($c['method'])?$c['method']:''),
             'model'=>trim(isset($c['model'])?$c['model']:''),'note'=>trim(isset($c['note'])?$c['note']:''),
@@ -1196,6 +1201,7 @@ if (isset($_GET['admin'])) {
 
     // admin-only extras (app API me nahi jaate — sirf is page ka $J):
     $S['recentScans300']=array_reverse(array_slice(isset($d['recentScans'])?$d['recentScans']:array(),-300));
+    $S['recentEvents']=array_reverse(array_slice(isset($d['recentEvents'])?$d['recentEvents']:array(),-200));
     if (!empty($GLOBALS['HAS_STORAGE'])) { $S['health']=storageHealth($DATA_FILE); }
     $S['adminLoginsFull']=array_reverse(array_slice(isset($d['adminLogins'])?$d['adminLogins']:array(),-20));
     // ---- (v2) REAL server metrics (sirf admin-blob me; kabhi fake nahi —
@@ -1661,6 +1667,10 @@ if (isset($_GET['admin'])) {
     </form>
     <div style="overflow:auto;max-height:460px"><table id="utable"></table></div>
   </div>
+  <div class="grid" style="margin-top:13px">
+    <div class="card"><h3><span class="em">🏆</span> Feature champions — kaun kya SABSE ZYADA karta hai</h3><div id="uchamp" class="skel"></div></div>
+    <div class="card"><h3><span class="em">🕒</span> User activity feed — kaun abhi kya kar raha hai</h3><div id="uactfeed" class="skel" style="max-height:300px;overflow:auto"></div></div>
+  </div>
 
   
 <div id="umodal" class="no-print" onclick="if(event.target===this)closeUser()" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99;align-items:center;justify-content:center">
@@ -1995,7 +2005,7 @@ if(window.Chart){
   Chart.defaults.elements.bar.borderSkipped=false;
 }
 function grad(ctx,hex){try{var c=ctx.chart.ctx,g=c.createLinearGradient(0,0,0,ctx.chart.height||160);g.addColorStop(0,hex+'55');g.addColorStop(1,hex+'05');return g;}catch(e){return hex+'22';}}
-var FEATLBL={ocr:'OCR (text)',compress:'Compress',merge:'Merge',split:'Split page',sign:'Signature',stamp:'Stamp',password:'Password',watermark:'Watermark',whatsapp:'WhatsApp share',email:'Email share',print:'Print',import:'Import',phoneimport:'Phone photo',idcard:'ID-card crop',rename:'Rename',donate:'Donate click',refer:'Share app',phonescan:'Phone scan'};
+var FEATLBL={ocr:'OCR (text)',compress:'Compress',merge:'Merge',split:'Split page',sign:'Signature',stamp:'Stamp',password:'Password',watermark:'Watermark',whatsapp:'WhatsApp share',email:'Email share',print:'Print',import:'Import',phoneimport:'Phone photo',idcard:'ID-card crop',rename:'Rename',donate:'Donate click',refer:'Share app',phonescan:'Phone scan',save:'PDF save',search:'File search'};
 
 // KPIs (icon + number + label)
 function kpi(ic,n,l,cls){return '<div class="kpi '+(cls||'')+'"><div class="ic">'+ic+'</div><div class="tx"><div class="n">'+n+'</div><div class="l">'+l+'</div></div></div>';}
@@ -2395,6 +2405,11 @@ function showUser(u){
         +'<div style="display:flex;flex-wrap:wrap;gap:2px;margin-bottom:8px">'+strip+'</div>'
         +(hist?'<div style="max-height:150px;overflow:auto"><table style="font-size:11px">'+hist+'</table></div>':'<div style="color:var(--mut);font-size:11px">— abhi record nahi —</div>')+'</div>';
     })()
+   +((u.featc&&u.featc.length)?(function(){ var mx=u.featc[0][1]||1;
+      return '<div class="pcard" style="margin-top:11px"><h4>⭐ Ye user kya SABSE ZYADA karta hai</h4>'
+       +u.featc.map(function(f){ return '<div style="display:flex;align-items:center;gap:7px;margin:4px 0"><span style="width:120px;font-size:11px">'+esc(flbl(f[0]))+'</span><div class="hbar" style="flex:1;height:8px"><i style="width:'+Math.round(f[1]*100/mx)+'%;background:linear-gradient(90deg,var(--accent),var(--accent2))"></i></div><b style="font-size:11px;min-width:34px;text-align:right">'+fmt(f[1])+'</b></div>'; }).join('')+'</div>'; })():'')
+   +((u.ev&&u.ev.length)?'<div class="pcard" style="margin-top:11px"><h4>🕒 Timeline — is user ki haal ki activity</h4><table style="font-size:11px">'
+      +u.ev.map(function(e){ return '<tr><td>⚙️ '+esc(flbl(e[1]))+'</td><td style="text-align:right;color:var(--mut);white-space:nowrap">'+ago(e[0])+'</td></tr>'; }).join('')+'</table></div>':'')
    +(crashes.length?'<div class="pcard" style="margin-top:11px"><h4>💥 Crash history</h4><div style="max-height:120px;overflow:auto"><table style="font-size:11px">'
       +crashes.slice(0,15).map(function(c){return '<tr><td>'+esc((c.err||'').slice(0,50))+'</td><td style="text-align:right;color:var(--mut);white-space:nowrap">v'+(c.v||'?')+' · '+ago(c.t)+'</td></tr>';}).join('')+'</table></div></div>':'')
    +(fbs.length?'<div class="pcard" style="margin-top:11px"><h4>💬 Feedback history</h4>'
@@ -2412,6 +2427,23 @@ function showUser(u){
 function closeUser(){ document.getElementById('umodal').style.display='none'; }
 document.getElementById('usearch').addEventListener('input',renderUsers);
 renderUsers();
+// ---- (v2.2) Feature champions (kaun kya sabse zyada karta hai) + activity feed ----
+(function(){ var el=document.getElementById('uchamp'); if(!el)return;
+  var tot={}, top={};
+  (D.userList||[]).forEach(function(u){ (u.featc||[]).forEach(function(f){
+    tot[f[0]]=(tot[f[0]]||0)+f[1];
+    if(!top[f[0]]||f[1]>top[f[0]][1]) top[f[0]]=[u.name,f[1],u.id]; }); });
+  var rows=Object.keys(tot).sort(function(a,b){return tot[b]-tot[a];}).slice(0,12);
+  el.classList.remove('skel');
+  el.innerHTML=rows.length?_tbl(rows.map(function(k){ var t2=top[k];
+    return '<tr><td>⚙️ '+esc(flbl(k))+'</td><td><a href="#" style="color:var(--accent);text-decoration:none" onclick="openUser(\''+esc(t2[2])+'\');return false"><b>'+esc(t2[0])+'</b></a> <span style="color:var(--mut)">('+fmt(t2[1])+' baar)</span></td><td style="text-align:right;color:var(--mut)">kul '+fmt(tot[k])+'</td></tr>';}),['Feature','#1 user','Sab total'])
+   :'<div style="color:var(--mut);font-size:12px">— jaise-jaise users features chalaayenge, yahan champions dikhenge —</div>';
+  var fe=document.getElementById('uactfeed'); if(!fe)return; fe.classList.remove('skel');
+  var E=(D.recentEvents||[]).slice(0,40);
+  fe.innerHTML=E.length?_tbl(E.map(function(e){
+    return '<tr><td><b>'+esc(e.u||'user')+'</b></td><td>'+esc(flbl(e.feat))+'</td><td style="text-align:right;color:var(--mut);white-space:nowrap">'+ago(e.t)+'</td></tr>';}),['User','Kaam','Kab'])
+   :'<div style="color:var(--mut);font-size:12px">— abhi koi event record nahi (v159+ app se events aate hain) —</div>';
+})();
 
 // date-range
 function drCalc(){ var a=document.getElementById('df').value,b=document.getElementById('dt').value; if(!a||!b){document.getElementById('drsum').textContent='';return;} var s=0; for(var k in D.daysMap){ if(k>=a&&k<=b) s+=parseInt(D.daysMap[k])||0; } document.getElementById('drsum').textContent=fmt(s)+' scans'; }
@@ -2832,6 +2864,7 @@ function lvRender(){
   // ---- timeline (asli events merge) ----
   (function(){ var el=document.getElementById('lvTime'); if(!el)return; var T=[];
     (D.recentScans300||D.recentScans||[]).slice(0,25).forEach(function(x){ T.push({t:x.t,ic:'🖨',txt:'<b>'+esc(x.name||'user')+'</b> ne <b>'+x.n+'</b> page scan kiye'+(x.cc?' ('+flag(x.cc)+')':'')}); });
+    (D.recentEvents||[]).slice(0,25).forEach(function(e){ T.push({t:e.t,ic:'⚙️',txt:'<b>'+esc(e.u||'user')+'</b> ne <b>'+esc(flbl(e.feat))+'</b> chalaya'}); });
     (D.crashes||[]).slice(0,6).forEach(function(c){ T.push({t:c.t,ic:'💥',txt:'Crash v'+esc(c.v||'?')+' — '+esc((c.err||'').slice(0,40))}); });
     (D.feedback||[]).slice(0,6).forEach(function(f){ T.push({t:f.t,ic:'💬',txt:'<b>'+esc(f.name||'user')+'</b> ka feedback '+('★'.repeat(f.rating||0))}); });
     (D.auditLog||[]).slice(0,6).forEach(function(a){ T.push({t:a.t,ic:'🛠',txt:'Admin: '+esc(a.act)+(a.det?' — '+esc(a.det):'')}); });
@@ -3113,7 +3146,16 @@ if ($action === 'scan') {
         if ($client !== '' && isset($d['clients'][$client])) {
             if (!isset($d['clients'][$client]['feats'])) $d['clients'][$client]['feats'] = array();
             $d['clients'][$client]['feats'][$feat] = intval(isset($d['clients'][$client]['feats'][$feat])?$d['clients'][$client]['feats'][$feat]:0) + 1;
+            // (v2.2) USER TIMELINE: har user ki aakhri 30 activities (kab kya kiya)
+            if (!isset($d['clients'][$client]['ev'])||!is_array($d['clients'][$client]['ev'])) $d['clients'][$client]['ev']=array();
+            $d['clients'][$client]['ev'][]=array($now,$feat);
+            $d['clients'][$client]['ev']=array_slice($d['clients'][$client]['ev'],-30);
         }
+        // (v2.2) GLOBAL ACTIVITY FEED: sab users ke haal ke events (admin ko dikhta hai)
+        if (!isset($d['recentEvents'])||!is_array($d['recentEvents'])) $d['recentEvents']=array();
+        $d['recentEvents'][]=array('t'=>$now,'client'=>substr((string)$client,0,40),
+            'u'=>substr(trim(isset($_REQUEST['u'])?$_REQUEST['u']:''),0,40),'feat'=>$feat);
+        $d['recentEvents']=array_slice($d['recentEvents'],-400);
         // (18) feature adoption over time — roz ka feature count
         if(!isset($d['featDaily'])||!is_array($d['featDaily'])) $d['featDaily']=array();
         if(!isset($d['featDaily'][$today])) $d['featDaily'][$today]=array();
