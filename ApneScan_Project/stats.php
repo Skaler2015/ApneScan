@@ -1978,7 +1978,10 @@ if (isset($_GET['admin'])) {
 var D=<?php echo $J; ?>;
 document.getElementById('tm').textContent=D.time;
 document.getElementById('rt').textContent='server '+D.respMs+'ms';
-function flag(cc){ if(!cc||cc.length!==2) return '🏳'; return String.fromCodePoint.apply(null,[].map.call(cc.toUpperCase(),function(ch){return 127397+ch.charCodeAt(0);})); }
+// Windows emoji-flags nahi dikhata ("us US" jaisa kachra dikhta tha) —
+// isliye saaf text-badge (IN / US / AE) har jagah kaam karta hai.
+function flag(cc){ if(!cc||cc.length!==2) return '';
+  return '<span style="display:inline-block;padding:0 5px;border-radius:5px;background:var(--line);color:var(--fg);font-size:9.5px;font-weight:800;letter-spacing:.4px;vertical-align:middle">'+String(cc).toUpperCase()+'</span>'; }
 function fmt(n){ return (n||0).toLocaleString(); }
 function esc(s){ return (s==null?'':(''+s)).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
 function ago(ts){ if(!ts)return '—'; var s=Math.floor(Date.now()/1000)-ts; if(s<60)return s+'s'; if(s<3600)return Math.floor(s/60)+'m'; if(s<86400)return Math.floor(s/3600)+'h'; return Math.floor(s/86400)+'d'; }
@@ -2274,7 +2277,7 @@ var _uf='all';
     b.classList.add('on'); _uf=b.getAttribute('data-f'); renderUsers(); }; });
   var cs=document.getElementById('ufCountry'); var seen={};
   (D.userList||[]).forEach(function(u){ if(u.country&&!seen[u.country]){seen[u.country]=1;
-    var o=document.createElement('option'); o.value=u.country; o.textContent=flag(u.country)+' '+u.country; cs.appendChild(o);} });
+    var o=document.createElement('option'); o.value=u.country; o.textContent='🌍 '+u.country; cs.appendChild(o);} });
   cs.onchange=renderUsers;
 })();
 function renderUsers(){

@@ -41,7 +41,7 @@ from apnescan_lib.search_engine import _folder_search_score
 from apnescan_lib.imaging import (
     is_blank_page, whiten_dark_background, autocrop, deskew, auto_enhance,
     denoise, apply_enhance_mode, clean_edges, split_two_pages, flatten_background,
-    adaptive_bw,
+    adaptive_bw, dewarp_page,
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
 )
@@ -227,7 +227,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "159"
+VERSION = "160"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3396,6 +3396,8 @@ class ImageEditor(QtWidgets.QDialog):
         gbtn(1, 1, "↕", "Flip V", lambda: self._op(lambda im: im.transpose(Image.FLIP_TOP_BOTTOM)))
         gbtn(2, 0, "📐", L("Seedha", "Straighten"), lambda: self._op(lambda im: deskew(im).convert("RGB")))
         gbtn(2, 1, "✂", L("Auto-crop", "Auto-crop"), lambda: self._op(lambda im: autocrop(im).convert("RGB")))
+        gbtn(3, 0, "📖", L("Book flatten", "Book flatten"),
+             lambda: self._op(lambda im: dewarp_page(im).convert("RGB")))
         sv.addLayout(gg)
         # live rotate slider
         rrow = QtWidgets.QHBoxLayout()
@@ -15861,6 +15863,11 @@ if the toggle is ticked).</p>
         self._edit_current_bg(lambda im: deskew(im),
                               self.L("Seedha kar rahe hain…", "Straightening…"))
 
+    def dewarp_current(self):
+        """Kitab/register ke mude page ki tedhi lines seedhi (book flatten)."""
+        self._edit_current_bg(lambda im: dewarp_page(im),
+                              self.L("Book page seedha kar rahe hain…", "Flattening book page…"))
+
     def enhance_current_page(self):
         self._edit_current_bg(lambda im: auto_enhance(im),
                               self.L("Saaf kar rahe hain…", "Enhancing…"))
@@ -17653,6 +17660,7 @@ if the toggle is ticked).</p>
         em.addSeparator()
         em.addAction("\u2702 " + L("Crop", "Crop"), self.crop_current_page)
         em.addAction("\ud83d\udcd0 " + L("Seedha (straighten)", "Straighten"), self.deskew_current)
+        em.addAction("\ud83d\udcd6 " + L("Book page seedha (flatten)", "Book flatten"), self.dewarp_current)
         em.addAction("\u2728 " + L("Auto-fix (saaf+seedha)", "Auto-fix"), self._autofix_current)
         em.addAction("\u2b1c " + L("Whiten", "Whiten"), self.whiten_current_page)
         em.addAction("\u2728 " + L("Enhance", "Enhance"), self.enhance_current_page)
@@ -18837,6 +18845,17 @@ if the toggle is ticked).</p>
             if not item:
                 return
             items = [item]
+        # (F13) 3+ pages ek saath delete par ek baar poochh lo (galti se
+        # selection samet delete na ho jaaye) — single page par nahi poochhte
+        # kyunki Ctrl+Z undo hamesha hai.
+        if len(items) >= 3:
+            if QtWidgets.QMessageBox.question(
+                    self, self.L("Delete", "Delete"),
+                    self.L("%d pages delete karein? (Ctrl+Z se wapas aa sakte hain)",
+                           "Delete %d pages? (Ctrl+Z can undo)") % len(items),
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+                return
         # delete from the highest row down so earlier indices stay valid
         rows = sorted((self.list.row(it) for it in items), reverse=True)
         deleted = []

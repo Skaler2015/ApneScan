@@ -27,6 +27,7 @@ __all__ = [
     "trim_dark_borders",
     "autocrop",
     "deskew",
+    "dewarp_page",
     "flatten_background",
     "adaptive_bw",
     "straighten_photo_page",
@@ -169,17 +170,130 @@ def deskew(img):
     try:
         g = img.convert("L")
         small = g.resize((max(1, g.width // 4), max(1, g.height // 4)))
-        best_angle, best_score = 0.0, -1.0
-        for i in range(-10, 11):
-            angle = i * 0.5
+        # Document-guard: deskew sirf KAGAZ jaise page par (zyada halka
+        # background) — photo/X-ray par rotation ke white kone score ko
+        # jhootha badha dete the aur bina wajah ghumav lag jaata tha.
+        # (subsample [::4] — resize ka averaging noise ko 'halka' dikha deta tha)
+        if float((np.asarray(g, dtype=np.float32)[::4, ::4] > 150).mean()) < 0.55:
+            return img
+
+        def _score(angle):
             rot = small.rotate(angle, resample=Image.BILINEAR, fillcolor=255)
             arr = np.asarray(rot, dtype=np.float32)
-            score = float(np.var(np.diff(arr.sum(axis=1))))
-            if score > best_score:
-                best_score, best_angle = score, angle
+            return float(np.var(np.diff(arr.sum(axis=1))))
+
+        score0 = _score(0.0)
+        # (F2) BADA tilt bhi: pehle mota search ±44° (2° step). Bada angle
+        # sirf tab mana jaata hai jab uska score 0° se SAAF (1.35x) behtar
+        # ho — warna photo/table jaise page par galat 30° ghumav lag jaata.
+        center = 0.0
+        best_c, best_cs = 0.0, score0
+        for i in range(-22, 23):
+            a = i * 2.0
+            if a == 0.0:
+                continue
+            s = _score(a)
+            if s > best_cs:
+                best_cs, best_c = s, a
+        if abs(best_c) > 5.0 and best_cs > 1.35 * score0:
+            center = best_c
+        # fine search: center ke aas-paas ±5° (0.5° step)
+        best_angle, best_score = center, _score(center)
+        for i in range(-10, 11):
+            angle = center + i * 0.5
+            s = _score(angle)
+            if s > best_score:
+                best_score, best_angle = s, angle
         if abs(best_angle) < 0.25:
             return img
+        # Quality-guard: ghumane par text-lines SAAF behtar honi chahiye —
+        # photo/naqsha jaise page par bina wajah rotation nahi lagti.
+        if best_score < 1.15 * score0:
+            return img
         return img.rotate(best_angle, resample=Image.BICUBIC, fillcolor=(255, 255, 255), expand=True)
+    except Exception:
+        return img
+
+
+def dewarp_page(img, max_shift_frac=0.04):
+    """(Conservative) Kitab/register ke MUDE hue page ki tedhi text-lines
+    seedhi karo. Kaise: page khadi pattiyon (24 strips) me bat'ta hai; har
+    patti ke text-profile ko beech wali patti se milaya jaata hai
+    (cross-correlation) — kitna upar/neeche khiska hai. In shifts par smooth
+    (quadratic) curve fit karke HAR column apni jagah wapas khiska diya
+    jaata hai (bilinear remap — koi nearest-neighbour nahi).
+    Suraksha: flat page, photo, ya kam-bharose par ORIGINAL wapas."""
+    try:
+        if not HAS_NUMPY:
+            return img
+        g = np.asarray(img.convert("L"), dtype=np.float32)
+        h, w = g.shape
+        if h < 400 or w < 400:
+            return img
+        ink = np.clip(200.0 - g, 0.0, 200.0)
+        NS = 24
+        sw = w // NS
+        if sw < 8:
+            return img
+        prof = np.zeros((NS, h), np.float32)
+        for i in range(NS):
+            prof[i] = ink[:, i * sw:(i + 1) * sw].sum(axis=1)
+        tot = prof.sum(axis=1)
+        c = NS // 2
+        if tot[c] <= 0 or float((tot > tot[c] * 0.15).mean()) < 0.5:
+            return img
+        max_sh = max(6, int(h * max_shift_frac))
+        ref = prof[c] - prof[c].mean()
+        rn = float(np.sqrt((ref * ref).sum())) or 1.0
+        shifts = np.zeros(NS, np.float32)
+        conf = np.zeros(NS, np.float32)
+        for i in range(NS):
+            p = prof[i] - prof[i].mean()
+            pn = float(np.sqrt((p * p).sum())) or 1.0
+            best, bs = 0.0, 0
+            for s in range(-max_sh, max_sh + 1, 2):
+                if s >= 0:
+                    v = float((p[s:h] * ref[0:h - s]).sum())
+                else:
+                    v = float((p[0:h + s] * ref[-s:h]).sum())
+                v /= (pn * rn)
+                if v > best:
+                    best, bs = v, s
+            shifts[i] = bs
+            conf[i] = best
+        good = conf > 0.35
+        if int(good.sum()) < NS // 2:
+            return img
+        xs = (np.arange(NS) + 0.5) * sw
+        co = np.polyfit(xs[good], shifts[good], 2)
+        colshift = np.polyval(co, np.arange(w)).astype(np.float32)
+        colshift = colshift - colshift[w // 2]
+        mx = float(np.abs(colshift).max())
+        if mx < 3.0 or mx > max_sh:
+            return img          # page pehle se seedha / bharosa nahi
+        rows = np.arange(h, dtype=np.float32)[:, None] + colshift[None, :]
+        r0 = np.clip(np.floor(rows).astype(np.int32), 0, h - 1)
+        fr = rows - r0
+        r1 = np.clip(r0 + 1, 0, h - 1)
+        cols = np.arange(w)[None, :]
+        outg = g[r0, cols] * (1.0 - fr) + g[r1, cols] * fr
+        # Quality-guard: sudhaar ke BAAD text-lines saaf zyada 'tight' honi
+        # chahiye (ink-profile ka std badhe) — na badhe to original wapas
+        # (seedha page kabhi kharab nahi hota).
+        def _tight(arr):
+            return float(np.clip(200.0 - arr, 0.0, 200.0).sum(axis=1).std())
+        if _tight(outg) < 1.05 * _tight(g):
+            return img
+        if img.mode == "L":
+            return Image.fromarray(np.clip(outg, 0, 255).astype(np.uint8), "L")
+        # RGB: channel-by-channel (32-bit app me memory kam rahe)
+        src = img.convert("RGB")
+        outc = np.empty((h, w, 3), dtype=np.uint8)
+        for ci, ch in enumerate(src.split()):
+            a = np.asarray(ch, dtype=np.float32)
+            outc[:, :, ci] = np.clip(a[r0, cols] * (1.0 - fr) + a[r1, cols] * fr,
+                                     0, 255).astype(np.uint8)
+        return Image.fromarray(outc, "RGB")
     except Exception:
         return img
 
