@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "185"
+VERSION = "186"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8026,25 +8026,54 @@ class ScannerWindow(QtWidgets.QMainWindow):
         return (self._config.get("user_name") or "")[:40]
 
     def _ensure_user_name(self):
-        """Pehli baar: user se naam pucho (analytics me kisne kitne scan kiye —
-        naam ke saath dikhe). Sirf ek baar puchte hain."""
-        if self._config.get("user_name") or self._config.get("user_name_asked"):
+        """(v186) Install ke baad pehli baar naam likhna ZAROORI hai —
+        admin panel me 'kaun kya kar raha hai' naam ke SAATH dikhta hai.
+        3 baar tak puchte hain; phir bhi na de to Windows-username apne
+        aap naam ban jaata hai (khaali kabhi nahi rahta). Jin purane
+        users ka naam khaali hai, unse bhi (update ke baad) puchega."""
+        if (self._config.get("user_name") or "").strip():
             return
-        self._config["user_name_asked"] = True
         try:
-            name, ok = QtWidgets.QInputDialog.getText(
-                self, self.L("Aapka naam?", "Your name?"),
-                self.L("Analytics me dikhane ke liye apna naam ya clinic likho\n"
-                       "(jaise 'Dr Subhash' ya 'ECHS OPD'). Sirf naam jaata hai,\n"
-                       "koi document/patient data nahi:",
-                       "Enter your name or clinic for analytics\n"
-                       "(e.g. 'Dr Subhash' or 'ECHS OPD'). Only the name is sent,\n"
-                       "no document/patient data:"),
-                text=self._opts.get("scanner_name", ""))
+            import getpass
+            _pre = getpass.getuser()
         except Exception:
-            ok = False; name = ""
-        if ok and name.strip():
-            self._config["user_name"] = name.strip()[:40]
+            _pre = ""
+        got = ""
+        for _try in range(3):
+            try:
+                name, ok = QtWidgets.QInputDialog.getText(
+                    self, self.L("Apna naam likhein (zaroori)",
+                                 "Enter your name (required)"),
+                    self.L("Shuru karne se pehle apna naam ya clinic/PC ka naam\n"
+                           "likhna ZAROORI hai (jaise 'Dr Subhash', 'ECHS OPD',\n"
+                           "'OPD-2'). Sirf naam jaata hai — koi document/patient\n"
+                           "data nahi:",
+                           "Before you start, you MUST enter your name or your\n"
+                           "clinic/PC name (e.g. 'Dr Subhash', 'ECHS OPD',\n"
+                           "'OPD-2'). Only the name is sent — no document or\n"
+                           "patient data:"),
+                    text=_pre)
+            except Exception:
+                ok = False; name = ""
+            name = (name or "").strip()
+            if ok and len(name) >= 2:
+                got = name
+                break
+            if _try < 2:
+                try:
+                    QtWidgets.QMessageBox.warning(
+                        self, APP_NAME,
+                        self.L("Naam likhna zaroori hai — bina naam ke aage nahi "
+                               "badh sakte. Krupya apna naam likhein.",
+                               "A name is required — you cannot continue without "
+                               "one. Please enter your name."))
+                except Exception:
+                    pass
+        if not got:
+            # 3 baar mana kiya -> Windows-username hi naam ban jaata hai
+            got = (_pre or "User") + " (PC)"
+        self._config["user_name"] = got[:40]
+        self._config["user_name_asked"] = True
         try:
             save_config(self._config)
         except Exception:
