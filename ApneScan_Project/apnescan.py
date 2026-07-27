@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "177"
+VERSION = "178"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8955,6 +8955,31 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 except Exception:
                     pass
 
+    def _nav_count_docs(self):
+        """Sidebar ke 'My Documents' par mockup jaisa file-count badge —
+        save-folder ki files background me ginta hai (cap ke saath)."""
+        def job():
+            n = 0
+            try:
+                for _r, _d, _f in os.walk(self._files_root()):
+                    n += len(_f)
+                    if n > 99999:
+                        break
+            except Exception:
+                return None
+            return n
+
+        def done(n):
+            b = getattr(self, "_nav_docs_badge", None)
+            if b is None or not n:
+                return
+            b.setText("{:,}".format(n))
+            b.show()
+        try:
+            self._run_bg_quiet(job, done)
+        except Exception:
+            pass
+
     def _dash_fill_recent(self):
         """Dashboard ke 'Recent Files' cards ko taaza karo — naam, samay,
         size ke saath; card par click = file kholo (mockup jaisa look)."""
@@ -12614,14 +12639,26 @@ if the toggle is ticked).</p>
         _bnext.setToolTip(self.L("Agla page", "Next page"))
         _bnext.clicked.connect(lambda: self._pv_step(1))
         self.pv_title = QtWidgets.QLabel("Document Preview")
-        self.pv_title.setAlignment(QtCore.Qt.AlignCenter)
-        self.pv_title.setStyleSheet("font-weight:700;font-size:13px;color:#111827;")
+        self.pv_title.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        self.pv_title.setStyleSheet("font-weight:700;font-size:13.5px;color:#111827;")
+        # ✨ redesign: mockup jaisi "Page 1 / 3" pill (right side)
+        self.pv_page_pill = QtWidgets.QLabel("")
+        self.pv_page_pill.setStyleSheet(
+            "background:#F3F4F6;color:#6B7280;font-size:10.5px;font-weight:700;"
+            "border-radius:10px;padding:3px 9px;")
+        self.pv_page_pill.hide()
         _bpvhelp = QtWidgets.QPushButton("❓"); _bpvhelp.setFixedWidth(30)
         _bpvhelp.setToolTip(self.L("Preview panel ki poori guide (Hindi + English)",
                                    "Full Preview panel guide (Hindi + English)"))
         _bpvhelp.clicked.connect(self.show_preview_guide)
-        _nav.addWidget(_bprev); _nav.addWidget(self.pv_title, 1)
-        _nav.addWidget(_bnext); _nav.addWidget(_bpvhelp)
+        for _nb in (_bprev, _bnext, _bpvhelp):
+            _nb.setFixedSize(26, 26)
+            _nb.setStyleSheet("QPushButton{border:none;border-radius:13px;background:transparent;"
+                              "color:#6B7280;font-size:11px;}"
+                              "QPushButton:hover{background:#F3F4F6;}")
+        _nav.addWidget(self.pv_title, 1)
+        _nav.addWidget(self.pv_page_pill)
+        _nav.addWidget(_bprev); _nav.addWidget(_bnext); _nav.addWidget(_bpvhelp)
         pv.addLayout(_nav)
         # tabs: Preview | Text | Info
         self.pv_tabs = QtWidgets.QTabWidget()
@@ -12634,7 +12671,11 @@ if the toggle is ticked).</p>
         self.pv_img.setAlignment(QtCore.Qt.AlignCenter)
         self.pv_img.setStyleSheet("background:#fff;")
         self.pv_scroll.setWidget(self.pv_img)
-        self.pv_scroll.setStyleSheet("border:1px solid #cbd5e1;border-radius:8px;background:#fff;")
+        # mockup jaisa halka gray-blue gradient backdrop (page card ubhar kar dikhe)
+        self.pv_scroll.setStyleSheet(
+            "QScrollArea{border:1px solid #E5E7EB;border-radius:13px;"
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #F1F5F9,stop:1 #E8EDF4);}")
+        self.pv_scroll.viewport().setStyleSheet("background:transparent;")
         _p1l.addWidget(self.pv_scroll, 1)
         # ---------- Attractive, RANG-GROUP wale buttons ----------
         def _grp_qss(border, hov_bg, hov_txt):
@@ -12699,16 +12740,17 @@ if the toggle is ticked).</p>
         self.pv_tabs.addTab(_p2, self.L("🔤 Text", "🔤 Text"))
         pv.addWidget(self.pv_tabs, 1)
         # ---- Complete info SEEDHA preview ke neeche (alag 'Info' tab nahi) ----
-        _infhdr = QtWidgets.QLabel(self.L("ℹ <b>Poori jaankari</b>", "ℹ <b>File info</b>"))
-        _infhdr.setStyleSheet("color:#4F46E5;font-size:11px;font-weight:700;margin-top:2px;")
+        _infhdr = QtWidgets.QLabel(self.L("<b>File info</b>", "<b>File info</b>"))
+        _infhdr.setStyleSheet("color:#111827;font-size:12px;font-weight:700;margin-top:2px;")
         pv.addWidget(_infhdr)
         self.pv_info = QtWidgets.QLabel("")
         self.pv_info.setTextFormat(QtCore.Qt.RichText)
         self.pv_info.setWordWrap(True)
         self.pv_info.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        # mockup jaisi light-gray info card
         self.pv_info.setStyleSheet(
-            "color:#475569;font-size:11px;padding:6px 8px;background:#f8fafc;"
-            "border:1px solid #e2e8f0;border-radius:8px;")
+            "color:#374151;font-size:11px;padding:9px 11px;background:#F9FAFB;"
+            "border:1px solid #E5E7EB;border-radius:12px;")
         pv.addWidget(self.pv_info)
         # 'Info' ab alag tab me nahi — saari jaankari isi label me. Upar wale
         # sabhi pv_info2.setText(...) ab seedha isi complete-info par jaate hain.
@@ -12730,7 +12772,7 @@ if the toggle is ticked).</p>
 
         # ---- Ek hi "Open editor" button — saare edit tools ab naye
         #      document editor me hain (double-click ya isse khulta hai). ----
-        _edit_btn = QtWidgets.QPushButton(self.L("🎨 Open editor", "🎨 Open editor"))
+        _edit_btn = QtWidgets.QPushButton(self.L("✏  Open in Editor", "✏  Open in Editor"))
         _edit_btn.setToolTip(self.L(
             "Poora document editor kholo — crop, seedha, saaf, whiten, sign, text… sab kuch.",
             "Open the full document editor — crop, straighten, clean, whiten, sign, text… everything."))
@@ -12768,7 +12810,7 @@ if the toggle is ticked).</p>
         _lg.addWidget(_mark)
         _lt = QtWidgets.QLabel(
             "<b style='font-size:14px'>ApneScan</b><br>"
-            "<span style='font-size:10px;color:#6B7280'>Smart Document Suite</span>")
+            "<span style='font-size:10px;color:#6B7280'>Document Studio · v%s</span>" % VERSION)
         _lg.addWidget(_lt, 1)
         nv.addLayout(_lg); nv.addSpacing(8)
 
@@ -12819,6 +12861,14 @@ if the toggle is ticked).</p>
             elif kind == "book":
                 p.drawRoundedRect(QtCore.QRectF(8, 7, 20, 22), 2, 2)
                 p.drawLine(QtCore.QPointF(18, 7), QtCore.QPointF(18, 29))
+            elif kind == "star":
+                pts = []
+                for _i in range(10):
+                    _r = 11.0 if _i % 2 == 0 else 4.6
+                    _a = -1.5708 + _i * 0.62832
+                    pts.append(QtCore.QPointF(18 + _r * math.cos(_a), 18.5 + _r * math.sin(_a)))
+                pts.append(pts[0])
+                p.drawPolyline(QtGui.QPolygonF(pts))
             p.end()
             return QtGui.QIcon(pm)
 
@@ -12835,8 +12885,20 @@ if the toggle is ticked).</p>
 
         _ncap("WORKSPACE")
         _nbtn("home", "Dashboard", lambda: self.list.setFocus(), on=True)
-        _nbtn("doc", self.L("Meri Files", "My Documents"), self.toggle_files_panel)
+        _bdocs = _nbtn("doc", self.L("Meri Files", "My Documents"), self.toggle_files_panel)
+        # mockup jaisa file-count badge (thodi der baad, background me ginti)
+        _badge = QtWidgets.QLabel("", _bdocs)
+        _badge.setStyleSheet("background:#EEF2FF;color:#4F46E5;font-size:9.5px;"
+                             "font-weight:700;border-radius:8px;padding:1px 7px;")
+        _badge.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
+        _badge.hide()
+        _bl = QtWidgets.QHBoxLayout(_bdocs); _bl.setContentsMargins(0, 0, 8, 0)
+        _bl.addStretch(1); _bl.addWidget(_badge)
+        self._nav_docs_badge = _badge
+        QtCore.QTimer.singleShot(2500, self._nav_count_docs)
         _nbtn("clock", "Recent Files", self._show_recent_files)
+        _nbtn("star", "Favourites",
+              lambda: (self.files_panel.setVisible(True), self.fav_combo.showPopup()))
         _nbtn("camera", self.L("History", "Scan History"), self.show_history)
         _nbtn("chart", "Analytics", self.show_analytics)
         _ncap("LIBRARY")
@@ -12853,12 +12915,15 @@ if the toggle is ticked).</p>
         _used_frac = 0.0
         try:
             _du = shutil.disk_usage(os.path.expanduser("~"))
-            _free = self.L("Disk: %.0f GB khaali", "Disk: %.0f GB free") % (_du.free / (1024 ** 3))
+            _gb = 1024.0 ** 3
+            _free = ("Storage used &nbsp;<b>%.0f / %.0f GB</b>"
+                     % ((_du.total - _du.free) / _gb, _du.total / _gb))
             _used_frac = max(0.02, min(1.0, 1.0 - (_du.free / float(_du.total or 1))))
         except Exception:
             _free = ""
         _s1 = QtWidgets.QLabel(_free)
-        _s1.setStyleSheet("font-size:10.5px;color:#374151;")
+        _s1.setTextFormat(QtCore.Qt.RichText)
+        _s1.setStyleSheet("font-size:10.5px;color:#6B7280;")
         _sv.addWidget(_s1)
         # mockup jaisi patli storage-bar (gradient fill)
         _track = QtWidgets.QFrame(); _track.setFixedHeight(6)
@@ -16386,6 +16451,16 @@ if the toggle is ticked).</p>
         scaled = pm.scaledToWidth(max(40, w), QtCore.Qt.SmoothTransformation)
         self.pv_img.setPixmap(scaled)
         self.pv_img.resize(scaled.size())
+        # mockup jaisi "Page x / N" pill taaza karo
+        try:
+            _n = self.list.count(); _r = self.list.currentRow()
+            if _n > 0 and _r >= 0:
+                self.pv_page_pill.setText("Page %d / %d" % (_r + 1, _n))
+                self.pv_page_pill.show()
+            else:
+                self.pv_page_pill.hide()
+        except Exception:
+            pass
 
     def _pv_do_zoom(self, factor):
         self._pv_zoom = max(0.2, min(6.0, self._pv_zoom * factor))
