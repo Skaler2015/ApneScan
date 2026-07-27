@@ -227,7 +227,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "161"
+VERSION = "162"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2204,21 +2204,26 @@ class ScanWorker(QtCore.QThread):
                 _d = int(self.dpi)
             except Exception:
                 _d = 200
-            # Kam-dpi (150/200) scan ko bhi BEST banao: master ~300dpi tak
-            # smooth (LANCZOS) upscale + halka unsharp — print/PDF me text ke
-            # kinare 300dpi jaise saaf aate hain (printer ka apna rough
-            # upscale hatta hai). Page ka A4 size NAHI badalta — dpi metadata
-            # saath me utna hi badhta hai. B&W me ye threshold se PEHLE hota
-            # hai, isliye 1-bit kinare bhi smooth bante hain.
+            # FILE SIZE = DPI KE ANUSAAR: page apni ASLI resolution par hi
+            # save hota hai (150dpi page ~150-350KB, 300dpi ~500-900KB) —
+            # pehle yahan 2x upscale hota tha jisse 150dpi ki file bhi
+            # ~1MB ban jaati thi. HD-print ki safai ab PRINT ke waqt hoti
+            # hai (_draw_fit ka smooth 2x upscale + SmoothPixmapTransform)
+            # — print me pixel kabhi nahi phat'te. Yahan sirf halka
+            # unsharp (BINA upscale) — text ke kinare tez, size par asar ~0.
             if 0 < _d < 300 and im.mode != "1":
                 try:
-                    _sc = min(2.0, 300.0 / _d)
-                    im = im.resize((max(1, int(im.width * _sc)),
-                                    max(1, int(im.height * _sc))),
-                                   Image.LANCZOS)
+                    if self.pixel_type == "bw":
+                        # B&W me 2x upscale RAKHA hai: Sauvola threshold ke
+                        # kinare smooth bante hain aur 1-bit file phir bhi
+                        # ~20KB hi rehti hai (size ki chinta nahi)
+                        _sc = min(2.0, 300.0 / _d)
+                        im = im.resize((max(1, int(im.width * _sc)),
+                                        max(1, int(im.height * _sc))),
+                                       Image.LANCZOS)
+                        _d = int(round(_d * _sc))
                     im = im.filter(ImageFilter.UnsharpMask(
                         radius=2, percent=110, threshold=3))
-                    _d = int(round(_d * _sc))
                 except Exception:
                     pass
             _dpi = (_d, _d)

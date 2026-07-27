@@ -377,14 +377,17 @@ def smart_jpeg_quality(img, qualities=(95, 92, 88, 84, 80, 76)):
         # wale page par SSIM noise se girta hai, content se nahi; isliye
         # aage ke sab trials 95-wale se RELATIVE naape jaate hain.
         base, _ = _metrics(qualities[0])
-        ssim_floor = base["ssim"] - 0.015
+        ssim_floor = base["ssim"] - 0.03
 
         def _passes(q):
             mm, comp = _metrics(q)
-            if mm["mean"] > 2.2 or mm["p99"] > 9.0:
-                return False
+            # PRIMARY gate = EDGE difference: text/patli line/QR ke kinare
+            # (asli 'pixel phatna' yahi hai). mean/p99/ssim dheele hain —
+            # wo scanner-noise ke smooth hone ko bhi 'kharabi' gin lete the.
             if mm["edge"] > 2.5:
-                return False        # kinare (text/patli line/QR) toot rahe
+                return False
+            if mm["mean"] > 3.0 or mm["p99"] > 16.0:
+                return False
             if mm["ssim"] < ssim_floor:
                 return False
             if qr0 is not None:
