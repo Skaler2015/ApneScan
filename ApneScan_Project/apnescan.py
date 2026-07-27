@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "180"
+VERSION = "181"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -16432,6 +16432,18 @@ if the toggle is ticked).</p>
         self.files_panel.setVisible(vis)
         self._opts["show_files_panel"] = vis
         self._save_opts()
+
+    def keyPressEvent(self, e):
+        # Esc = Meri Files panel band (agar khula ho) — user ki request.
+        # Ye tabhi chalta hai jab kisi text-box/editor ne Esc use na kiya ho,
+        # isliye rename-cancel jaise purane kaam waise hi chalte rehte hain.
+        if (e.key() == QtCore.Qt.Key_Escape
+                and getattr(self, "files_panel", None) is not None
+                and self.files_panel.isVisible()):
+            self.toggle_files_panel()
+            e.accept()
+            return
+        super().keyPressEvent(e)
 
     def _update_preview_panel(self):
         if not getattr(self, "preview_panel", None) or not self.preview_panel.isVisible():
