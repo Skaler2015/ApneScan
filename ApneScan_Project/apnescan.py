@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "178"
+VERSION = "179"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9988,6 +9988,16 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 # Ctrl + mouse scroll -> zoom thumbnails in/out (like NAPS2)
                 self._apply_thumb_zoom(self._thumb_w * (1.15 if ev.angleDelta().y() > 0 else 0.87))
                 return True
+        # Preview panel: sidebar chhoti/badi karte hi preview APNE AAP
+        # resize ho (fit) — thoda debounce taaki drag ke waqt smooth rahe
+        if (hasattr(self, "pv_scroll") and obj is self.pv_scroll.viewport()
+                and ev.type() == QtCore.QEvent.Resize):
+            _t = getattr(self, "_pv_rsz_timer", None)
+            if _t is None:
+                _t = QtCore.QTimer(self); _t.setSingleShot(True)
+                _t.timeout.connect(self._pv_render)
+                self._pv_rsz_timer = _t
+            _t.start(120)
         # Preview panel: Ctrl+scroll = zoom
         if (hasattr(self, "pv_scroll") and obj is self.pv_scroll.viewport()
                 and ev.type() == QtCore.QEvent.Wheel
