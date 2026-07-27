@@ -228,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "165"
+VERSION = "166"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2249,24 +2249,20 @@ class ScanWorker(QtCore.QThread):
                 _d = int(self.dpi)
             except Exception:
                 _d = 200
-            # FILE SIZE = DPI KE ANUSAAR: page apni ASLI resolution par hi
-            # save hota hai (150dpi page ~150-350KB, 300dpi ~500-900KB) —
-            # pehle yahan 2x upscale hota tha jisse 150dpi ki file bhi
-            # ~1MB ban jaati thi. HD-print ki safai ab PRINT ke waqt hoti
-            # hai (_draw_fit ka smooth 2x upscale + SmoothPixmapTransform)
-            # — print me pixel kabhi nahi phat'te. Yahan sirf halka
-            # unsharp (BINA upscale) — text ke kinare tez, size par asar ~0.
-            if 0 < _d < 300 and im.mode != "1":
+            # NAPS2-PARITY: page apni ASLI resolution par, BINA kisi
+            # sharpening ke save hota hai — NAPS2 bhi scan-data ko waise ka
+            # waisa rakhta hai (koi filter nahi). Pehle yahan unsharp lagta
+            # tha jo JPEG ko 25-35% phula deta tha; print ki 'dhaar' waise
+            # bhi PRINT ke waqt aati hai (_draw_fit ka smooth upscale).
+            # Sirf B&W me upscale+unsharp RAKHA hai — wahan Sauvola threshold
+            # ke kinare smooth bante hain aur 1-bit file ~20KB hi rehti hai.
+            if 0 < _d < 300 and im.mode != "1" and self.pixel_type == "bw":
                 try:
-                    if self.pixel_type == "bw":
-                        # B&W me 2x upscale RAKHA hai: Sauvola threshold ke
-                        # kinare smooth bante hain aur 1-bit file phir bhi
-                        # ~20KB hi rehti hai (size ki chinta nahi)
-                        _sc = min(2.0, 300.0 / _d)
-                        im = im.resize((max(1, int(im.width * _sc)),
-                                        max(1, int(im.height * _sc))),
-                                       Image.LANCZOS)
-                        _d = int(round(_d * _sc))
+                    _sc = min(2.0, 300.0 / _d)
+                    im = im.resize((max(1, int(im.width * _sc)),
+                                    max(1, int(im.height * _sc))),
+                                   Image.LANCZOS)
+                    _d = int(round(_d * _sc))
                     im = im.filter(ImageFilter.UnsharpMask(
                         radius=2, percent=110, threshold=3))
                 except Exception:
@@ -19357,11 +19353,12 @@ if the toggle is ticked).</p>
         # wali lagti hai (quality hamesha size se pehle).
         if not compress and q == 95:
             try:
-                # 150dpi jaise kam-res pages par ladder q68 tak jaati hai —
-                # edge-guard phir bhi text/QR ke kinare TOOTNE se pehle rok
-                # deta hai (150dpi = chhoti file user ki pasand hai).
+                # NAPS2 fixed q75 use karta hai — hum wahan tak (72) jaate
+                # hain par HAR page ko edge-guard se jaanch kar: kinare
+                # TOOTNE lagen to quality khud upar ruk jaati hai. Kam-res
+                # (150dpi) par 68 tak — chhoti file user ki pasand hai.
                 _lad = ((95, 92, 88, 84, 80, 76, 72, 68) if res <= 160
-                        else (95, 92, 88, 84, 80, 76))
+                        else (95, 92, 88, 84, 80, 76, 72))
                 _needs = [smart_jpeg_quality(im, _lad)[0]
                           for im in imgs if im.mode != "1"]
                 if _needs:

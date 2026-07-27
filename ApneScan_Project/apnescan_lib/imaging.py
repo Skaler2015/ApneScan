@@ -377,7 +377,10 @@ def smart_jpeg_quality(img, qualities=(95, 92, 88, 84, 80, 76)):
         # wale page par SSIM noise se girta hai, content se nahi; isliye
         # aage ke sab trials 95-wale se RELATIVE naape jaate hain.
         base, _ = _metrics(qualities[0])
-        ssim_floor = base["ssim"] - 0.03
+        # SSIM sirf LOOSE backstop hai (bahut saaf page par baseline ~0.999
+        # hota hai aur chhota delta bhi jhootha alarm deta tha) — asli
+        # pehredaar EDGE-difference hai.
+        ssim_floor = max(0.93, base["ssim"] - 0.06)
 
         def _passes(q):
             mm, comp = _metrics(q)
