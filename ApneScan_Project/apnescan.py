@@ -228,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "171"
+VERSION = "172"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -441,6 +441,7 @@ SHORTCUTS = [
 
 DEFAULT_OPTIONS = {
     "auto_save": False,
+    "clear_after_save": False,   # save hote hi pages thumbnail se hatao (Ctrl+Z wapas)
     # --- AI Document Memory (offline learning) ---
     "ai_memory": True,          # master switch — remember & recognise documents
     "ai_threshold": 90,         # confidence % to auto-suggest the latest name/folder
@@ -2565,6 +2566,9 @@ class OptionsDialog(QtWidgets.QDialog):
         form.addRow(chkrow(self.chk_name_date, "हिन्दी: चालू करने पर: अपने-आप बने नाम के आगे आज की तारीख़ लग जाएगी (जैसे Bill_2026-07-21)।\nEnglish: ON: appends today's date to the auto name (e.g. Bill_2026-07-21)."))
 
         header("Save")
+        self.chk_clear_saved = QtWidgets.QCheckBox("Auto-clear pages after save (Ctrl+Z restores)")
+        self.chk_clear_saved.setChecked(bool(self.opts.get("clear_after_save")))
+        form.addRow(chkrow(self.chk_clear_saved, 'हिन्दी: चालू करने पर: PDF save होते ही वही pages thumbnail area से अपने-आप हट जाएँगे — अगले scan के लिए जगह साफ़। गलती लगे तो Ctrl+Z से पूरा batch वापस आ जाता है (files delete नहीं होतीं)।\nEnglish: ON: as soon as the PDF is saved, those pages are cleared from the thumbnail area — ready for the next scan. Ctrl+Z brings the whole batch back (no files are deleted).'))
         self.chk_autosave = QtWidgets.QCheckBox("Save PDF automatically after scanning")
         self.chk_autosave.setChecked(self.opts["auto_save"]); form.addRow(chkrow(self.chk_autosave, 'हिन्दी: चालू करने पर: स्कैन ख़त्म होते ही PDF अपने-आप सेव हो जाएगी (हर बार Save दबाना नहीं पड़ेगा)। रोज़ बहुत स्कैन करते हों तो चालू रखें।\nEnglish: ON: PDF saves automatically after each scan. Handy if you scan a lot.'))
         fr = QtWidgets.QHBoxLayout()
@@ -2752,6 +2756,7 @@ class OptionsDialog(QtWidgets.QDialog):
         o["save_images_too"] = self.chk_imgtoo.isChecked()
         o["searchable_pdf"] = self.chk_searchable.isChecked()
         o["auto_save"] = self.chk_autosave.isChecked()
+        o["clear_after_save"] = self.chk_clear_saved.isChecked()
         o["save_folder"] = self.folder_edit.text().strip()
         o["filename_template"] = self.tmpl_edit.text().strip() or "{date}_{seq}"
         o["make_claim_folder"] = self.chk_claimfolder.isChecked()
@@ -14423,6 +14428,7 @@ if the toggle is ticked).</p>
             self._record_save(saved, npages)
             self._dirty = False
             self._after_save_action(saved)
+            self._auto_clear_saved(paths)
             # Save hote hi wahi folder sidebar me khol do (aur file select)
             try:
                 self._panel_show(folder)
@@ -19698,6 +19704,37 @@ if the toggle is ticked).</p>
         except Exception:
             pass
 
+    def _auto_clear_saved(self, paths):
+        """(Setting: clear_after_save) PDF save hote hi WAHI pages thumbnail
+        area se apne aap hat jaate hain — Ctrl+Z poora batch WAPAS le aata
+        hai (delete_page wala hi undo-system; files disk par rehti hain)."""
+        if not self._opts.get("clear_after_save") or not paths:
+            return
+        try:
+            want = set(paths)
+            deleted = []
+            for row in reversed(range(self.list.count())):
+                it = self.list.item(row)
+                if it is None:
+                    continue
+                p = it.data(QtCore.Qt.UserRole)
+                if p in want:
+                    deleted.append({"path": p, "row": row, "title": it.data(TITLE_ROLE)})
+                    self.list.takeItem(row)
+                    self._undo_stack.append((p, row))
+            self._undo_stack = self._undo_stack[-15:]
+            if deleted:
+                try:
+                    self._hist_record({"type": "delete", "items": deleted})
+                except Exception:
+                    pass
+                self._dirty = False
+                self.status.showMessage(
+                    self.L("🧹 Save ho gaya — %d page thumbnail se hataye (Ctrl+Z = wapas)",
+                           "🧹 Saved — cleared %d page(s) from thumbnails (Ctrl+Z restores)") % len(deleted), 6000)
+        except Exception:
+            pass
+
     def _auto_save_pdf(self):
         paths = self._ordered_paths()
         if not paths:
@@ -19723,6 +19760,7 @@ if the toggle is ticked).</p>
                     pass
         self._after_save_action(out)
         self.status.showMessage("Auto-save: %s" % out, 8000)
+        self._auto_clear_saved(paths)
         return True
 
     def save_pdf_all(self):
@@ -19777,6 +19815,7 @@ if the toggle is ticked).</p>
             self._record_save(out, npages); self._dirty = False; self._after_save_action(out)
             self.status.showMessage("✔ PDF saved: %s" % out, 8000)
             self._open_saved_in_panel(out)   # us file ka folder Meri Files panel me khol do
+            self._auto_clear_saved(paths)    # setting ON ho to saved pages hata do (Ctrl+Z wapas)
         self._run_bg(job, done,
                      "Saving PDF…" if not ocr else "Creating OCR PDF…")
 
@@ -19825,6 +19864,7 @@ if the toggle is ticked).</p>
             self._record_save(out, npages); self._dirty = False; self._after_save_action(out)
             self.status.showMessage("✔ Password PDF saved: %s" % out, 8000)
             self._open_saved_in_panel(out)
+            self._auto_clear_saved(paths)
         self._run_bg(job, done, "Creating password PDF…")
 
     def save_images(self):
