@@ -18,6 +18,7 @@ import os
 import re
 import sys
 import json
+import math
 import time
 import shutil
 import socket
@@ -228,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "176"
+VERSION = "177"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6372,6 +6373,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
             _lo = self._config.get("options")
             if isinstance(_lo, dict):
                 _lo["files_panel_side"] = "left"
+            try:
+                save_config(self._config)
+            except Exception:
+                pass
+        # v177 redesign: mockup jaisa saaf dashboard — Meri Files panel ek baar
+        # chhupa do (sidebar ke 'Meri Files'/My Documents par click = wapas;
+        # pasand yaad rehti hai, ye sirf EK baar hota hai).
+        if not self._config.get("layout_v177"):
+            self._config["layout_v177"] = True
+            _lo = self._config.get("options")
+            if isinstance(_lo, dict):
+                _lo["show_files_panel"] = False
             try:
                 save_config(self._config)
             except Exception:
@@ -12765,8 +12778,54 @@ if the toggle is ticked).</p>
             c.setContentsMargins(10, 9, 0, 3)
             nv.addWidget(c)
 
-        def _nbtn(icon, txt, slot, on=False):
-            b = QtWidgets.QPushButton("%s  %s" % (icon, txt))
+        def _nav_icon(kind, color="#6B7280"):
+            # mockup jaise PATLE monochrome line-icons (emoji nahi) — QPainter
+            pm = QtGui.QPixmap(36, 36); pm.fill(QtCore.Qt.transparent)
+            p = QtGui.QPainter(pm)
+            p.setRenderHint(QtGui.QPainter.Antialiasing)
+            pen = QtGui.QPen(QtGui.QColor(color), 2.4)
+            pen.setCapStyle(QtCore.Qt.RoundCap); pen.setJoinStyle(QtCore.Qt.RoundJoin)
+            p.setPen(pen); p.setBrush(QtCore.Qt.NoBrush)
+            if kind == "home":
+                p.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(6, 17), QtCore.QPointF(18, 7), QtCore.QPointF(30, 17)]))
+                p.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(9, 15), QtCore.QPointF(9, 28), QtCore.QPointF(27, 28), QtCore.QPointF(27, 15)]))
+            elif kind == "doc":
+                p.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(21, 6), QtCore.QPointF(9, 6), QtCore.QPointF(9, 30), QtCore.QPointF(27, 30), QtCore.QPointF(27, 12), QtCore.QPointF(21, 6), QtCore.QPointF(21, 12), QtCore.QPointF(27, 12)]))
+            elif kind == "clock":
+                p.drawEllipse(QtCore.QRectF(7, 7, 22, 22))
+                p.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(18, 12), QtCore.QPointF(18, 19), QtCore.QPointF(23, 21)]))
+            elif kind == "camera":
+                p.drawRoundedRect(QtCore.QRectF(6, 12, 24, 15), 3, 3)
+                p.drawEllipse(QtCore.QRectF(13.5, 15, 9, 9))
+                p.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(13, 12), QtCore.QPointF(15, 8), QtCore.QPointF(21, 8), QtCore.QPointF(23, 12)]))
+            elif kind == "chart":
+                p.drawLine(QtCore.QPointF(11, 28), QtCore.QPointF(11, 19))
+                p.drawLine(QtCore.QPointF(18, 28), QtCore.QPointF(18, 11))
+                p.drawLine(QtCore.QPointF(25, 28), QtCore.QPointF(25, 22))
+            elif kind == "folder":
+                p.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(6, 26), QtCore.QPointF(6, 10), QtCore.QPointF(13, 10), QtCore.QPointF(16, 13), QtCore.QPointF(30, 13), QtCore.QPointF(30, 26), QtCore.QPointF(6, 26)]))
+            elif kind == "phone":
+                p.drawRoundedRect(QtCore.QRectF(12, 6, 12, 24), 3, 3)
+                p.drawLine(QtCore.QPointF(16.5, 26), QtCore.QPointF(19.5, 26))
+            elif kind == "case":
+                p.drawRoundedRect(QtCore.QRectF(7, 13, 22, 14), 3, 3)
+                p.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(14, 13), QtCore.QPointF(14, 9), QtCore.QPointF(22, 9), QtCore.QPointF(22, 13)]))
+            elif kind == "gear":
+                p.drawEllipse(QtCore.QRectF(12, 12, 12, 12))
+                for _a in range(8):
+                    _r = 3.14159 * _a / 4.0
+                    p.drawLine(QtCore.QPointF(18 + 8.2 * math.cos(_r), 18 + 8.2 * math.sin(_r)),
+                               QtCore.QPointF(18 + 11.5 * math.cos(_r), 18 + 11.5 * math.sin(_r)))
+            elif kind == "book":
+                p.drawRoundedRect(QtCore.QRectF(8, 7, 20, 22), 2, 2)
+                p.drawLine(QtCore.QPointF(18, 7), QtCore.QPointF(18, 29))
+            p.end()
+            return QtGui.QIcon(pm)
+
+        def _nbtn(kind, txt, slot, on=False):
+            b = QtWidgets.QPushButton(" " + txt.replace("&", "&&"))
+            b.setIcon(_nav_icon(kind, "#4F46E5" if on else "#6B7280"))
+            b.setIconSize(QtCore.QSize(18, 18))
             b.setCursor(QtCore.Qt.PointingHandCursor)
             if on:
                 b.setObjectName("navon")
@@ -12775,19 +12834,18 @@ if the toggle is ticked).</p>
             return b
 
         _ncap("WORKSPACE")
-        _nbtn("🏠", "Dashboard", lambda: self.list.setFocus(), on=True)
-        _nbtn("📁", self.L("Meri Files", "My Documents"),
-              lambda: self.files_panel.setVisible(not self.files_panel.isVisible()))
-        _nbtn("🕘", "Recent Files", self._show_recent_files)
-        _nbtn("📚", self.L("History", "Scan History"), self.show_history)
-        _nbtn("📊", "Analytics", self.show_analytics)
+        _nbtn("home", "Dashboard", lambda: self.list.setFocus(), on=True)
+        _nbtn("doc", self.L("Meri Files", "My Documents"), self.toggle_files_panel)
+        _nbtn("clock", "Recent Files", self._show_recent_files)
+        _nbtn("camera", self.L("History", "Scan History"), self.show_history)
+        _nbtn("chart", "Analytics", self.show_analytics)
         _ncap("LIBRARY")
-        _nbtn("🗂", "Profiles", self.open_profiles)
-        _nbtn("📱", self.L("Phone se Scan", "Phone to PC"), self.phone_scan)
-        _nbtn("🧰", "Tools", self._tools_catalog_dialog)
+        _nbtn("folder", "Profiles", self.open_profiles)
+        _nbtn("phone", self.L("Phone se Scan", "Phone to PC"), self.phone_scan)
+        _nbtn("case", "Tools", self._tools_catalog_dialog)
         _ncap("SYSTEM")
-        _nbtn("⚙", "Settings", self.open_options)
-        _nbtn("📖", self.L("Guide", "Help & Guide"), self.show_guide)
+        _nbtn("gear", "Settings", self.open_options)
+        _nbtn("book", self.L("Guide", "Help & Guide"), self.show_guide)
         nv.addStretch(1)
         _store = QtWidgets.QFrame()
         _store.setStyleSheet("background:#F9FAFB;border:1px solid #E5E7EB;border-radius:11px;")
@@ -12799,7 +12857,7 @@ if the toggle is ticked).</p>
             _used_frac = max(0.02, min(1.0, 1.0 - (_du.free / float(_du.total or 1))))
         except Exception:
             _free = ""
-        _s1 = QtWidgets.QLabel("💾 " + _free)
+        _s1 = QtWidgets.QLabel(_free)
         _s1.setStyleSheet("font-size:10.5px;color:#374151;")
         _sv.addWidget(_s1)
         # mockup jaisi patli storage-bar (gradient fill)
@@ -12811,7 +12869,8 @@ if the toggle is ticked).</p>
             "border-radius:3px;border:none;")
         _fillw.setGeometry(0, 0, int(152 * _used_frac), 6)
         _sv.addWidget(_track)
-        _s2 = QtWidgets.QLabel("🟢 Scanner · WIA")
+        _s2 = QtWidgets.QLabel("<span style='color:#22C55E'>●</span> Scanner · WIA")
+        _s2.setTextFormat(QtCore.Qt.RichText)
         _s2.setStyleSheet("font-size:10.5px;color:#374151;")
         _sv.addWidget(_s2)
         nv.addWidget(_store)
