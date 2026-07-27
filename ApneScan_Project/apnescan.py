@@ -228,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "166"
+VERSION = "167"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6537,7 +6537,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "Restore old photo", self.restore_photo_current, "हिन्दी: फीकी/धुँधली पुरानी फ़ोटो का रंग-रूप सुधारो।\nEnglish: Restore faded/dull old photos.")
         self._ma(mt, "Scan History…", self.show_history, "हिन्दी: अब तक की सारी सेव की हुई PDF — नई से पुरानी, filter के साथ।\nEnglish: All saved PDFs, newest first, with quick filter.")
         self._ma(mt, "📊 Analytics…", self.show_analytics, "हिन्दी: आपकी + दुनिया भर की गिनती — कितने स्कैन, import, print (सिर्फ़ गिनती, कोई document नहीं)।\nEnglish: Your + worldwide counts — scans, imports, prints (counts only, no documents).")
-        self._ma(mt, "📱 Phone se scan (WiFi — QR)…", self.phone_scan, "हिन्दी: फ़ोन के कैमरे से document की photo खींचो और वो सीधे PC पर आ जाए — QR scan करो, बस। (फ़ोन और PC एक ही WiFi पर हों; कोई internet/cloud नहीं, सब local।)\nEnglish: Snap a document photo with your phone camera and it lands straight on the PC — just scan the QR. (Phone & PC on the same WiFi; all local, no cloud.)")
+        self._ma(mt, "📱 Phone se scan (kahin se bhi — QR)…", self.phone_scan, "हिन्दी: फ़ोन के कैमरे से document की photo खींचो और वो सीधे PC पर आ जाए — QR scan करो, बस। Internet से कहीं से भी (same WiFi ज़रूरी नहीं); file PC पर पहुँचते ही server से delete। Net न हो तो local-WiFi mode अपने आप।\nEnglish: Snap a document photo with your phone and it lands straight on the PC — just scan the QR. Works over the internet from anywhere (same WiFi not needed); files are deleted from the server as soon as the PC receives them. Falls back to local-WiFi mode automatically.")
         self._ma(mt, "📷 Scan from camera (webcam)…", self.scan_from_camera, "हिन्दी: स्कैनर न हो तो भी — webcam/USB कैमरा से document capture करके PDF बनाओ (फ़ोटो अपने-आप साफ़ होती है)।\nEnglish: No scanner? Capture documents with a webcam/USB camera (auto-cleaned).")
         self._ma(mt, "Phone photo to PDF (photo import)…", self.import_photos, "हिन्दी: फ़ोन से खींची document-फ़ोटो को साफ़ करके पेज बनाओ (परछाई हटाना, सीधा करना) — फिर PDF सेव करो।\nEnglish: Clean up phone photos of documents (remove shadows, straighten) and add them as pages.")
         self._ma(mt, "Split ID cards (from this page)…", self.split_id_cards, "हिन्दी: एक पेज पर 2-3 ID कार्ड स्कैन किए हैं? यह उन्हें अलग-अलग पेजों में काट देगा।\nEnglish: Scanned 2-3 ID cards on one page? This splits them into separate pages.")
@@ -11639,6 +11639,10 @@ if the toggle is ticked).</p>
         tbsep()
         self.btn_import = tbtn("import", tr("import", self._lang), self.import_images, advanced=True, key="import")
         tbtn("import", self.L("Camera", "Camera"), self.scan_from_camera, advanced=True, key="camera")
+        tbtn_e("📱", self.L("Phone", "Phone"), self.phone_scan, "phone",
+               tip=self.L("Phone se scan — QR se photo seedhe PC par (internet se, kahin se bhi)",
+                          "Scan from phone — QR sends photos straight to the PC (over the internet, from anywhere)"),
+               advanced=True)
         self.btn_save_pdf = tbtn("savepdf", self.L("Save", "Save"), self.save_pdf, key="savepdf",
                                  tip=self.L("Save — PDF / Images / Word / Excel / Text… (tir se chuno)",
                                             "Save — PDF / Images / Word / Excel / Text… (use the arrow)"))
@@ -16857,7 +16861,7 @@ if the toggle is ticked).</p>
     # Toolbar ke button jinko dikhana/chhupana user chun sakta hai
     TB_ITEMS = [
         ("scan", "Scan"), ("profiles", "Profiles"), ("ocr", "OCR"),
-        ("import", "Import"), ("camera", "Camera"), ("savepdf", "Save"),
+        ("import", "Import"), ("camera", "Camera"), ("phone", "Phone"), ("savepdf", "Save"),
         ("print", "Print"), ("share", "Share"), ("editor", "Editor"),
         ("rotate", "Rotate"), ("undo", "Undo"), ("delete", "Delete"),
         ("clear", "Clear"), ("guide", "Guide"), ("language", "Language"),
