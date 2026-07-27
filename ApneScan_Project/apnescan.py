@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "179"
+VERSION = "180"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11749,7 +11749,7 @@ if the toggle is ticked).</p>
 
         # ---------- Top toolbar ----------
         tbwrap = QtWidgets.QWidget(); tbwrap.setObjectName("toolbar")
-        tb = QtWidgets.QHBoxLayout(tbwrap); tb.setContentsMargins(8, 4, 8, 4); tb.setSpacing(2)
+        tb = QtWidgets.QHBoxLayout(tbwrap); tb.setContentsMargins(12, 6, 12, 6); tb.setSpacing(4)
         self._adv_btns = []
 
         tips = {
@@ -12025,19 +12025,26 @@ if the toggle is ticked).</p>
         #            EK LINE me (user ki request) — neeche body me My Files |
         #            pages | preview ek RESIZABLE splitter me. ----------
         scanbar = QtWidgets.QWidget(); scanbar.setObjectName("scanbar")
+        # ✨ premium scanbar: pill-style dropdowns, halka hover-glow, gradient Scan
         scanbar.setStyleSheet(
-            "#scanbar{background:#FFFFFF;}"
-            "#scanbar QComboBox{border:1px solid #E5E7EB;border-radius:9px;padding:3px 8px;background:#F9FAFB;}"
-            "#scanbar QPushButton{border:1px solid #E5E7EB;border-radius:9px;background:#F9FAFB;padding:4px 8px;}"
+            "#scanbar{background:#FFFFFF;border-bottom:1px solid #EEF0F4;}"
+            "#scanbar QComboBox{border:1px solid #E5E7EB;border-radius:9px;padding:5px 10px;"
+            "background:#F9FAFB;font-weight:600;color:#1F2937;font-size:12px;}"
+            "#scanbar QComboBox:hover{border-color:#C7D2FE;background:#FFFFFF;}"
+            "#scanbar QComboBox:focus{border-color:#A5B4FC;}"
+            "#scanbar QComboBox::drop-down{border:none;width:20px;}"
+            "#scanbar QPushButton{border:1px solid #E5E7EB;border-radius:9px;background:#F9FAFB;padding:5px 9px;}"
             "#scanbar QPushButton:hover{border-color:#C7D2FE;background:#EEF2FF;}"
+            "#scanbar #devpill{background:#F9FAFB;border:1px solid #E5E7EB;border-radius:9px;}"
             "#scanbar QPushButton#primary{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #4F46E5,stop:1 #7C3AED);border:none;color:#fff;font-weight:800;"
-            "font-size:13.5px;padding:9px 30px;border-radius:10px;}"
-            "#scanbar QPushButton#primary:hover{background:#4338CA;}")
+            "font-size:13.5px;padding:10px 32px;border-radius:11px;}"
+            "#scanbar QPushButton#primary:hover{background:#4338CA;}"
+            "#scanbar QPushButton#primary:pressed{background:#3730A3;}")
         self.left_panel = scanbar     # purane F9 / show_left_panel toggle isi par
         if not self._opts.get("show_left_panel", True):
             scanbar.hide()
         sb = QtWidgets.QHBoxLayout(scanbar)
-        sb.setContentsMargins(10, 3, 10, 5); sb.setSpacing(8)
+        sb.setContentsMargins(16, 7, 16, 9); sb.setSpacing(13)
 
         def _col(caption, w, width=None):
             # chhota caption UPAR + control NEECHE — ribbon jaisi ek line
@@ -12084,10 +12091,13 @@ if the toggle is ticked).</p>
             "kar list dikhata hai.",
             "Change / find scanner — auto-detects all scanners (LAN + USB)."))
         self.btn_change_dev.clicked.connect(lambda: self.pick_scanner_dialog())
-        _devrow = QtWidgets.QHBoxLayout(); _devrow.setContentsMargins(0, 0, 0, 0); _devrow.setSpacing(3)
+        _devrow = QtWidgets.QHBoxLayout(); _devrow.setContentsMargins(8, 2, 4, 2); _devrow.setSpacing(3)
         _devrow.addWidget(self.dev_status); _devrow.addWidget(self.dev_lbl, 1)
         _devrow.addWidget(self.btn_change_dev)
         _devw = QtWidgets.QWidget(); _devw.setLayout(_devrow)
+        # device ke aas-paas mockup jaisi halki pill
+        _devw.setObjectName("devpill")
+        _devw.setAttribute(QtCore.Qt.WA_StyledBackground, True)
         self.method_lbl = QtWidgets.QLabel(""); self.method_lbl.setObjectName("dev")
         self.method_lbl.setStyleSheet("font-size:9px;color:#9CA3AF;font-weight:700;")
         _dbox = QtWidgets.QVBoxLayout(); _dbox.setContentsMargins(0, 0, 0, 0); _dbox.setSpacing(0)
@@ -12104,7 +12114,10 @@ if the toggle is ticked).</p>
         self.btn_adv = QtWidgets.QToolButton(); self.btn_adv.setCheckable(True)
         # default COLLAPSED — sirf kaam ki details dikhein (kholne par sab)
         self.btn_adv.setChecked(not bool(self._opts.get("panel_simple", True)))
-        self.btn_adv.setStyleSheet("QToolButton{border:none;color:#64748b;font-size:11px;padding:2px;}")
+        self.btn_adv.setStyleSheet(
+            "QToolButton{border:none;color:#4F46E5;font-size:11.5px;font-weight:600;"
+            "padding:3px 6px;border-radius:8px;}"
+            "QToolButton:hover{background:#EEF2FF;}")
         self.btn_adv.toggled.connect(self._toggle_adv_panel)
         # MAIN bar par sirf KAAM KI cheezein: Resolution + Bit depth
         self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.addItems([d + " dpi" for d in RESOLUTIONS])
@@ -12130,9 +12143,40 @@ if the toggle is ticked).</p>
         _av.addWidget(_col("Scan sides", self.cmb_sides, 100))
 
         # ---- ⚙ Auto-fixes quick chips (yahin on/off) ----
-        _ocrow = QtWidgets.QHBoxLayout(); _ocrow.setContentsMargins(0, 0, 0, 0); _ocrow.setSpacing(9)
+        _ocrow = QtWidgets.QHBoxLayout(); _ocrow.setContentsMargins(0, 0, 0, 0); _ocrow.setSpacing(11)
         self._opt_chips = {}
-        # ✨ redesign: mockup jaise chhote toggle-SWITCH (pill indicator)
+
+        # ✨ premium: ASLI toggle-switch (white gol knob wala) — runtime par
+        # PNG paint karke QSS image se lagta hai (Qt QSS me knob nahi banta)
+        def _switch_png(on):
+            pth = os.path.join(tempfile.gettempdir(),
+                               "apnescan_sw_%s.png" % ("on" if on else "off"))
+            try:
+                pm = QtGui.QPixmap(60, 34); pm.fill(QtCore.Qt.transparent)
+                pp = QtGui.QPainter(pm)
+                pp.setRenderHint(QtGui.QPainter.Antialiasing)
+                pp.setPen(QtCore.Qt.NoPen)
+                if on:
+                    g = QtGui.QLinearGradient(0, 0, 60, 0)
+                    g.setColorAt(0, QtGui.QColor("#4F46E5"))
+                    g.setColorAt(1, QtGui.QColor("#7C3AED"))
+                    pp.setBrush(QtGui.QBrush(g))
+                else:
+                    pp.setBrush(QtGui.QColor("#D1D5DB"))
+                pp.drawRoundedRect(QtCore.QRectF(0, 0, 60, 34), 17, 17)
+                pp.setBrush(QtGui.QColor(0, 0, 0, 26))          # halki shadow
+                pp.drawEllipse(QtCore.QRectF(32 if on else 4, 6.5, 24, 24))
+                pp.setBrush(QtGui.QColor("#FFFFFF"))
+                pp.drawEllipse(QtCore.QRectF(31 if on else 5, 5, 24, 24))
+                pp.end()
+                pm = pm.scaled(30, 17, QtCore.Qt.IgnoreAspectRatio,
+                               QtCore.Qt.SmoothTransformation)
+                pm.save(pth, "PNG")
+            except Exception:
+                pass
+            return pth.replace("\\", "/")
+
+        _sw_off, _sw_on = _switch_png(False), _switch_png(True)
         for _key, _lbl, _tip in (("auto_crop", "Auto Crop", "Auto-crop the border"),
                                  ("deskew", "Deskew", "Auto-straighten (deskew)"),
                                  ("remove_blank", "Blank", "Remove blank pages"),
@@ -12141,11 +12185,10 @@ if the toggle is ticked).</p>
             _cb.setToolTip(_tip); _cb.setChecked(bool(self._opts.get(_key)))
             _cb.setCursor(QtCore.Qt.PointingHandCursor)
             _cb.setStyleSheet(
-                "QCheckBox{font-size:11px;color:#374151;font-weight:600;spacing:5px;}"
-                "QCheckBox::indicator{width:28px;height:15px;border-radius:7px;"
-                "background:#D1D5DB;border:none;}"
-                "QCheckBox::indicator:checked{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-                "stop:0 #4F46E5,stop:1 #7C3AED);}")
+                "QCheckBox{font-size:11.5px;color:#374151;font-weight:600;spacing:6px;}"
+                "QCheckBox::indicator{width:30px;height:17px;border:none;"
+                "image:url(%s);}"
+                "QCheckBox::indicator:checked{image:url(%s);}" % (_sw_off, _sw_on))
             _cb.toggled.connect(lambda on, k=_key: self._set_scan_opt(k, on))
             self._opt_chips[_key] = _cb; _ocrow.addWidget(_cb)
         _ocw = QtWidgets.QWidget(); _ocw.setLayout(_ocrow)
@@ -13263,8 +13306,9 @@ if the toggle is ticked).</p>
                 QMenu::item { padding:5px 22px 5px 14px; border-radius:6px; }
                 QMenu::item:selected { background:#EEF2FF; color:#4F46E5; }
                 #toolbar { background:#FFFFFF; border-bottom:1px solid #E5E7EB; }
-                QToolButton { border:1px solid transparent; border-radius:10px; padding:5px 7px; color:#4B5563; font-size:11px; }
-                QToolButton:hover { background:#F3F4F6; border-color:#E5E7EB; }
+                QToolButton { border:1px solid transparent; border-radius:11px; padding:6px 8px; color:#4B5563; font-size:10.5px; font-weight:500; }
+                QToolButton:hover { background:#EEF2FF; border-color:#C7D2FE; color:#4F46E5; }
+                QToolButton:pressed { background:#E0E7FF; }
                 QToolButton:checked { background:#EEF2FF; border-color:#A5B4FC; color:#4F46E5; }
                 #panel { background:#FFFFFF; }
                 #dev { color:#6B7280; font-size:12px; }
