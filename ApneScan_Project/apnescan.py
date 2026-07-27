@@ -41,7 +41,7 @@ from apnescan_lib.search_engine import _folder_search_score
 from apnescan_lib.imaging import (
     is_blank_page, whiten_dark_background, autocrop, deskew, auto_enhance,
     denoise, apply_enhance_mode, clean_edges, split_two_pages, flatten_background,
-    adaptive_bw, dewarp_page, smart_jpeg_quality,
+    adaptive_bw, dewarp_page, smart_jpeg_quality, has_real_colour,
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
 )
@@ -228,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "169"
+VERSION = "170"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2226,8 +2226,8 @@ class ScanWorker(QtCore.QThread):
                     # Rang-heen page ko gray bana do (chhoti file) — sirf colour
                     # scan me, aur sirf jab option ON ho.
                     if (self.opts.get("auto_colour") and self.pixel_type == "color"
-                            and colorfulness(img) < 6.0):
-                        img = img.convert("L")
+                            and not has_real_colour(img)):
+                        img = img.convert("L")   # sach me rang-heen page hi gray
                     # Ek glass par do page → do alag page (option ON ho to)
                     if self.opts.get("split_two_page"):
                         parts = split_two_pages(img)
@@ -10516,8 +10516,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                         im = im.convert("RGB")
                         try:
                             # rang-heen page gray me — usi quality par kaafi
-                            # chhota (aur colour-noise bhi nahi dabana padta)
-                            if colorfulness(im) < 6.0:
+                            # chhota; mohar/sign wala page colour hi rehta
+                            if not has_real_colour(im):
                                 im = im.convert("L")
                         except Exception:
                             pass
@@ -11646,7 +11646,10 @@ if the toggle is ticked).</p>
         # 'Fast' button toolbar se hata diya (user ki request). chk_fast object
         # (chhupa) rehta hai taaki do_scan / fast-mode ka code na toote.
         self.chk_fast = QtWidgets.QToolButton(); self.chk_fast.setCheckable(True); self.chk_fast.hide()
-        self.chk_fast.setChecked(bool(self._opts.get("fast_mode")))
+        # SURAKSHA: button toolbar se hat chuka hai — purani saved fast_mode
+        # kisi PC par CHUPCHAAP har scan 200dpi B&W kar deti thi aur user ke
+        # paas band karne ka koi UI nahi tha. Ab hamesha OFF se shuru.
+        self.chk_fast.setChecked(False)
         self.chk_fast.toggled.connect(self._on_fast_toggled)
         tbsep()
         self.btn_import = tbtn("import", tr("import", self._lang), self.import_images, advanced=True, key="import")
@@ -19425,7 +19428,10 @@ if the toggle is ticked).</p>
             if im.mode not in ("1", "L"):
                 im = im.convert("RGB")
                 try:
-                    if colorfulness(im) < 6.0:
+                    # sirf SACH ME rang-heen page gray hota hai — chhoti
+                    # mohar/sign wala page COLOUR hi rehta hai (pixel-level
+                    # jaanch; purana average-metric mohar kha jaata tha)
+                    if not has_real_colour(im):
                         im = im.convert("L")
                 except Exception:
                     pass

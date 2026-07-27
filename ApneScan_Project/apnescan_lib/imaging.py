@@ -30,6 +30,7 @@ __all__ = [
     "dewarp_page",
     "flatten_background",
     "smart_jpeg_quality",
+    "has_real_colour",
     "adaptive_bw",
     "straighten_photo_page",
     "auto_enhance",
@@ -616,6 +617,30 @@ def split_two_pages(img, min_aspect=1.15):
         return [left, right]
     except Exception:
         return [img]
+
+
+def has_real_colour(img, frac=0.0006, chroma_thr=48):
+    """Kya page par ASLI rang hai — chhota stamp/mohar/sign/logo bhi?
+    Purana tarika (global colorfulness < 6) poore page ka AVERAGE leta tha,
+    isliye 1% area wali neeli mohar bhi 'rang-heen' gin kar page GRAY ho
+    jaata tha (user ki shikayat: 'colour me scan, PDF black&white').
+    Ab PIXEL-level: kitne pixel saaf-saaf rangeen hain — mohar jitna chhota
+    hissa (0.4%+) bhi page ko COLOUR rakh deta hai. Scanner ke halke
+    colour-noise/tint se alag (chroma>40 + roshan pixel hi ginte hain)."""
+    try:
+        if img.mode in ("1", "L"):
+            return False
+        if not HAS_NUMPY:
+            return colorfulness(img) >= 6.0
+        a = np.asarray(img.convert("RGB"), dtype=np.float32)[::4, ::4]
+        r, g, b = a[..., 0], a[..., 1], a[..., 2]
+        mx = np.maximum(np.maximum(r, g), b)
+        mn = np.minimum(np.minimum(r, g), b)
+        sat = mx - mn                       # rang ki taakat (chroma)
+        colored = (sat > float(chroma_thr)) & (mx > 80.0)
+        return float(colored.mean()) >= float(frac)
+    except Exception:
+        return True     # shak ho to RANG rakho — mohar kabhi mat udao
 
 
 def adaptive_bw(img, window=41, k=0.18):
