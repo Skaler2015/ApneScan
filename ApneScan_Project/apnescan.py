@@ -228,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "174"
+VERSION = "175"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11673,7 +11673,14 @@ if the toggle is ticked).</p>
     # ---- UI ----
     def _build_ui(self):
         central = QtWidgets.QWidget(); self.setCentralWidget(central)
-        outer = QtWidgets.QVBoxLayout(central); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
+        # ✨ redesign: root = HBox(nav-sidebar | baaki sab) — nav POORI height
+        # ki (mockup jaisi); toolbar/scanbar/body sab nav ke RIGHT me.
+        _rooth = QtWidgets.QHBoxLayout(central)
+        _rooth.setContentsMargins(0, 0, 0, 0); _rooth.setSpacing(0)
+        self._root_h = _rooth
+        _rightcol = QtWidgets.QWidget()
+        _rooth.addWidget(_rightcol, 1)
+        outer = QtWidgets.QVBoxLayout(_rightcol); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
 
         # ---------- Top toolbar ----------
         tbwrap = QtWidgets.QWidget(); tbwrap.setObjectName("toolbar")
@@ -11698,8 +11705,8 @@ if the toggle is ticked).</p>
             b = QtWidgets.QToolButton()
             b.setToolTip(tip or tips.get(kind, label))
             b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
-            b.setIcon(_make_icon(kind)); b.setIconSize(QtCore.QSize(28, 28))
-            b.setText(label); b.setAutoRaise(True); b.setMinimumWidth(62)
+            b.setIcon(_make_icon(kind)); b.setIconSize(QtCore.QSize(22, 22))
+            b.setText(label); b.setAutoRaise(True); b.setMinimumWidth(50)
             if checkable:
                 b.setCheckable(True)
                 b.toggled.connect(fn) if fn else None
@@ -11716,7 +11723,7 @@ if the toggle is ticked).</p>
             b = QtWidgets.QToolButton()
             b.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
             b.setText("%s\n%s" % (emoji, label)); b.setToolTip(tip or label)
-            b.setAutoRaise(True); b.setMinimumWidth(62)
+            b.setAutoRaise(True); b.setMinimumWidth(50)
             b.clicked.connect(fn)
             tb.addWidget(b)
             if advanced:
@@ -11768,6 +11775,25 @@ if the toggle is ticked).</p>
         tbtn("delete", tr("delete", self._lang), self.delete_page, advanced=True, key="delete")
         tbtn("clear", tr("clear", self._lang), self.clear_all, advanced=True, key="clear")
         tb.addStretch(1)
+        # ✨ redesign: toolbar search-box (My Files me dhoondta hai) + scanner chip
+        self.tb_search = QtWidgets.QLineEdit()
+        self.tb_search.setPlaceholderText(self.L("🔍 Documents dhoondo…  (Ctrl+K)",
+                                                 "🔍 Search documents…  (Ctrl+K)"))
+        self.tb_search.setFixedWidth(240)
+        self.tb_search.setClearButtonEnabled(True)
+        self.tb_search.setStyleSheet(
+            "QLineEdit{background:#F3F4F6;border:1px solid transparent;border-radius:11px;"
+            "padding:6px 12px;font-size:12px;}"
+            "QLineEdit:focus{background:#fff;border-color:#A5B4FC;}")
+        self.tb_search.textChanged.connect(self._tb_search_changed)
+        tb.addWidget(self.tb_search)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+K"), self,
+                            lambda: (self.tb_search.setFocus(), self.tb_search.selectAll()))
+        tb.addSpacing(8)
+        self.tb_devchip = QtWidgets.QLabel("")
+        self.tb_devchip.hide()
+        tb.addWidget(self.tb_devchip)
+        tb.addSpacing(6)
         tbtn_e("🧰", "Tools", self._show_tools_menu, "tools",
                tip=self.L("ApneSoftware.com ke free online tools + PDF Info / Metadata",
                           "ApneSoftware.com free online tools + PDF Info / Metadata"))
@@ -11939,8 +11965,9 @@ if the toggle is ticked).</p>
             if width:
                 w.setFixedWidth(width)
             _cbox = QtWidgets.QVBoxLayout(); _cbox.setContentsMargins(0, 0, 0, 0); _cbox.setSpacing(0)
-            _cl = QtWidgets.QLabel(caption)
-            _cl.setStyleSheet("font-size:9.5px;color:#64748b;")
+            # mockup jaisa UPPERCASE chhota caption
+            _cl = QtWidgets.QLabel(str(caption).upper())
+            _cl.setStyleSheet("font-size:9px;color:#9CA3AF;font-weight:700;")
             _cbox.addWidget(_cl); _cbox.addWidget(w)
             _cw = QtWidgets.QWidget(); _cw.setLayout(_cbox)
             return _cw
@@ -12023,18 +12050,22 @@ if the toggle is ticked).</p>
         _av.addWidget(_col("Page size", self.cmb_pagesize, 110))
 
         # ---- ⚙ Auto-fixes quick chips (yahin on/off) ----
-        _ocrow = QtWidgets.QHBoxLayout(); _ocrow.setContentsMargins(0, 0, 0, 0); _ocrow.setSpacing(3)
+        _ocrow = QtWidgets.QHBoxLayout(); _ocrow.setContentsMargins(0, 0, 0, 0); _ocrow.setSpacing(9)
         self._opt_chips = {}
-        for _key, _lbl, _tip in (("auto_crop", "Crop", "Auto-crop the border"),
-                                 ("deskew", "Straight", "Auto-straighten (deskew)"),
+        # ✨ redesign: mockup jaise chhote toggle-SWITCH (pill indicator)
+        for _key, _lbl, _tip in (("auto_crop", "Auto Crop", "Auto-crop the border"),
+                                 ("deskew", "Deskew", "Auto-straighten (deskew)"),
                                  ("remove_blank", "Blank", "Remove blank pages"),
                                  ("quality_enhance", "Clean", "Auto clean / enhance")):
-            _cb = QtWidgets.QToolButton(); _cb.setText(_lbl); _cb.setCheckable(True)
+            _cb = QtWidgets.QCheckBox(_lbl)
             _cb.setToolTip(_tip); _cb.setChecked(bool(self._opts.get(_key)))
             _cb.setCursor(QtCore.Qt.PointingHandCursor)
-            _cb.setStyleSheet("QToolButton{font-size:10px;padding:3px 2px;border:1px solid "
-                              "#cbd5e1;border-radius:7px;background:#fff;color:#475569;}"
-                              "QToolButton:checked{background:#4F46E5;color:#fff;border-color:#4F46E5;}")
+            _cb.setStyleSheet(
+                "QCheckBox{font-size:11px;color:#374151;font-weight:600;spacing:5px;}"
+                "QCheckBox::indicator{width:28px;height:15px;border-radius:7px;"
+                "background:#D1D5DB;border:none;}"
+                "QCheckBox::indicator:checked{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+                "stop:0 #4F46E5,stop:1 #7C3AED);}")
             _cb.toggled.connect(lambda on, k=_key: self._set_scan_opt(k, on))
             self._opt_chips[_key] = _cb; _ocrow.addWidget(_cb)
         _ocw = QtWidgets.QWidget(); _ocw.setLayout(_ocrow)
@@ -12170,9 +12201,9 @@ if the toggle is ticked).</p>
                     clip = QtGui.QPainterPath()
                     clip.addRoundedRect(QtCore.QRectF(1, 1, w - 2, h - 2), 15, 15)
                     p.setClipPath(clip)
-                    for dy, col in ((0.74, QtGui.QColor(79, 70, 229, 12)),
-                                    (0.82, QtGui.QColor(124, 58, 237, 15)),
-                                    (0.89, QtGui.QColor(79, 70, 229, 20))):
+                    for dy, col in ((0.78, QtGui.QColor(79, 70, 229, 8)),
+                                    (0.85, QtGui.QColor(124, 58, 237, 10)),
+                                    (0.91, QtGui.QColor(79, 70, 229, 13))):
                         path = QtGui.QPainterPath(QtCore.QPointF(0, h * dy))
                         path.cubicTo(w * .18, h * (dy - .16), w * .34, h * (dy + .12), w * .52, h * dy)
                         path.cubicTo(w * .72, h * (dy - .12), w * .88, h * (dy - .04), w, h * (dy + .04))
@@ -12537,9 +12568,9 @@ if the toggle is ticked).</p>
         _bnext = QtWidgets.QPushButton("▶"); _bnext.setFixedWidth(30)
         _bnext.setToolTip(self.L("Agla page", "Next page"))
         _bnext.clicked.connect(lambda: self._pv_step(1))
-        self.pv_title = QtWidgets.QLabel(self.L("👁 Preview", "👁 Preview"))
+        self.pv_title = QtWidgets.QLabel("Document Preview")
         self.pv_title.setAlignment(QtCore.Qt.AlignCenter)
-        self.pv_title.setStyleSheet("font-weight:700;")
+        self.pv_title.setStyleSheet("font-weight:700;font-size:13px;color:#111827;")
         _bpvhelp = QtWidgets.QPushButton("❓"); _bpvhelp.setFixedWidth(30)
         _bpvhelp.setToolTip(self.L("Preview panel ki poori guide (Hindi + English)",
                                    "Full Preview panel guide (Hindi + English)"))
@@ -12671,7 +12702,8 @@ if the toggle is ticked).</p>
             "#navside QPushButton{border:none;border-radius:10px;text-align:left;"
             "padding:7px 11px;font-size:12.5px;color:#374151;background:transparent;}"
             "#navside QPushButton:hover{background:#F3F4F6;}"
-            "#navside QPushButton#navon{background:#EEF2FF;color:#4F46E5;font-weight:700;}"
+            "#navside QPushButton#navon{background:#EEF2FF;color:#4F46E5;font-weight:700;"
+            "border-left:3px solid #4F46E5;border-radius:8px;padding-left:9px;}"
             "#navside QPushButton#navon:hover{background:#E0E7FF;}"
             "#navside QLabel{background:transparent;border:none;}")
         nv = QtWidgets.QVBoxLayout(nav); nv.setContentsMargins(11, 13, 11, 9); nv.setSpacing(2)
@@ -12706,7 +12738,7 @@ if the toggle is ticked).</p>
         _ncap("WORKSPACE")
         _nbtn("🏠", "Dashboard", lambda: self.list.setFocus(), on=True)
         _nbtn("📁", self.L("Meri Files", "My Documents"),
-              lambda: (self.files_panel.setVisible(True), self.files_panel.setFocus()))
+              lambda: self.files_panel.setVisible(not self.files_panel.isVisible()))
         _nbtn("🕘", "Recent Files", self._show_recent_files)
         _nbtn("📚", self.L("History", "Scan History"), self.show_history)
         _nbtn("📊", "Analytics", self.show_analytics)
@@ -12721,16 +12753,28 @@ if the toggle is ticked).</p>
         _store = QtWidgets.QFrame()
         _store.setStyleSheet("background:#F9FAFB;border:1px solid #E5E7EB;border-radius:11px;")
         _sv = QtWidgets.QVBoxLayout(_store); _sv.setContentsMargins(10, 8, 10, 8); _sv.setSpacing(3)
+        _used_frac = 0.0
         try:
             _du = shutil.disk_usage(os.path.expanduser("~"))
             _free = self.L("Disk: %.0f GB khaali", "Disk: %.0f GB free") % (_du.free / (1024 ** 3))
+            _used_frac = max(0.02, min(1.0, 1.0 - (_du.free / float(_du.total or 1))))
         except Exception:
             _free = ""
         _s1 = QtWidgets.QLabel("💾 " + _free)
         _s1.setStyleSheet("font-size:10.5px;color:#374151;")
+        _sv.addWidget(_s1)
+        # mockup jaisi patli storage-bar (gradient fill)
+        _track = QtWidgets.QFrame(); _track.setFixedHeight(6)
+        _track.setStyleSheet("background:#E5E7EB;border-radius:3px;border:none;")
+        _fillw = QtWidgets.QFrame(_track)
+        _fillw.setStyleSheet(
+            "background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #4F46E5,stop:1 #7C3AED);"
+            "border-radius:3px;border:none;")
+        _fillw.setGeometry(0, 0, int(152 * _used_frac), 6)
+        _sv.addWidget(_track)
         _s2 = QtWidgets.QLabel("🟢 Scanner · WIA")
         _s2.setStyleSheet("font-size:10.5px;color:#374151;")
-        _sv.addWidget(_s1); _sv.addWidget(_s2)
+        _sv.addWidget(_s2)
         nv.addWidget(_store)
         _ver = QtWidgets.QLabel("ApneScan · v%s · 100%% Free" % VERSION)
         _ver.setAlignment(QtCore.Qt.AlignCenter)
@@ -12746,11 +12790,9 @@ if the toggle is ticked).</p>
             nav.hide()
         QtWidgets.QShortcut(QtGui.QKeySequence("F8"), self,
                             lambda: self.nav_side.setVisible(not self.nav_side.isVisible()))
-        _bodyrow = QtWidgets.QWidget()
-        _bh = QtWidgets.QHBoxLayout(_bodyrow)
-        _bh.setContentsMargins(0, 0, 0, 0); _bh.setSpacing(0)
-        _bh.addWidget(nav); _bh.addWidget(spl, 1)
-        outer.addWidget(_bodyrow, 1)
+        # nav sabse LEFT me poori height par (toolbar bhi iske right me)
+        self._root_h.insertWidget(0, nav)
+        outer.addWidget(spl, 1)
         # ANALYTICS card: PREVIEW ke JUST NEECHE (user ki request); preview
         # band ho to Meri Files panel ke neeche — kahin na kahin hamesha.
         self._place_an_box()
@@ -13082,6 +13124,39 @@ if the toggle is ticked).</p>
                "offline": "🔴", "unknown": "⚪"}.get(state, "⚪")
         try:
             self.dev_status.setText(dot)
+        except Exception:
+            pass
+        # ✨ redesign: toolbar ki scanner-chip bhi taaza karo (mockup jaisi)
+        try:
+            chip = getattr(self, "tb_devchip", None)
+            if chip is not None:
+                name = (self._opts.get("scanner_name") or "").strip()
+                if len(name) > 26:
+                    name = name[:24] + "…"
+                bg, bd, fg, word = {
+                    "busy": ("#FFF7ED", "#FED7AA", "#B45309", "Busy"),
+                    "offline": ("#FEF2F2", "#FECACA", "#B91C1C", "Offline"),
+                }.get(state, ("#F0FDF4", "#BBF7D0", "#15803D", "Ready"))
+                if name and state in ("free", "ready", "busy", "offline"):
+                    chip.setText("● %s · %s" % (name, word))
+                    chip.setStyleSheet(
+                        "background:%s;border:1px solid %s;color:%s;"
+                        "font-size:11px;font-weight:600;border-radius:12px;"
+                        "padding:4px 11px;" % (bg, bd, fg))
+                    chip.show()
+                else:
+                    chip.hide()
+        except Exception:
+            pass
+
+    def _tb_search_changed(self, txt):
+        """Toolbar ki search — My Files panel ki search me hi bhejta hai
+        (panel chhupa ho to dikha deta hai)."""
+        try:
+            if txt and hasattr(self, "files_panel") and not self.files_panel.isVisible():
+                self.files_panel.setVisible(True)
+            if hasattr(self, "files_search") and self.files_search.text() != txt:
+                self.files_search.setText(txt)
         except Exception:
             pass
 
@@ -16155,7 +16230,7 @@ if the toggle is ticked).</p>
         it = self.list.currentItem()
         if it is None:
             self.pv_img.clear(); self.pv_info.setText("")
-            self.pv_title.setText(self.L("👁 Preview", "👁 Preview"))
+            self.pv_title.setText("Document Preview")
             self.pv_info2.setText(""); self.pv_text.setPlainText("")
             self._pv_pm = None
             return
