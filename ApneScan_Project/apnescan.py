@@ -228,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "168"
+VERSION = "169"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11821,7 +11821,15 @@ if the toggle is ticked).</p>
         # ---------- SCAN BAR: saari scan-settings TOOLBAR ke JUST NEECHE,
         #            EK LINE me (user ki request) — neeche body me My Files |
         #            pages | preview ek RESIZABLE splitter me. ----------
-        scanbar = QtWidgets.QWidget(); scanbar.setObjectName("panel")
+        scanbar = QtWidgets.QWidget(); scanbar.setObjectName("scanbar")
+        scanbar.setStyleSheet(
+            "#scanbar{background:#f8fafc;}"
+            "#scanbar QComboBox{border:1px solid #cbd5e1;border-radius:8px;padding:3px 8px;background:#fff;}"
+            "#scanbar QPushButton{border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:4px 8px;}"
+            "#scanbar QPushButton:hover{border-color:#94a3b8;}"
+            "#scanbar QPushButton#primary{background:#2563eb;border:none;color:#fff;font-weight:800;"
+            "font-size:13.5px;padding:9px 30px;border-radius:10px;}"
+            "#scanbar QPushButton#primary:hover{background:#1d4ed8;}")
         self.left_panel = scanbar     # purane F9 / show_left_panel toggle isi par
         if not self._opts.get("show_left_panel", True):
             scanbar.hide()
@@ -11839,11 +11847,11 @@ if the toggle is ticked).</p>
             _cw = QtWidgets.QWidget(); _cw.setLayout(_cbox)
             return _cw
 
-        # Profile + uske buttons (ek hi chhoti row)
+        # Profile — MAIN bar par sirf combo (kam clutter); edit-buttons
+        # "Advanced settings" ke andar (user: sirf kaam ki details dikhein)
         self.cmb_profile = QtWidgets.QComboBox(); self.cmb_profile.currentTextChanged.connect(self._on_profile_changed)
-        self.cmb_profile.setMinimumWidth(120)
+        sb.addWidget(_col(tr("profile", self._lang), self.cmb_profile, 150))
         prow = QtWidgets.QHBoxLayout(); prow.setContentsMargins(0, 0, 0, 0); prow.setSpacing(2)
-        prow.addWidget(self.cmb_profile, 1)
         bnew = QtWidgets.QPushButton("➕"); bnew.setFixedWidth(26); bnew.setToolTip(self.L("Naya profile", "New profile")); bnew.clicked.connect(self._quick_new_profile); prow.addWidget(bnew)
         bedit = QtWidgets.QPushButton("✏️"); bedit.setFixedWidth(26); bedit.setToolTip(self.L("Profile badlo", "Edit profile")); bedit.clicked.connect(self._quick_edit_profile); prow.addWidget(bedit)
         bdup = QtWidgets.QPushButton("📋"); bdup.setFixedWidth(26); bdup.setToolTip(self.L("Is profile ki nakal", "Duplicate this profile")); bdup.clicked.connect(self._duplicate_profile); prow.addWidget(bdup)
@@ -11856,7 +11864,7 @@ if the toggle is ticked).</p>
         self.btn_lock.toggled.connect(self._toggle_profile_lock)
         prow.addWidget(self.btn_lock)
         pw = QtWidgets.QWidget(); pw.setLayout(prow)
-        sb.addWidget(_col(tr("profile", self._lang), pw, 240))
+        self._prof_tools = pw          # ⚙ Advanced ke andar dikhta hai
 
         # Device (status-dot + naam + 🔄) — caption ki jagah "Connected via"
         self.dev_status = QtWidgets.QLabel("● ")
@@ -11864,7 +11872,7 @@ if the toggle is ticked).</p>
                                           "Scanner status: 🟢 ready · 🟡 busy · 🔴 offline"))
         self.dev_lbl = QtWidgets.QLabel(self._opts.get("scanner_name") or "(no device)")
         self.dev_lbl.setObjectName("dev"); self.dev_lbl.setWordWrap(False)
-        self.dev_lbl.setMaximumWidth(160)
+        self.dev_lbl.setMaximumWidth(230)
         self.btn_change_dev = QtWidgets.QPushButton("🔄")
         self.btn_change_dev.setFixedWidth(30)
         self.btn_change_dev.setToolTip(self.L(
@@ -11890,12 +11898,22 @@ if the toggle is ticked).</p>
 
         # ---- ⚙ Advanced settings (Simple mode me chhup jate hain) ----
         self.btn_adv = QtWidgets.QToolButton(); self.btn_adv.setCheckable(True)
-        self.btn_adv.setChecked(not bool(self._opts.get("panel_simple", False)))
+        # default COLLAPSED — sirf kaam ki details dikhein (kholne par sab)
+        self.btn_adv.setChecked(not bool(self._opts.get("panel_simple", True)))
         self.btn_adv.setStyleSheet("QToolButton{border:none;color:#64748b;font-size:11px;padding:2px;}")
         self.btn_adv.toggled.connect(self._toggle_adv_panel)
-        sb.addWidget(self.btn_adv)
+        # MAIN bar par sirf KAAM KI cheezein: Resolution + Bit depth
+        self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.addItems([d + " dpi" for d in RESOLUTIONS])
+        self.cmb_dpi.addItem(self.L("Custom… (apni dpi)", "Custom…"))
+        self.cmb_dpi.setCurrentText("300 dpi")
+        self.cmb_dpi.currentTextChanged.connect(self._on_panel_dpi_changed)
+        sb.addWidget(_col("Resolution", self.cmb_dpi, 88))
+        self.cmb_depth = QtWidgets.QComboBox(); self.cmb_depth.addItems(["24-bit Colour", "Grayscale", "Black & White"]); self.cmb_depth.setCurrentText("Grayscale")
+        sb.addWidget(_col("Bit depth", self.cmb_depth, 110))
+        # baaki sab ⚙ Advanced ke andar (default band)
         self._adv_box = QtWidgets.QWidget()
         _av = QtWidgets.QHBoxLayout(self._adv_box); _av.setContentsMargins(0, 0, 0, 0); _av.setSpacing(8)
+        _av.addWidget(_col(self.L("Profile tools", "Profile tools"), self._prof_tools))
         self.cmb_source = QtWidgets.QComboBox(); self.cmb_source.addItems(["Feeder (ADF)", "Glass (Flatbed)"])
         _av.addWidget(_col("Paper source", self.cmb_source, 108))
         self.cmb_sides = QtWidgets.QComboBox()
@@ -11905,16 +11923,6 @@ if the toggle is ticked).</p>
         self.cmb_pagesize = QtWidgets.QComboBox(); self.cmb_pagesize.addItems(["Auto (detect each page's size)", "A4 (210x297 mm)", "Letter", "Legal", "A5"])
         self.cmb_pagesize.setToolTip("Auto = detect each page's real size (mixed sizes / ID card / half page too). A4/Letter/Legal = fixed size.")
         _av.addWidget(_col("Page size", self.cmb_pagesize, 110))
-        self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.addItems([d + " dpi" for d in RESOLUTIONS])
-        self.cmb_dpi.addItem(self.L("Custom… (apni dpi)", "Custom…"))
-        self.cmb_dpi.setCurrentText("300 dpi")
-        self.cmb_dpi.currentTextChanged.connect(self._on_panel_dpi_changed)
-        _av.addWidget(_col("Resolution", self.cmb_dpi, 90))
-        self.cmb_depth = QtWidgets.QComboBox(); self.cmb_depth.addItems(["24-bit Colour", "Grayscale", "Black & White"]); self.cmb_depth.setCurrentText("Grayscale")
-        _av.addWidget(_col("Bit depth", self.cmb_depth, 112))
-        sb.addWidget(self._adv_box)
-        self._adv_box.setVisible(self.btn_adv.isChecked())
-        self._refresh_adv_toggle_text()
 
         # ---- ⚙ Auto-fixes quick chips (yahin on/off) ----
         _ocrow = QtWidgets.QHBoxLayout(); _ocrow.setContentsMargins(0, 0, 0, 0); _ocrow.setSpacing(3)
@@ -11945,7 +11953,12 @@ if the toggle is ticked).</p>
         self.cmb_after_scan.setCurrentIndex(_ix if _ix >= 0 else 0)
         self.cmb_after_scan.currentIndexChanged.connect(
             lambda _i: (self._opts.__setitem__("after_scan_panel", self.cmb_after_scan.currentData()), self._save_opts()))
-        sb.addWidget(_col(self.L("Baad me", "After"), self.cmb_after_scan, 100))
+        _av.addWidget(_col(self.L("Baad me", "After"), self.cmb_after_scan, 100))
+        # ⚙ toggle + Advanced box (chips ke baad, ek saath)
+        sb.addWidget(self.btn_adv)
+        sb.addWidget(self._adv_box)
+        self._adv_box.setVisible(self.btn_adv.isChecked())
+        self._refresh_adv_toggle_text()
 
         sb.addStretch(1)
         # UPDATE BANNER: naya version website par aate hi yahan dikhta hai —
