@@ -228,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "170"
+VERSION = "171"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8762,6 +8762,42 @@ class ScannerWindow(QtWidgets.QMainWindow):
         v.addLayout(bb)
         dlg.exec_()
 
+    def _copy_pages_to_clipboard(self):
+        """Ctrl+C (thumbnail area): chune hue page(s) clipboard par le jao —
+        phir Ctrl+V se YAHIN duplicate ban jaate hain, aur Explorer/WhatsApp/
+        Word me bhi paste ho sakte hain (file + image dono roop me jaata hai).
+        Kisi text-box me likh rahe hon to wahan normal copy hi hota hai."""
+        fw = QtWidgets.QApplication.focusWidget()
+        if isinstance(fw, (QtWidgets.QLineEdit, QtWidgets.QPlainTextEdit, QtWidgets.QTextEdit)):
+            try:
+                fw.copy()
+            except Exception:
+                pass
+            return
+        try:
+            paths = self._selected_paths() or []
+            if not paths:
+                it = self.list.currentItem()
+                if it is not None:
+                    paths = [it.data(QtCore.Qt.UserRole)]
+            paths = [p for p in paths if p and os.path.exists(p)]
+            if not paths:
+                return
+            md = QtCore.QMimeData()
+            md.setUrls([QtCore.QUrl.fromLocalFile(p) for p in paths])
+            try:
+                _qi = QtGui.QImage(paths[0])
+                if not _qi.isNull():
+                    md.setImageData(_qi)
+            except Exception:
+                pass
+            QtWidgets.QApplication.clipboard().setMimeData(md)
+            self.status.showMessage(
+                self.L("📋 %d page copy ho gaye — Ctrl+V se yahin duplicate, ya kahin bhi paste",
+                       "📋 Copied %d page(s) — Ctrl+V here duplicates, or paste anywhere") % len(paths), 5000)
+        except Exception:
+            pass
+
     def _paste_from_clipboard(self):
         """Ctrl+V: clipboard se image/PDF ya copy ki hui file(s) app me laao.
         Agar kisi text-box me likh rahe hain to wahan normal paste ho."""
@@ -12619,6 +12655,7 @@ if the toggle is ticked).</p>
         # Ctrl+O = koi folder kholo (sidebar me) · Ctrl+V = clipboard se paste
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+O"), self, self.open_existing_folder)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+V"), self, self._paste_from_clipboard)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+C"), self, self._copy_pages_to_clipboard)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Y"), self, self._hist_redo_do)   # redo (alt)
         # Tesseract check ko startup par BACKGROUND me warm kar do (ye tesseract.exe
         # subprocess chalata hai ~1-2s) — taaki baad me koi bhi kaam (rename, scan)
