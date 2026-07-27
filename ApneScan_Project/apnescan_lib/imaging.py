@@ -28,6 +28,8 @@ __all__ = [
     "autocrop",
     "deskew",
     "flatten_background",
+    "adaptive_bw",
+    "straighten_photo_page",
     "auto_enhance",
     "auto_brightness",
     "denoise",
@@ -202,17 +204,31 @@ def flatten_background(img, target=246):
         if float((g > 120).mean()) < 0.55:
             return img
         h, w = g.shape
-        # Background chhote size par nikalta hai (tez): max-filter text ke
-        # strokes ke UPAR se kagaz utha leta hai, blur use smooth karta hai.
-        small = img.convert("L").resize(
-            (max(1, w // 8), max(1, h // 8)), Image.BILINEAR)
-        # Pehle se SAFED page (naye 300dpi HD scan) par kaam hi mat karo —
-        # print ke waqt ye per-page bachat hai (no-op = same object return).
-        if float(np.percentile(np.asarray(small, dtype=np.float32), 80)) >= 243.0:
+        sw, sh = max(1, w // 8), max(1, h // 8)
+        small = img.convert("L").resize((sw, sh), Image.BILINEAR)
+        # Kagaz me RANG ki tint (peela/neela) hai kya? — white-balance ke liye.
+        tint = 0.0
+        if img.mode != "L":
+            sc = np.asarray(img.convert("RGB").resize((sw, sh), Image.BILINEAR),
+                            dtype=np.float32)
+            bright = np.asarray(small, dtype=np.float32) > 150
+            if float(bright.mean()) > 0.2:
+                ch = sc[bright].mean(axis=0)
+                tint = float(ch.max() - ch.min())
+        # Pehle se SAFED + bina-tint page (naye 300dpi HD scan) par kaam hi mat
+        # karo — print ke waqt ye per-page bachat hai (same object return).
+        if (float(np.percentile(np.asarray(small, dtype=np.float32), 80)) >= 243.0
+                and tint < 12.0):
             return img
-        bg = small.filter(ImageFilter.MaxFilter(9)).filter(
-            ImageFilter.GaussianBlur(6)).resize((w, h), Image.BILINEAR)
-        b = np.maximum(np.asarray(bg, dtype=np.float32), 40.0)
+
+        def _bg_field(chan_small):
+            # max-filter text ke strokes ke UPAR se kagaz utha leta hai,
+            # blur use smooth karta hai (sab chhote size par — tez).
+            f = chan_small.filter(ImageFilter.MaxFilter(9)).filter(
+                ImageFilter.GaussianBlur(6)).resize((w, h), Image.BILINEAR)
+            return np.maximum(np.asarray(f, dtype=np.float32), 40.0)
+
+        b = _bg_field(small)
         bgmean = float(b.mean())
         gain = float(target) / b
         # ADF ki KHADI (vertical) streak-lines: har column ka apna chhota
@@ -231,13 +247,29 @@ def flatten_background(img, target=246):
             lut[np.clip(gray1[::8, ::8], 0, 255).astype(np.uint8)], 90))
         lut = np.clip(lut * min(1.15, 255.0 / max(wp, 200.0)), 0.0, 255.0)
         lut = lut.astype(np.uint8)
+        # Quality-guard (stroke preservation): sudhaar ke baad text GHATNA
+        # nahi chahiye — gehre pixel aadhe se kam reh jaayen to processing
+        # reject karke original wapas (kabhi-kabhi ajeeb page par safety).
+        outL = lut[np.clip(gray1, 0.0, 255.0).astype(np.uint8)]
+        dark_before = float((g < 110).mean())
+        if dark_before > 0.002 and float((outL < 110).mean()) < 0.5 * dark_before:
+            return img
         if img.mode == "L":
-            out = np.clip(gray1, 0.0, 255.0).astype(np.uint8)
-            return Image.fromarray(lut[out], "L")
-        rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
-        out = np.clip(rgb * (gain * cgain[None, :])[..., None],
-                      0.0, 255.0).astype(np.uint8)
-        return Image.fromarray(lut[out], "RGB")
+            return Image.fromarray(outL, "L")
+        # Colour: HAR CHANNEL ki apni background estimate — isse WHITE BALANCE
+        # bhi ho jaata hai (peela/purana kagaz asli white; thanda/garam bulb ki
+        # tint gayab) aur stamp/sign ke rang bane rehte hain. Channel-by-channel
+        # (32-bit app me memory kam rakhne ke liye).
+        chans = img.convert("RGB").split()
+        outc = np.empty((h, w, 3), dtype=np.uint8)
+        for i, cch in enumerate(chans):
+            cs = cch.resize((sw, sh), Image.BILINEAR)
+            bc = _bg_field(cs)
+            ca = np.asarray(cch, dtype=np.float32)
+            outc[:, :, i] = lut[np.clip(
+                ca * (float(target) / bc) * cgain[None, :],
+                0.0, 255.0).astype(np.uint8)]
+        return Image.fromarray(outc, "RGB")
     except Exception:
         return img
 
@@ -355,6 +387,116 @@ def split_two_pages(img, min_aspect=1.15):
         return [img]
 
 
+def adaptive_bw(img, window=41, k=0.18):
+    """Professional B&W (Sauvola adaptive threshold): har ilaake ka APNA
+    threshold (local mean/std se) — global-160 wale purane tarike me patle
+    akshar toot'te the aur halki syahi gayab ho jaati thi. Yahan:
+      - patli lines / chhote font surakshit,
+      - halka pen / stamp bhi aata hai,
+      - background pure white, text deep black.
+    Badi image par threshold-field aadhe size par banta hai (field smooth hota
+    hai — quality same, memory/time 4x kam; 32-bit app ke liye zaroori).
+    numpy na ho, ya result ajeeb lage (sab kala / sab safed), to purana global
+    threshold (160) — kabhi kharab output nahi."""
+    try:
+        if not HAS_NUMPY:
+            raise RuntimeError("no numpy")
+        gsrc = img.convert("L")
+        g = np.asarray(gsrc, dtype=np.float32)
+        h, w = g.shape
+        scale = 2 if max(h, w) > 2200 else 1
+        gs = (np.asarray(gsrc.resize((max(1, w // 2), max(1, h // 2)),
+                                     Image.BILINEAR), dtype=np.float32)
+              if scale == 2 else g)
+        hh, ww = gs.shape
+        win = max(15, min(window, (min(hh, ww) // 2) * 2 - 1))
+        if win % 2 == 0:
+            win += 1
+        pad = win // 2
+        gp = np.pad(gs, pad + 1, mode="edge").astype(np.float64)
+        s1 = gp.cumsum(0).cumsum(1)
+        s2 = (gp * gp).cumsum(0).cumsum(1)
+
+        def _box(S):
+            return (S[win:, win:] - S[:-win, win:]
+                    - S[win:, :-win] + S[:-win, :-win])
+
+        n = float(win * win)
+        mean = (_box(s1)[:hh, :ww] / n).astype(np.float32)
+        var = (_box(s2)[:hh, :ww] / n).astype(np.float32) - mean * mean
+        std = np.sqrt(np.maximum(var, 0.0))
+        thr = mean * (1.0 + k * (std / 128.0 - 1.0))
+        if scale == 2:
+            thr = np.asarray(
+                Image.fromarray(thr, "F").resize((w, h), Image.BILINEAR),
+                dtype=np.float32)
+        bw = g > thr
+        black = 1.0 - float(bw.mean())
+        # Sanity: bilkul khaali ya aadhe se zyada kala page = kuch galat hai.
+        if not (0.002 <= black <= 0.5):
+            raise RuntimeError("sauvola out of range")
+        return Image.fromarray((bw.astype(np.uint8) * 255), "L").convert("1")
+    except Exception:
+        try:
+            return img.convert("L").point(
+                lambda v: 255 if v >= 160 else 0, mode="1")
+        except Exception:
+            return img
+
+
+def straighten_photo_page(img):
+    """Phone-photo me TIRCHHE rakhe page ko flatbed-jaisa seedha karo
+    (perspective / keystone correction). Kagaz ka chamakta hua quad numpy se
+    dhoondh kar BICUBIC warp hota hai (kabhi nearest-neighbour nahi).
+    Sirf tab lagta hai jab 4 kone bharose se milen — warna original wapas
+    (photo kabhi kharab nahi hoti)."""
+    try:
+        if not HAS_NUMPY:
+            return img
+        rgb = img.convert("RGB")
+        w, h = rgb.size
+        small = rgb.resize((max(1, w // 6), max(1, h // 6)), Image.BILINEAR)
+        sg = np.asarray(small.convert("L"), dtype=np.float32)
+        sh, sw = sg.shape
+        # Paper-mask: andhere background par chamakta kagaz.
+        thr = (float(np.percentile(sg, 20)) + float(np.percentile(sg, 90))) / 2.0
+        mask = sg > thr
+        frac = float(mask.mean())
+        # ~poora frame bright (scanner/white table) ya bahut kam paper -> no-op.
+        if not (0.25 <= frac <= 0.90):
+            return img
+        ys, xs = np.nonzero(mask)
+        s = xs + ys
+        d = xs.astype(np.int64) - ys.astype(np.int64)
+        fx, fy = w / float(sw), h / float(sh)
+
+        def _pt(i):
+            return (float(xs[i]) * fx, float(ys[i]) * fy)
+
+        tl, br = _pt(int(s.argmin())), _pt(int(s.argmax()))
+        tr, bl = _pt(int(d.argmax())), _pt(int(d.argmin()))
+        # Shoelace area — degenerate ya ~full-frame quad par no-op.
+        qx = [tl[0], tr[0], br[0], bl[0]]
+        qy = [tl[1], tr[1], br[1], bl[1]]
+        area = 0.5 * abs(sum(qx[i] * qy[(i + 1) % 4] - qx[(i + 1) % 4] * qy[i]
+                             for i in range(4)))
+        if not (0.30 * w * h <= area <= 0.965 * w * h):
+            return img
+
+        def _dist(a, b):
+            return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+        W2 = int(max(_dist(tl, tr), _dist(bl, br)))
+        H2 = int(max(_dist(tl, bl), _dist(tr, br)))
+        if W2 < 200 or H2 < 200:
+            return img
+        # PIL QUAD source order: NW, SW, SE, NE.
+        data = (tl[0], tl[1], bl[0], bl[1], br[0], br[1], tr[0], tr[1])
+        return rgb.transform((W2, H2), Image.QUAD, data, Image.BICUBIC)
+    except Exception:
+        return img
+
+
 def flatten_photo_shadows(img):
     """Phone-photo ke shadow / roshni ke dabbe hatao: background ko blur karke
     usse divide karo — paper flat white ho jata hai, text/stamp waise hi rehte
@@ -388,6 +530,8 @@ def clean_photo(img):
         s = 2600.0 / m
         img = img.resize((max(1, int(img.width * s)), max(1, int(img.height * s))),
                          Image.LANCZOS)
+    # Tirchha page seedha (perspective warp) — bharosa na ho to no-op.
+    img = straighten_photo_page(img)
     return flatten_photo_shadows(img)
 
 

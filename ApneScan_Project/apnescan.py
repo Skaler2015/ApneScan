@@ -41,6 +41,7 @@ from apnescan_lib.search_engine import _folder_search_score
 from apnescan_lib.imaging import (
     is_blank_page, whiten_dark_background, autocrop, deskew, auto_enhance,
     denoise, apply_enhance_mode, clean_edges, split_two_pages, flatten_background,
+    adaptive_bw,
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
 )
@@ -226,7 +227,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "157"
+VERSION = "158"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -461,6 +462,7 @@ DEFAULT_OPTIONS = {
     "searchable_pdf": False,     # har save par PDF ke andar OCR text (Ctrl+F se dhoondo)
     "compress": False,
     "jpeg_quality": 60,
+    "pdf_quality_mode": "best",  # best (quality-first) / balanced / compact
     "watermark": False,
     "watermark_text": "Noble Care Hospital",
     "batch_mode": False,
@@ -2233,8 +2235,9 @@ class ScanWorker(QtCore.QThread):
                 os.close(fd)
                 try:
                     if im.mode != "1":
-                        im = im.convert("L").point(
-                            lambda v: 255 if v >= 160 else 0, mode="1")
+                        # Sauvola adaptive threshold — patle akshar/halki
+                        # syahi surakshit, pure white bg (fallback: global 160)
+                        im = adaptive_bw(im)
                 except Exception:
                     pass
                 try:
@@ -2617,6 +2620,11 @@ class OptionsDialog(QtWidgets.QDialog):
         form.addRow(chkrow(self.chk_filexfer, 'हिन्दी: चालू करने पर (सिर्फ़ TWAIN तरीके में): स्कैनर का feeder बिना रुके चलता रहेगा (file-transfer mode)। अगर स्कैनर समर्थन न करे तो ऐप खुद पुराने तरीके पर आ जाएगी।\nEnglish: ON (TWAIN method only): keeps the ADF feeding continuously via file-transfer mode; falls back to the normal path automatically if unsupported.'))
 
         header("Output")
+        self.cmb_pdfq = QtWidgets.QComboBox()
+        self.cmb_pdfq.addItems(["Best quality (recommended)", "Balanced", "Compact (smallest)"])
+        self.cmb_pdfq.setCurrentIndex({"best": 0, "balanced": 1, "compact": 2}.get(
+            str(self.opts.get("pdf_quality_mode", "best")).lower(), 0))
+        form.addRow(lblhelp("PDF quality:", 'हिन्दी: Best = सबसे साफ़ PDF (print/zoom/records के लिए; फ़ाइल बड़ी)। Balanced = साफ़ और छोटी। Compact = सबसे छोटी (portal upload)।\nEnglish: Best = clearest PDF (bigger file). Balanced = clear & small. Compact = smallest (portal uploads).'), self.cmb_pdfq)
         self.chk_compress = QtWidgets.QCheckBox("PDF compress (smaller file)")
         self.chk_compress.setChecked(self.opts["compress"]); form.addRow(chkrow(self.chk_compress, 'हिन्दी: चालू करने पर: PDF की फ़ाइल छोटी बनेगी (email/upload आसान); quality थोड़ी कम।\nEnglish: ON: smaller PDF (easier to email/upload); slightly lower quality.'))
         self.q_spin = QtWidgets.QSpinBox(); self.q_spin.setRange(20, 95)
@@ -2725,6 +2733,7 @@ class OptionsDialog(QtWidgets.QDialog):
         o["custom_page_mm"] = int(self.spin_custlen.value())
         o["compress"] = self.chk_compress.isChecked()
         o["jpeg_quality"] = int(self.q_spin.value())
+        o["pdf_quality_mode"] = ["best", "balanced", "compact"][self.cmb_pdfq.currentIndex()]
         o["watermark"] = self.chk_wm.isChecked()
         o["watermark_text"] = self.wm_edit.text().strip() or "Noble Care Hospital"
         o["batch_mode"] = self.chk_batch.isChecked()
@@ -19033,10 +19042,18 @@ if the toggle is ticked).</p>
         # par. (Pehle page JPEG me daba kar PDF me DOBARA default-75 par
         # dabta tha: quality bhi girti thi, size bhi barhta tha.)
         compress = self._opts.get("compress")
-        q = int(self._opts.get("jpeg_quality", 60)) if compress else 80
+        if compress:
+            q, _cap = int(self._opts.get("jpeg_quality", 60)), 3300
+        else:
+            # PDF quality mode (Settings): best = quality-first (koi downscale
+            # nahi, q95 — print/zoom/archive ke liye); balanced/compact chhoti
+            # file ke liye.
+            _pm = str(self._opts.get("pdf_quality_mode", "best") or "best").lower()
+            q, _cap = {"balanced": (85, 4400),
+                       "compact": (75, 3300)}.get(_pm, (95, 0))
         wm = self._opts.get("watermark")
         wt = self._opts.get("watermark_text", "")
-        imgs, res = self._pdf_ready_pages(paths)
+        imgs, res = self._pdf_ready_pages(paths, max_side=_cap)
         if wm and wt:
             # watermark RGBA me lagta hai — gray page ko wapas gray kar do
             # taaki file chhoti hi rahe
