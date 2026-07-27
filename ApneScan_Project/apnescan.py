@@ -228,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "172"
+VERSION = "173"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2382,7 +2382,7 @@ class EditProfileDialog(QtWidgets.QDialog):
             # "?" help-icon wala row-label (Hindi + English hover)
             h = QtWidgets.QLabel("?")
             h.setToolTip(tip); h.setCursor(QtCore.Qt.WhatsThisCursor)
-            h.setStyleSheet("QLabel{color:#0f766e;border:1px solid #0f766e;border-radius:9px;"
+            h.setStyleSheet("QLabel{color:#4F46E5;border:1px solid #4F46E5;border-radius:9px;"
                             "min-width:18px;max-width:18px;min-height:18px;max-height:18px;"
                             "font-weight:bold;qproperty-alignment:AlignCenter;}")
             r = QtWidgets.QHBoxLayout(); r.setContentsMargins(0, 0, 0, 0); r.setSpacing(6)
@@ -2416,7 +2416,7 @@ class EditProfileDialog(QtWidgets.QDialog):
         _dxr = QtWidgets.QHBoxLayout(); _dxr.setContentsMargins(0, 0, 0, 0); _dxr.setSpacing(6)
         _dxh = QtWidgets.QLabel("?"); _dxh.setToolTip(self.chk_duplex.toolTip())
         _dxh.setCursor(QtCore.Qt.WhatsThisCursor)
-        _dxh.setStyleSheet("QLabel{color:#0f766e;border:1px solid #0f766e;border-radius:9px;"
+        _dxh.setStyleSheet("QLabel{color:#4F46E5;border:1px solid #4F46E5;border-radius:9px;"
                            "min-width:18px;max-width:18px;min-height:18px;max-height:18px;"
                            "font-weight:bold;qproperty-alignment:AlignCenter;}")
         _dxr.addWidget(self.chk_duplex); _dxr.addWidget(_dxh); _dxr.addStretch(1)
@@ -2533,7 +2533,7 @@ class OptionsDialog(QtWidgets.QDialog):
         def qhelp(tip):
             h = QtWidgets.QLabel("?")
             h.setToolTip(tip); h.setCursor(QtCore.Qt.WhatsThisCursor)
-            h.setStyleSheet("QLabel{color:#0f766e; border:1px solid #0f766e; border-radius:9px;"
+            h.setStyleSheet("QLabel{color:#4F46E5; border:1px solid #4F46E5; border-radius:9px;"
                             "min-width:18px; max-width:18px; min-height:18px; max-height:18px;"
                             "font-weight:bold; qproperty-alignment:AlignCenter;}")
             return h
@@ -3008,14 +3008,14 @@ class HelpDialog(QtWidgets.QDialog):
         br.document().setDefaultStyleSheet(
             "body{font-family:'Nirmala UI','Noto Sans Devanagari','Segoe UI',sans-serif;"
             "font-size:15px;line-height:170%;color:#334155;}"
-            "h3{color:#0f766e;font-weight:700;} b{color:#0f172a;}")
+            "h3{color:#4F46E5;font-weight:700;} b{color:#0f172a;}")
         br.setHtml(HELP_TEXT_HI if lang == "hi" else HELP_TEXT_EN)
         lay.addWidget(br)
         b = QtWidgets.QPushButton("Close" if lang == "hi" else "Close")
         b.clicked.connect(self.accept); lay.addWidget(b)
 
 
-def _make_icon(kind, color="#0f766e"):
+def _make_icon(kind, color="#4F46E5"):
     """Draw a small flat icon (28x28) for the toolbar. No external files needed."""
     from PyQt5 import QtGui, QtCore
     pm = QtGui.QPixmap(30, 30); pm.fill(QtCore.Qt.transparent)
@@ -3254,21 +3254,21 @@ class ImageEditor(QtWidgets.QDialog):
     QToolButton.tool { border:none; border-radius:10px; padding:7px 3px; color:#334155;
                        font-size:10px; background:transparent; }
     QToolButton.tool:hover { background:#e6eef0; }
-    QToolButton.tool:checked { background:#0f766e; color:#ffffff; }
+    QToolButton.tool:checked { background:#4F46E5; color:#ffffff; }
     QToolButton.act { border:1px solid #e2e8f0; border-radius:9px; padding:5px 7px;
                       color:#334155; font-size:11px; background:#fff; }
-    QToolButton.act:hover { border-color:#0f766e; color:#0f766e; background:#f0fdfa; }
-    QPushButton#primary { background:#0f766e; color:#fff; border:none; border-radius:9px;
+    QToolButton.act:hover { border-color:#4F46E5; color:#4F46E5; background:#f0fdfa; }
+    QPushButton#primary { background:#4F46E5; color:#fff; border:none; border-radius:9px;
                           padding:8px 16px; font-weight:700; }
-    QPushButton#primary:hover { background:#0d5f58; }
+    QPushButton#primary:hover { background:#4338CA; }
     QPushButton#ghost { background:#fff; color:#334155; border:1px solid #cbd5e1;
                         border-radius:9px; padding:8px 14px; }
-    QPushButton#ghost:hover { border-color:#0f766e; color:#0f766e; }
+    QPushButton#ghost:hover { border-color:#4F46E5; color:#4F46E5; }
     QPushButton#accent { background:#f59e0b; color:#1f2937; border:none; border-radius:9px;
                          padding:7px 14px; font-weight:700; }
     QPushButton#accent:hover { background:#d97706; color:#fff; }
     QSlider::groove:horizontal { height:5px; background:#e2e8f0; border-radius:3px; }
-    QSlider::handle:horizontal { background:#0f766e; width:14px; margin:-5px 0; border-radius:7px; }
+    QSlider::handle:horizontal { background:#4F46E5; width:14px; margin:-5px 0; border-radius:7px; }
     QScrollArea#cv { background:#334155; border:none; border-radius:12px; }
     QListWidget { border:none; background:transparent; }
     """
@@ -3837,7 +3837,7 @@ class ImageEditor(QtWidgets.QDialog):
             while y < h:
                 p.drawLine(0, y, w, y); y += step
         if self._start and self._cur:
-            col = "#111827" if self.tool == "redact" else "#0f766e"
+            col = "#111827" if self.tool == "redact" else "#4F46E5"
             pen = QtGui.QPen(QtGui.QColor(col)); pen.setWidth(2); p.setPen(pen)
             if self.tool in ("arrow", "line"):
                 p.drawLine(self._start, self._cur)
@@ -4959,7 +4959,7 @@ class CameraDialog(QtWidgets.QDialog):
 class SparkBars(QtWidgets.QWidget):
     """Chhota bar-chart (bina kisi library ke) — dashboard ke liye."""
 
-    def __init__(self, values, labels=None, color="#0f766e"):
+    def __init__(self, values, labels=None, color="#4F46E5"):
         super().__init__()
         self.v = [max(0, int(x or 0)) for x in (values or [0])]
         self.labels = labels
@@ -5000,7 +5000,7 @@ class SparkBars(QtWidgets.QWidget):
 class LineSpark(QtWidgets.QWidget):
     """Line chart (bina library) — trend (jaise 30-din) dikhane ke liye."""
 
-    def __init__(self, values, labels=None, color="#0f766e"):
+    def __init__(self, values, labels=None, color="#4F46E5"):
         super().__init__()
         self.v = [float(x or 0) for x in (values or [0])]
         self.labels = labels or []
@@ -5099,7 +5099,7 @@ class PieMini(QtWidgets.QWidget):
 class HeatMonth(QtWidgets.QWidget):
     """Mahine ka heatmap — har din ek chhota box; zyada scan = gehra rang."""
 
-    def __init__(self, day_values, color="#0f766e"):
+    def __init__(self, day_values, color="#4F46E5"):
         super().__init__()
         self.dv = dict(day_values or {})     # {day-int: value}
         self.c = QtGui.QColor(color)
@@ -5142,7 +5142,7 @@ class HBars(QtWidgets.QWidget):
     """Labelled horizontal bars — breakdown (country/version/type) ke liye.
     rows: list of (label, value); sabse bada upar."""
 
-    def __init__(self, rows, color="#0f766e"):
+    def __init__(self, rows, color="#4F46E5"):
         super().__init__()
         self.rows = rows or []
         self.c = QtGui.QColor(color)
@@ -6850,7 +6850,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if not hasattr(self, "method_lbl"):
             return
         m = self._opts.get("scanner_method", "twain")
-        color = "#0f766e" if m in ("wia", "naps2", "escl") else "#b45309"
+        color = "#4F46E5" if m in ("wia", "naps2", "escl") else "#b45309"
         self.method_lbl.setText('<b>Connected via:</b> <span style="color:%s">%s</span>'
                                 % (color, m.upper()))
 
@@ -7792,7 +7792,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         status_lbl.setWordWrap(True)
         status_lbl.setStyleSheet("color:#64748b;font-size:11.5px"); v.addWidget(status_lbl)
         count_lbl = QtWidgets.QLabel(L("Abhi tak 0 file aayi", "0 files received"))
-        count_lbl.setStyleSheet("font-weight:700;color:#0f766e;margin-top:4px"); v.addWidget(count_lbl)
+        count_lbl.setStyleSheet("font-weight:700;color:#4F46E5;margin-top:4px"); v.addWidget(count_lbl)
         exp_lbl = QtWidgets.QLabel("")
         exp_lbl.setStyleSheet("color:#94a3b8;font-size:11px"); v.addWidget(exp_lbl)
 
@@ -7905,7 +7905,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         link = QtWidgets.QLabel(L("Ya phone browser me kholo:<br><b>%s</b>", "Or open in phone browser:<br><b>%s</b>") % url)
         link.setWordWrap(True); link.setStyleSheet("color:#475569;font-size:11px"); v.addWidget(link)
         count_lbl = QtWidgets.QLabel(L("Abhi tak 0 photo aayi — intezaar…", "0 photos received — waiting…"))
-        count_lbl.setStyleSheet("font-weight:700;color:#0f766e;margin-top:6px"); v.addWidget(count_lbl)
+        count_lbl.setStyleSheet("font-weight:700;color:#4F46E5;margin-top:6px"); v.addWidget(count_lbl)
 
         self._phone_n = 0
 
@@ -8314,7 +8314,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # ================= TAB 3: Breakdown =================
         bk = tab(L("🥧 Bantwara", "🥧 Breakdown"))
         parts = [
-            (L("PDF", "PDF"), t.get("pdfs", 0), "#0f766e"),
+            (L("PDF", "PDF"), t.get("pdfs", 0), "#4F46E5"),
             (L("Import", "Import"), t.get("imports", 0), "#2563eb"),
             (L("Print", "Print"), t.get("prints", 0), "#d97706"),
             (L("Share", "Share"), t.get("shared", 0), "#7c3aed"),
@@ -8971,7 +8971,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "stop:0 #ecfdf5, stop:0.5 #eff6ff, stop:1 #eef2ff);"
             "border-top:1px solid #d1e0d8;}"
             "#adfooter QLabel{font-size:12px;color:#334155;}"
-            "#adBtn{background:#0f766e;color:#ffffff;border:none;border-radius:11px;"
+            "#adBtn{background:#4F46E5;color:#ffffff;border:none;border-radius:11px;"
             "padding:3px 12px;font-size:12px;font-weight:700;}"
             "#adBtn:hover{background:#0b5c55;}"
             "#adClose{color:#94a3b8;border:none;background:transparent;font-size:14px;}"
@@ -8981,7 +8981,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
         # ---- LEFT: ApneScan official site ----
         left = QtWidgets.QLabel(
-            "🖨 <b>ApneScan</b> · <span style='color:#0f766e'>%s</span> · %s"
+            "🖨 <b>ApneScan</b> · <span style='color:#4F46E5'>%s</span> · %s"
             % (WEBSITE_URL.replace("https://", ""),
                self.L("100% FREE", "100% FREE")))
         left.setTextFormat(QtCore.Qt.RichText)
@@ -9187,7 +9187,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             card = QtWidgets.QFrame(); card.setObjectName("toolcard")
             card.setStyleSheet(
                 "#toolcard{border:1px solid #e2e8f0;border-radius:10px;background:#ffffff;}"
-                "#toolcard:hover{border-color:#0f766e;}")
+                "#toolcard:hover{border-color:#4F46E5;}")
             cl = QtWidgets.QHBoxLayout(card); cl.setContentsMargins(12, 10, 12, 10)
             ic = QtWidgets.QLabel(t.get("icon", "•")); ic.setStyleSheet("font-size:22px;")
             cl.addWidget(ic)
@@ -10266,7 +10266,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             qr = qrcode.QRCode(border=2, box_size=box,
                                error_correction=qrcode.constants.ERROR_CORRECT_M)
             qr.add_data(url or WEBSITE_URL); qr.make(fit=True)
-            return qr.make_image(fill_color="#0f766e", back_color="white").convert("RGB")
+            return qr.make_image(fill_color="#4F46E5", back_color="white").convert("RGB")
         except Exception:
             return None
 
@@ -11233,7 +11233,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             q = (q or "").strip().lower()
             out = ["<style>body{font-family:'Nirmala UI','Noto Sans Devanagari','Segoe UI',sans-serif;"
                    "font-size:15px;line-height:168%;color:#334155;}"
-                   "h3{color:#0f766e;margin:18px 0 8px;font-size:17px;font-weight:700;}"
+                   "h3{color:#4F46E5;margin:18px 0 8px;font-size:17px;font-weight:700;}"
                    ".opt{margin:9px 0;padding:9px 12px;border-left:3px solid #99f6e4;background:#f8fafc;line-height:165%;}"
                    ".lbl{font-weight:700;color:#0f172a;}.loc{color:#94a3b8;font-size:12px;}"
                    ".hi{color:#334155;}.en{color:#475569;}</style>"]
@@ -11304,7 +11304,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             if title:
                 cur = QtGui.QTextCursor(d)
                 cur.setPosition(0)
-                cur.insertHtml("<h1 style='color:#0f766e'>%s</h1>"
+                cur.insertHtml("<h1 style='color:#4F46E5'>%s</h1>"
                                "<p style='color:#64748b;font-size:11px'>ApneScan v%s "
                                "· apnescan.apnesoft.com</p><hr>" % (title, VERSION))
             d.print_(printer)
@@ -11329,7 +11329,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
     _GUIDE_FONT = "'Nirmala UI','Noto Sans Devanagari','Kohinoor Devanagari','Segoe UI',sans-serif"
     _GUIDE_CSS = ("<style>"
                   "body{font-family:%s;color:#334155;font-size:15px;line-height:172%%;}"
-                  "h2{font-family:%s;color:#0f766e;font-size:22px;font-weight:700;"
+                  "h2{font-family:%s;color:#4F46E5;font-size:22px;font-weight:700;"
                   "margin:6px 0 12px;}"
                   "h3{font-family:%s;color:#0f172a;font-size:16px;font-weight:700;"
                   "margin:20px 0 6px;}"
@@ -11337,7 +11337,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                   "b{color:#0f172a;font-weight:700;}"
                   "li{color:#334155;margin:7px 0;line-height:165%%;}"
                   "ul{margin:6px 0 12px 4px;padding-left:22px;}"
-                  "a{color:#0f766e;text-decoration:none;}"
+                  "a{color:#4F46E5;text-decoration:none;}"
                   ".t{color:#64748b;font-size:13px;line-height:168%%;}"
                   "</style>" % (_GUIDE_FONT, _GUIDE_FONT, _GUIDE_FONT))
 
@@ -11831,7 +11831,7 @@ if the toggle is ticked).</p>
         self.ui_header.setObjectName("uiheader")
         self.ui_header.setStyleSheet(
             "#uiheader{background:#f0fdfa;border-bottom:1px solid #ccfbf1;}"
-            "#uiheader QLabel{font-size:12px;color:#115e59;}")
+            "#uiheader QLabel{font-size:12px;color:#4338CA;}")
         _hb = QtWidgets.QHBoxLayout(self.ui_header)
         _hb.setContentsMargins(10, 3, 10, 3)
         # Branding: hospital/clinic ka logo + naam (customize se set hota hai)
@@ -11871,9 +11871,9 @@ if the toggle is ticked).</p>
             "#scanbar QComboBox{border:1px solid #cbd5e1;border-radius:8px;padding:3px 8px;background:#fff;}"
             "#scanbar QPushButton{border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:4px 8px;}"
             "#scanbar QPushButton:hover{border-color:#94a3b8;}"
-            "#scanbar QPushButton#primary{background:#2563eb;border:none;color:#fff;font-weight:800;"
+            "#scanbar QPushButton#primary{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #4F46E5,stop:1 #7C3AED);border:none;color:#fff;font-weight:800;"
             "font-size:13.5px;padding:9px 30px;border-radius:10px;}"
-            "#scanbar QPushButton#primary:hover{background:#1d4ed8;}")
+            "#scanbar QPushButton#primary:hover{background:#4338CA;}")
         self.left_panel = scanbar     # purane F9 / show_left_panel toggle isi par
         if not self._opts.get("show_left_panel", True):
             scanbar.hide()
@@ -11980,7 +11980,7 @@ if the toggle is ticked).</p>
             _cb.setCursor(QtCore.Qt.PointingHandCursor)
             _cb.setStyleSheet("QToolButton{font-size:10px;padding:3px 2px;border:1px solid "
                               "#cbd5e1;border-radius:7px;background:#fff;color:#475569;}"
-                              "QToolButton:checked{background:#0f766e;color:#fff;border-color:#0f766e;}")
+                              "QToolButton:checked{background:#4F46E5;color:#fff;border-color:#4F46E5;}")
             _cb.toggled.connect(lambda on, k=_key: self._set_scan_opt(k, on))
             self._opt_chips[_key] = _cb; _ocrow.addWidget(_cb)
         _ocw = QtWidgets.QWidget(); _ocw.setLayout(_ocrow)
@@ -12097,36 +12097,62 @@ if the toggle is ticked).</p>
         self._empty_lbl.setAlignment(QtCore.Qt.AlignCenter)
         self._empty_lbl.setStyleSheet("color:#94a3b8; font-size:15px;")
         # ---- UI #2: Start-dashboard (khaali screen par bade action-cards) ----
+        # ✨ HERO dashboard (redesign): "Ready to Scan" + bada gol gradient
+        # Scan-button + quick-action cards — khaali screen ka naya chehra.
         self._dash = QtWidgets.QWidget(self.list.viewport())
         _dv = QtWidgets.QVBoxLayout(self._dash)
-        _dv.addStretch(1)
-        _dt = QtWidgets.QLabel(self.L("Kya karna hai?", "What would you like to do?"))
+        _dv.addStretch(5)
+        _dt = QtWidgets.QLabel(self.L("Scan ke liye taiyaar", "Ready to Scan"))
         _dt.setAlignment(QtCore.Qt.AlignCenter)
-        _dt.setStyleSheet("color:#64748b;font-size:17px;font-weight:600;")
+        _dt.setStyleSheet("color:#111827;font-size:27px;font-weight:800;letter-spacing:-1px;background:transparent;")
         _dv.addWidget(_dt)
-        _dr = QtWidgets.QHBoxLayout()
+        _dsub = QtWidgets.QLabel(self.L("Document feeder me rakho aur Scan dabao",
+                                        "Place your document and press Scan"))
+        _dsub.setAlignment(QtCore.Qt.AlignCenter)
+        _dsub.setStyleSheet("color:#6B7280;font-size:13px;background:transparent;")
+        _dv.addWidget(_dsub)
+        _dv.addSpacing(20)
+        _hb = QtWidgets.QPushButton("🖨\nSCAN")
+        _hb.setFixedSize(132, 132)
+        _hb.setCursor(QtCore.Qt.PointingHandCursor)
+        _hb.setToolTip(self.L("Panel ki setting se scan (Enter = profile se)",
+                              "Scan with panel settings (Enter = profile)"))
+        _hb.setStyleSheet(
+            "QPushButton{border-radius:66px;border:8px solid #EEF2FF;"
+            "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #4F46E5,stop:1 #7C3AED);"
+            "color:#fff;font-size:17px;font-weight:800;}"
+            "QPushButton:hover{border:8px solid #E0E7FF;background:#4338CA;}"
+            "QPushButton:pressed{background:#3730A3;}")
+        _hb.clicked.connect(lambda: self.do_scan(use_panel=True))
+        _hr2 = QtWidgets.QHBoxLayout(); _hr2.addStretch(1); _hr2.addWidget(_hb); _hr2.addStretch(1)
+        _dv.addLayout(_hr2)
+        _dv.addSpacing(26)
+        _dr = QtWidgets.QHBoxLayout(); _dr.setSpacing(10)
         _dr.addStretch(1)
 
-        def _dbtn(icon, text, slot):
-            b = QtWidgets.QPushButton("%s\n%s" % (icon, text))
-            b.setMinimumSize(118, 84)
-            b.setStyleSheet("QPushButton{font-size:13px;font-weight:700;border:1px solid "
-                            "#cbd5e1;border-radius:12px;background:#fff;padding:8px;}"
-                            "QPushButton:hover{border-color:#0f766e;color:#0f766e;}")
+        def _dbtn(icon, text, sub, slot):
+            b = QtWidgets.QPushButton("%s\n%s\n%s" % (icon, text, sub))
+            b.setMinimumSize(148, 96)
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setStyleSheet(
+                "QPushButton{font-size:12.5px;font-weight:700;border:1px solid #E5E7EB;"
+                "border-radius:13px;background:#fff;padding:10px;color:#111827;}"
+                "QPushButton:hover{border-color:#C7D2FE;color:#4F46E5;background:#FBFAFF;}")
             b.clicked.connect(slot)
             _dr.addWidget(b)
-        _dbtn("🖨", self.L("Scan karo", "Scan"), self.do_scan)
-        _dbtn("📥", "Import", self.import_images)
-        _dbtn("📷", "Photo→PDF", self.import_photos)
-        _dbtn("🕘", "History", self.show_history)
-        _dbtn("🧰", "Tools", self._tools_catalog_dialog)
+        _dbtn("📥", "Import", self.L("file/photo jodo", "add files"), self.import_images)
+        _dbtn("📱", self.L("Phone se", "Phone"), self.L("kahin se bhi", "from anywhere"), self.phone_scan)
+        _dbtn("📷", "Photo→PDF", self.L("camera photo", "camera shots"), self.import_photos)
+        _dbtn("🕘", "History", self.L("purani PDF", "saved PDFs"), self.show_history)
+        _dbtn("🧰", "Tools", self.L("merge · split…", "merge · split…"), self._tools_catalog_dialog)
         _dr.addStretch(1)
         _dv.addLayout(_dr)
+        _dv.addSpacing(10)
         self._dash_recent = QtWidgets.QLabel("")
         self._dash_recent.setAlignment(QtCore.Qt.AlignCenter)
-        self._dash_recent.setStyleSheet("color:#94a3b8;font-size:11px;")
+        self._dash_recent.setStyleSheet("color:#9CA3AF;font-size:11px;background:transparent;")
         _dv.addWidget(self._dash_recent)
-        _dv.addStretch(1)
+        _dv.addStretch(6)
         self._dash.hide()
         self.list.viewport().installEventFilter(self)
         self.list.itemDoubleClicked.connect(self._on_thumb_dblclick)
@@ -12251,7 +12277,7 @@ if the toggle is ticked).</p>
         # (abhi khule folder ko seedhe favourite banao/hatao)
         _cwdrow = QtWidgets.QHBoxLayout(); _cwdrow.setSpacing(4); _cwdrow.setContentsMargins(0, 0, 0, 0)
         self.lbl_panel_cwd = QtWidgets.QLabel("")
-        self.lbl_panel_cwd.setStyleSheet("color:#0f766e;font-size:11px;font-weight:600;")
+        self.lbl_panel_cwd.setStyleSheet("color:#4F46E5;font-size:11px;font-weight:600;")
         self.lbl_panel_cwd.setWordWrap(True)
         _cwdrow.addWidget(self.lbl_panel_cwd, 1)
         self.btn_cwd_fav = QtWidgets.QToolButton()
@@ -12464,7 +12490,7 @@ if the toggle is ticked).</p>
         pv.addWidget(self.pv_tabs, 1)
         # ---- Complete info SEEDHA preview ke neeche (alag 'Info' tab nahi) ----
         _infhdr = QtWidgets.QLabel(self.L("ℹ <b>Poori jaankari</b>", "ℹ <b>File info</b>"))
-        _infhdr.setStyleSheet("color:#0f766e;font-size:11px;font-weight:700;margin-top:2px;")
+        _infhdr.setStyleSheet("color:#4F46E5;font-size:11px;font-weight:700;margin-top:2px;")
         pv.addWidget(_infhdr)
         self.pv_info = QtWidgets.QLabel("")
         self.pv_info.setTextFormat(QtCore.Qt.RichText)
@@ -12488,7 +12514,7 @@ if the toggle is ticked).</p>
         self.pv_strip.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.pv_strip.setStyleSheet("QListWidget{border:1px solid #e2e8f0;border-radius:6px;"
                                     "background:#fff;}QListWidget::item:selected{"
-                                    "background:#e0f2f1;border:1px solid #0f766e;border-radius:4px;}")
+                                    "background:#e0f2f1;border:1px solid #4F46E5;border-radius:4px;}")
         self.pv_strip.itemClicked.connect(self._pv_strip_click)
         pv.addWidget(self.pv_strip)
 
@@ -12501,8 +12527,8 @@ if the toggle is ticked).</p>
         _edit_btn.setCursor(QtCore.Qt.PointingHandCursor)
         _edit_btn.setStyleSheet(
             "QPushButton{font-size:12px;font-weight:700;padding:7px;border-radius:8px;"
-            "border:1px solid #0f766e;background:#0f766e;color:#fff;}"
-            "QPushButton:hover{background:#0d5f58;}")
+            "border:1px solid #4F46E5;background:#4F46E5;color:#fff;}"
+            "QPushButton:hover{background:#4338CA;}")
         _edit_btn.clicked.connect(lambda: self._pv_open_image_editor())
         pv.addWidget(_edit_btn)
         spl.addWidget(self.preview_panel)       # pehle parent, phir visibility
@@ -12564,8 +12590,8 @@ if the toggle is ticked).</p>
             b = QtWidgets.QPushButton("%s\n%s" % (ic, tx))
             b.setMinimumHeight(120)
             b.setStyleSheet("QPushButton{font-size:20px;font-weight:800;border:2px solid "
-                            "#0f766e;border-radius:18px;background:#fff;color:#0f766e;}"
-                            "QPushButton:hover{background:#0f766e;color:#fff;}")
+                            "#4F46E5;border-radius:18px;background:#fff;color:#4F46E5;}"
+                            "QPushButton:hover{background:#4F46E5;color:#fff;}")
             b.clicked.connect(fn)
             _kg.addWidget(b, i // 3, i % 3)
         self.kiosk.hide()
@@ -12785,31 +12811,52 @@ if the toggle is ticked).</p>
                 QLineEdit, QComboBox, QSpinBox, QPlainTextEdit { background:#1e293b; border:1px solid #475569; border-radius:6px; padding:4px 8px; color:#e2e8f0; }
                 QPushButton { background:#1e293b; border:1px solid #475569; border-radius:6px; padding:6px 12px; color:#e2e8f0; }
                 QPushButton:hover { background:#334155; }
-                QPushButton#primary { background:#0f766e; border:1px solid #0f766e; color:#fff; font-weight:700; }
-                QPushButton#primary:hover { background:#115e59; }
+                QPushButton#primary { background:#4F46E5; border:1px solid #4F46E5; color:#fff; font-weight:700; }
+                QPushButton#primary:hover { background:#4338CA; }
                 QListWidget { background:#0b1220; border:none; }
                 QListWidget::item:selected { background:#134e4a; color:#e2e8f0; }
                 QScrollArea { background:#111827; }
             """)
         else:
+            # ✨ Premium Fluent theme (redesign blueprint): indigo #4F46E5 +
+            # violet #7C3AED, bg #F8FAFC, gol kone 10px, saaf borders #E5E7EB.
             self.setStyleSheet("""
-                QMainWindow, QWidget { background:#f4f6f8; color:#1f2933; }
-                QMenuBar { background:#f4f6f8; }
-                #toolbar { background:#ffffff; }
-                QToolButton { border:1px solid transparent; border-radius:8px; padding:4px 6px; color:#334155; font-size:11px; }
-                QToolButton:hover { background:#eef2f6; border-color:#e2e8f0; }
-                QToolButton:checked { background:#d1eae7; border-color:#0f766e; color:#0f766e; }
-                #panel { background:#ffffff; }
-                #dev { color:#475569; font-size:12px; }
-                #hr { color:#e2e8f0; }
-                QLabel { color:#334155; }
-                QLineEdit, QComboBox, QSpinBox { background:#fff; border:1px solid #cbd5e1; border-radius:6px; padding:4px 8px; }
-                QPushButton { background:#fff; border:1px solid #cbd5e1; border-radius:6px; padding:6px 12px; color:#1f2933; }
-                QPushButton:hover { background:#eef2f6; }
-                QPushButton#primary { background:#0f766e; border:1px solid #0f766e; color:#fff; font-weight:700; }
-                QPushButton#primary:hover { background:#115e59; }
-                QListWidget { background:#fbfcfd; border:none; }
-                QListWidget::item:selected { background:#d1eae7; color:#0f172a; }
+                QMainWindow, QWidget { background:#F8FAFC; color:#111827; }
+                QMenuBar { background:#FFFFFF; color:#374151; }
+                QMenuBar::item { padding:4px 10px; border-radius:6px; }
+                QMenuBar::item:selected { background:#EEF2FF; color:#4F46E5; }
+                QMenu { background:#FFFFFF; color:#111827; border:1px solid #E5E7EB; border-radius:8px; }
+                QMenu::item { padding:5px 22px 5px 14px; border-radius:6px; }
+                QMenu::item:selected { background:#EEF2FF; color:#4F46E5; }
+                #toolbar { background:#FFFFFF; border-bottom:1px solid #E5E7EB; }
+                QToolButton { border:1px solid transparent; border-radius:10px; padding:5px 7px; color:#4B5563; font-size:11px; }
+                QToolButton:hover { background:#F3F4F6; border-color:#E5E7EB; }
+                QToolButton:checked { background:#EEF2FF; border-color:#A5B4FC; color:#4F46E5; }
+                #panel { background:#FFFFFF; }
+                #dev { color:#6B7280; font-size:12px; }
+                #hr { color:#E5E7EB; }
+                QLabel { color:#374151; }
+                QLineEdit, QComboBox, QSpinBox { background:#fff; border:1px solid #E5E7EB; border-radius:9px; padding:4px 9px; }
+                QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border-color:#A5B4FC; }
+                QPushButton { background:#fff; border:1px solid #E5E7EB; border-radius:10px; padding:6px 12px; color:#111827; }
+                QPushButton:hover { background:#F3F4F6; border-color:#C7D2FE; }
+                QPushButton#primary { background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #4F46E5,stop:1 #7C3AED); border:none; color:#fff; font-weight:700; }
+                QPushButton#primary:hover { background:#4338CA; }
+                QListWidget { background:#F8FAFC; border:none; }
+                QListWidget::item:selected { background:#EEF2FF; color:#111827; border-radius:10px; }
+                QTreeView { background:#FFFFFF; border:none; }
+                QTreeView::item:selected { background:#EEF2FF; color:#4F46E5; }
+                QTabBar::tab { padding:6px 13px; color:#6B7280; border-radius:8px; }
+                QTabBar::tab:selected { background:#EEF2FF; color:#4F46E5; font-weight:600; }
+                QTabWidget::pane { border:1px solid #E5E7EB; border-radius:8px; }
+                QScrollBar:vertical { background:transparent; width:10px; margin:2px; }
+                QScrollBar::handle:vertical { background:#D1D5DB; border-radius:5px; min-height:30px; }
+                QScrollBar::handle:vertical:hover { background:#9CA3AF; }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
+                QScrollBar:horizontal { background:transparent; height:10px; margin:2px; }
+                QScrollBar::handle:horizontal { background:#D1D5DB; border-radius:5px; min-width:30px; }
+                QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width:0; }
+                #statsbox { border:1px solid #E5E7EB; border-radius:10px; padding:8px; color:#374151; background:#fff; }
             """)
 
 
@@ -15353,7 +15400,7 @@ if the toggle is ticked).</p>
             + ("+" if len(res) >= 1000 else ""))
         head.setFlags(QtCore.Qt.NoItemFlags)
         _hf = head.font(); _hf.setBold(True); head.setFont(_hf)
-        head.setForeground(QtGui.QColor("#0f766e"))
+        head.setForeground(QtGui.QColor("#4F46E5"))
         if not grid:
             self.files_results.addItem(head)
         _icon = {".pdf": "📕", ".docx": "📘", ".xlsx": "📗"}
@@ -15363,7 +15410,7 @@ if the toggle is ticked).</p>
             if not grid:
                 fh = QtWidgets.QListWidgetItem("📁  " + (os.path.basename(folder) or folder))
                 _ff = fh.font(); _ff.setBold(True); fh.setFont(_ff)
-                fh.setForeground(QtGui.QColor("#0f766e"))
+                fh.setForeground(QtGui.QColor("#4F46E5"))
                 fh.setBackground(QtGui.QColor("#eef4f3"))
                 fh.setToolTip(folder + self.L("   (folder — 2x click = kholo)",
                                               "   (folder — double-click to open)"))
@@ -16517,7 +16564,7 @@ if the toggle is ticked).</p>
             if not hasattr(self, "_pv_loupe"):
                 self._pv_loupe = QtWidgets.QLabel(self)
                 self._pv_loupe.setWindowFlags(QtCore.Qt.ToolTip)
-                self._pv_loupe.setStyleSheet("border:2px solid #0f766e;background:#fff;")
+                self._pv_loupe.setStyleSheet("border:2px solid #4F46E5;background:#fff;")
             self.status.showMessage(self.L("🔎 Loupe ON — image par maus le jao",
                                            "🔎 Loupe ON — hover over the image"), 4000)
         else:
@@ -16662,7 +16709,7 @@ if the toggle is ticked).</p>
 
     # Accent (primary button) rang — customize me chuno.
     ACCENTS = {
-        "teal": "#0f766e", "blue": "#1d4ed8", "green": "#15803d",
+        "teal": "#4F46E5", "blue": "#1d4ed8", "green": "#15803d",
         "purple": "#7e22ce", "orange": "#c2410c", "rose": "#be123c",
     }
 
@@ -16680,7 +16727,7 @@ if the toggle is ticked).</p>
             pass
         # 2) Accent — primary button ka rang (theme ke upar override)
         try:
-            acc = self.ACCENTS.get(o.get("accent", "teal"), "#0f766e")
+            acc = self.ACCENTS.get(o.get("accent", "teal"), "#4F46E5")
             self.setStyleSheet(self.styleSheet() +
                 "QPushButton#primary{background:%s;border:1px solid %s;color:#fff;"
                 "font-weight:700;}QPushButton#primary:hover{background:%s;}"
@@ -17075,10 +17122,10 @@ if the toggle is ticked).</p>
         dlg.setMinimumWidth(440)
         outer = QtWidgets.QVBoxLayout(dlg)
         hint = QtWidgets.QLabel(L(
-            "<span style='color:#0f766e;font-size:12px;'>💡 Koi bhi cheez tick/badalte "
+            "<span style='color:#4F46E5;font-size:12px;'>💡 Koi bhi cheez tick/badalte "
             "hi software par TURANT dikh jayegi. Pasand aaye to <b>OK</b>, warna "
             "<b>Cancel</b> — sab wapas pehle jaisa.</span>",
-            "<span style='color:#0f766e;font-size:12px;'>💡 Every change shows on the app "
+            "<span style='color:#4F46E5;font-size:12px;'>💡 Every change shows on the app "
             "<b>instantly</b> (no OK needed). Keep it with <b>OK</b>, or "
             "<b>Cancel</b> to revert everything.</span>"))
         hint.setTextFormat(QtCore.Qt.RichText); hint.setWordWrap(True)
@@ -17481,7 +17528,7 @@ if the toggle is ticked).</p>
         if not hasattr(self, "_busy_lbl"):
             self._busy_lbl = QtWidgets.QLabel("")
             self._busy_lbl.setStyleSheet(
-                "QLabel{background:#0f766e;color:#fff;border-radius:9px;"
+                "QLabel{background:#4F46E5;color:#fff;border-radius:9px;"
                 "padding:1px 10px;font-weight:700;}")
             try:
                 self.status.addPermanentWidget(self._busy_lbl)
