@@ -1476,6 +1476,7 @@ if (isset($_GET['admin'])) {
   <div class="nlab">More analytics</div>
   <button class="tab jump2" data-p="growth"><span class="tic">🔁</span> Growth</button>
   <button class="tab jump2" data-p="devices"><span class="tic">🌍</span> Activity Feed</button>
+  <button class="tab jump2" data-p="useract"><span class="tic">📜</span> User Activity</button>
   <button class="tab jump2" data-p="tools"><span class="tic">🧰</span> Tools &amp; Impact</button>
   <button class="tab jump2" data-p="ideas"><span class="tic">💡</span> Suggestions</button>
   <button class="tab jump2" data-p="system"><span class="tic">🖥</span> System</button>
@@ -1732,6 +1733,30 @@ if (isset($_GET['admin'])) {
   </div>
 
   </div><!-- /devices -->
+
+  <div class="page" data-p="useract">
+  <div class="sec"><span class="em">📜</span> User Activity — kaun, kya, kab (poori kahani)</div>
+  <div class="kpis" id="uaKpis" style="margin-bottom:13px"></div>
+  <div class="card" style="margin-bottom:13px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <select id="uaDate"></select>
+      <select id="uaUser"><option value="">👥 Sab users</option></select>
+      <select id="uaType"><option value="">🧩 Sab kaam</option><option value="feat">⚙️ Features (scan/save/print…)</option><option value="btn">🔘 Toolbar buttons</option><option value="menu">📋 Menu</option><option value="nav">🧭 Sidebar/Dashboard</option><option value="app">🟢 App khuli/band</option></select>
+      <input id="uaQ" placeholder="🔍 kaam ya user se dhoondo…" style="flex:1;min-width:150px">
+      <button class="btn" onclick="uaLoad()">🔄 Load</button>
+      <button class="btn gray" onclick="uaCSV()">⬇ CSV</button>
+    </div>
+  </div>
+  <div class="grid" style="margin-bottom:13px">
+    <div class="card"><h3><span class="em">👥</span> Har user ka saraansh <span style="color:var(--mut);font-weight:500;font-size:11px">— naam par click = uski timeline</span></h3><div id="uaUsers" style="max-height:300px;overflow:auto"></div></div>
+    <div class="card"><h3><span class="em">🔥</span> Sabse zyada hue kaam</h3><div id="uaTop"></div></div>
+    <div class="card"><h3><span class="em">🕐</span> Kis ghante kitna kaam</h3><div id="uaHours"></div></div>
+  </div>
+  <div class="card"><h3><span class="em">📜</span> Poori timeline <span id="uaInfo" style="color:var(--mut);font-weight:500;font-size:11px"></span></h3>
+    <div style="color:var(--mut);font-size:10px;margin-bottom:6px">💡 Ek user chuno to uski din-bhar ki kahani sessions me bant kar (subah → raat); 30 min ka gap = nayi session</div>
+    <div id="uaList" style="max-height:460px;overflow:auto"></div>
+  </div>
+  </div><!-- /useract -->
 
   <div class="page" data-p="system">
   <div class="sec"><span class="em">💬</span> Quality, Feedback &amp; System</div>
@@ -3069,6 +3094,109 @@ function dfRender(){ var el=document.getElementById('dfList'); if(!el)return;
   var e2=document.getElementById('dfQ'); if(e2)e2.addEventListener('input',dfRender);
   var e3=document.getElementById('dfDate'); if(e3)e3.addEventListener('change',dfLoad);
   if(document.getElementById('dfList')) dfLoad(); })();
+// ---- (v3.1) USER ACTIVITY — poora alag page: summary + charts + timeline ----
+var _ua={rows:[],date:''};
+function uaCat(e){ var n=String(e||'');
+  if(n==='app:start'||n==='app:close')return 'app';
+  if(n.indexOf('btn:')===0)return 'btn';
+  if(n.indexOf('menu:')===0)return 'menu';
+  if(n.indexOf('nav:')===0||n.indexOf('card:')===0)return 'nav';
+  return 'feat'; }
+function uaLoad(){ var dt=(document.getElementById('uaDate')||{}).value||'';
+  fetch('?admin=1&api=feed'+(dt?'&date='+dt:''),{credentials:'same-origin'})
+   .then(function(r){return r.json();}).then(function(j){
+    if(!j||!j.ok)return; _ua.rows=j.events||[]; _ua.date=j.date;
+    var sel=document.getElementById('uaDate');
+    if(sel&&!sel.options.length){ (j.dates&&j.dates.length?j.dates:[j.date]).forEach(function(dd){
+      var o=document.createElement('option'); o.value=dd; o.textContent='🗓 '+dd; sel.appendChild(o); }); sel.value=j.date; }
+    var us={}; _ua.rows.forEach(function(e){ if(e.u)us[e.u]=1; });
+    var su=document.getElementById('uaUser');
+    if(su){ var cur=su.value; su.innerHTML='<option value="">👥 Sab users</option>';
+      Object.keys(us).sort().forEach(function(k){ var o=document.createElement('option'); o.value=k; o.textContent=k; su.appendChild(o); }); su.value=cur; }
+    uaRender(); }).catch(function(){});
+}
+function _uaRows(){ var fu=(document.getElementById('uaUser')||{}).value||'';
+  var ft=(document.getElementById('uaType')||{}).value||'';
+  var q=((document.getElementById('uaQ')||{}).value||'').toLowerCase();
+  return _ua.rows.filter(function(e){ if(fu&&e.u!==fu)return false;
+    if(ft&&uaCat(e.e)!==ft)return false;
+    if(q&&(String(e.e)+' '+(e.u||'')).toLowerCase().indexOf(q)<0)return false; return true;});
+}
+function uaRender(){ if(!document.getElementById('uaList'))return;
+  var rows=_uaRows().slice().sort(function(a,b){return (a.t||0)-(b.t||0);});
+  var fu=(document.getElementById('uaUser')||{}).value||'';
+  // ---- KPI summary ----
+  var users={},acts={},hours={},opens=0;
+  rows.forEach(function(e){ var u=e.u||e.c||'?';
+    if(!users[u])users[u]={n:0,acts:{},first:e.t,last:e.t,sess:0,prev:0};
+    var U=users[u]; U.n++; U.last=e.t; if(e.t<U.first)U.first=e.t;
+    if(e.e==='app:start'||((e.t-U.prev)>1800&&U.prev))U.sess++;
+    if(!U.prev)U.sess=Math.max(U.sess,1); U.prev=e.t;
+    var lb=dfLbl(e.e); acts[lb]=(acts[lb]||0)+1;
+    var h=new Date((e.t||0)*1000).getHours(); hours[h]=(hours[h]||0)+1;
+    if(e.e==='app:start')opens++; });
+  var ulist=Object.keys(users); var top='—',topn=0;
+  Object.keys(acts).forEach(function(k){ if(acts[k]>topn){topn=acts[k];top=k;} });
+  var busy='—',busyn=0; ulist.forEach(function(u){ if(users[u].n>busyn){busyn=users[u].n;busy=u;} });
+  var kp=document.getElementById('uaKpis');
+  if(kp)kp.innerHTML=_kpi('','📜',fmt(rows.length),'Events ('+esc(_ua.date||'')+')')
+    +_kpi('g','👥',ulist.length,'Active users')
+    +_kpi('p','🏆',esc(busy),'Sabse busy ('+busyn+')')
+    +_kpi('y','🔥',esc(top),'Sabse zyada kaam ('+topn+')')
+    +_kpi('','🟢',opens,'App kholi (baar)')
+    +_kpi('','📊',ulist.length?Math.round(rows.length/ulist.length):0,'Avg events/user');
+  // ---- per-user summary table ----
+  var uu=document.getElementById('uaUsers');
+  if(uu){ var ur=ulist.sort(function(a,b){return users[b].n-users[a].n;}).map(function(u){ var U=users[u];
+      var ta='—',tan=0; Object.keys(U.acts||{}).length; // top act per user
+      var pacts={}; rows.forEach(function(e){ if((e.u||e.c)===u){ var l=dfLbl(e.e); pacts[l]=(pacts[l]||0)+1; } });
+      Object.keys(pacts).forEach(function(k){ if(k.indexOf('App ')===0)return; if(pacts[k]>tan){tan=pacts[k];ta=k;} });
+      return '<tr style="cursor:pointer" onclick="document.getElementById(\'uaUser\').value='+JSON.stringify(u).replace(/"/g,'&quot;')+';uaRender()">'
+        +'<td><b>'+esc(u)+'</b></td><td>'+U.n+'</td><td style="font-size:10px">'+esc(ta)+'</td>'
+        +'<td style="font-size:10px">'+new Date(U.first*1000).toLocaleTimeString()+' → '+new Date(U.last*1000).toLocaleTimeString()+'</td>'
+        +'<td>'+Math.max(1,U.sess)+'</td></tr>'; });
+    uu.innerHTML=ur.length?_tbl(ur,['User','Events','Sabse zyada','Pehli → aakhri','Sessions']):'<div style="color:var(--mut)">— aaj koi activity nahi —</div>'; }
+  // ---- top actions bars ----
+  var ta2=Object.keys(acts).map(function(k){return [k,acts[k]];}).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
+  var mx=ta2.length?ta2[0][1]:1;
+  var te=document.getElementById('uaTop');
+  if(te)te.innerHTML=ta2.length?ta2.map(function(r){
+    return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:5px;font-size:11px">'
+      +'<span style="width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(r[0])+'</span>'
+      +'<span class="bar" style="flex:0 0 '+Math.max(5,Math.round(r[1]*60/mx))+'%;height:10px"></span><b>'+r[1]+'</b></div>'; }).join('')
+    :'<div style="color:var(--mut)">—</div>';
+  // ---- hour bars ----
+  var he=document.getElementById('uaHours');
+  if(he){ var hm=1; Object.keys(hours).forEach(function(h){ if(hours[h]>hm)hm=hours[h]; });
+    var hh=''; for(var h=0;h<24;h++){ if(!hours[h])continue;
+      hh+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;font-size:11px">'
+        +'<span style="width:56px">'+(h%12||12)+(h<12?' AM':' PM')+'</span>'
+        +'<span class="bar" style="flex:0 0 '+Math.max(5,Math.round(hours[h]*60/hm))+'%;height:9px"></span><b>'+hours[h]+'</b></div>'; }
+    he.innerHTML=hh||'<div style="color:var(--mut)">—</div>'; }
+  // ---- timeline ----
+  var out=[],last=0;
+  rows.forEach(function(e){
+    if(fu&&out.length&&((e.t-last>1800)||e.e==='app:start'))
+      out.push('<div style="color:var(--accent2);font-size:10px;margin:8px 0 4px;border-top:1px dashed rgba(148,163,184,.3);padding-top:6px">— nayi session shuru —</div>');
+    last=e.t;
+    out.push('<div class="aii"><span>'+(e.e==='app:start'?'🟢':(e.e==='app:close'?'🔴':'•'))+'</span><div>'
+      +(fu?'':'<b>'+esc(e.u||e.c||'user')+'</b> — ')+esc(dfLbl(e.e))
+      +'<div style="color:var(--mut);font-size:9px">'+new Date((e.t||0)*1000).toLocaleTimeString()+'</div></div></div>');
+  });
+  var inf=document.getElementById('uaInfo');
+  if(inf)inf.textContent='— '+rows.length+' events'+(fu?' · '+fu:'');
+  document.getElementById('uaList').innerHTML=out.length?out.join(''):'<div style="color:var(--mut)">— kuch nahi mila (users ke paas app v183+ hone par aayega) —</div>';
+}
+function uaCSV(){ var rows=_uaRows().slice().sort(function(a,b){return (a.t||0)-(b.t||0);});
+  var csv='date,time,user,action\n'+rows.map(function(e){ var d=new Date((e.t||0)*1000);
+    return d.toLocaleDateString()+','+d.toLocaleTimeString()+',"'+String(e.u||e.c||'').replace(/"/g,'""')+'","'+String(e.e||'').replace(/"/g,'""')+'"';}).join('\n');
+  var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='apnescan-activity-'+(_ua.date||'')+'.csv'; a.click();
+  showToast('⬇ Activity CSV download ho gayi','ok'); }
+(function(){ var e1=document.getElementById('uaUser'); if(e1)e1.addEventListener('change',uaRender);
+  var e4=document.getElementById('uaType'); if(e4)e4.addEventListener('change',uaRender);
+  var e2=document.getElementById('uaQ'); if(e2)e2.addEventListener('input',uaRender);
+  var e3=document.getElementById('uaDate'); if(e3)e3.addEventListener('change',uaLoad);
+  if(document.getElementById('uaList')) uaLoad(); })();
 // ---- SYSTEM HEALTH ----
 (function(){ var el=document.getElementById('healthKpis'); if(!el)return;
   var H=D.health||{}, SY=D.sys||{};
