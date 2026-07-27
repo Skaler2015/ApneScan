@@ -548,6 +548,29 @@ if (isset($_GET['admin'])) {
 
     // ---- login ho gaya ----
     $_SESSION['seen']=time();
+
+    // ---- (v3) ACTIVITY FEED API: kisi bhi din ki poori event-file (JSON) ----
+    // GET ?admin=1&api=feed&date=YYYY-MM-DD  → us din ke saare events + dates
+    if (isset($_GET['api']) && $_GET['api'] === 'feed') {
+        header('Content-Type: application/json; charset=utf-8');
+        $fdt = preg_replace('/[^0-9\-]/','', isset($_GET['date'])?$_GET['date']:date('Y-m-d'));
+        if ($fdt === '') $fdt = date('Y-m-d');
+        $ffp = __DIR__.'/apnescan_events/events-'.$fdt.'.jsonl';
+        $fout = array();
+        if (is_file($ffp)) {
+            foreach (array_slice(@file($ffp, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) ?: array(), -3000) as $fln) {
+                $fj = json_decode($fln, true); if (is_array($fj)) $fout[] = $fj;
+            }
+        }
+        $fds = array();
+        foreach (glob(__DIR__.'/apnescan_events/events-*.jsonl') ?: array() as $fg) {
+            $fds[] = substr(basename($fg), 7, 10);
+        }
+        rsort($fds);
+        echo json_encode(array('ok'=>true,'date'=>$fdt,'events'=>$fout,
+            'dates'=>array_slice($fds,0,60)), JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     $t0=microtime(true);
     $d=load_data($DATA_FILE);
 
@@ -1684,6 +1707,17 @@ if (isset($_GET['admin'])) {
 
   <div class="page" data-p="devices">
   <div class="sec"><span class="em">🧰</span> Activity, Usage &amp; Devices</div>
+  <div class="card" style="margin-bottom:13px"><h3><span class="em">📜</span> Din-bhar ki POORI feed — har click <span style="color:var(--mut);font-weight:500;font-size:11px">(app v183+ · roz ki alag file · kuch nahi mitta)</span></h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">
+      <select id="dfDate"></select>
+      <select id="dfUser"><option value="">👥 Sab users</option></select>
+      <input id="dfQ" placeholder="🔍 kaam se dhoondo… (scan / save / print)" style="flex:1;min-width:140px">
+      <button class="btn" onclick="dfLoad()">🔄 Load</button>
+    </div>
+    <div id="dfKpi" style="color:var(--mut);font-size:11px;margin-bottom:6px"></div>
+    <div style="color:var(--mut);font-size:10px;margin-bottom:6px">💡 Ek user chuno to uski POORI din ki kahani sessions me bant kar dikhti hai (subah → raat)</div>
+    <div id="dfList" style="max-height:420px;overflow:auto"></div>
+  </div>
   <div class="grid">
     <div class="card"><h3><span class="em">🟢</span> Abhi online (<span id="oncount"></span>)</h3><div id="onlist"></div></div>
     <div class="card"><h3><span class="em">🕒</span> Recently active</h3><div id="recent"></div></div>
@@ -1918,12 +1952,17 @@ if (isset($_GET['admin'])) {
   </div>
   <div class="page" data-p="scans">
     <div class="sec"><span class="em">📄</span> Scans — data grid (last 300)</div>
+    <div class="kpis" id="sgKpis" style="margin-bottom:13px"></div>
     <div class="card">
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:9px;align-items:center">
-        <input id="sgQ" placeholder="🔍 user / country se dhoondo…" style="flex:1;min-width:160px">
+        <input id="sgQ" placeholder="🔍 user / country / profile se dhoondo…" style="flex:1;min-width:160px">
         <select id="sgRange"><option value="0">Sab</option><option value="1">Aaj</option><option value="7">7 din</option><option value="30">30 din</option></select>
+        <select id="sgDpi"><option value="">DPI: sab</option></select>
+        <select id="sgCol"><option value="">Rang: sab</option></select>
+        <select id="sgSrc"><option value="">Srot: sab</option><option value="feeder">Feeder</option><option value="glass">Glass</option></select>
         <button class="btn gray" onclick="sgCSV()">⬇ CSV</button>
       </div>
+      <div style="color:var(--mut);font-size:10.5px;margin-bottom:7px">💡 Kisi bhi row par CLICK karo — us scan ka poora byora khul jayega (scanner, profile, samay…)</div>
       <div id="sgGrid" class="skel"></div>
       <div id="sgPag" style="margin-top:9px;display:flex;gap:6px;align-items:center;justify-content:center"></div>
     </div>
@@ -2915,40 +2954,121 @@ try{ lvRender(); }catch(e){ if(window.jsonLog){} }
       +'</div></div>'; }).join('') : '<div class="card" style="color:var(--mut)">— data nahi —</div>';
 })();
 // ---- SCANS grid: search + range + sort + pagination + CSV ----
-var _sg={page:1,per:25,sort:'t',dir:-1};
+var _sg={page:1,per:25,sort:'t',dir:-1,open:-1};
 function _sgData(){ var rows=(D.recentScans300||D.recentScans||[]).slice();
   var q=(document.getElementById('sgQ').value||'').toLowerCase();
   var r=parseInt(document.getElementById('sgRange').value||'0');
+  var fd=(document.getElementById('sgDpi')||{}).value||'';
+  var fc=(document.getElementById('sgCol')||{}).value||'';
+  var fs=(document.getElementById('sgSrc')||{}).value||'';
   var cut=r? (Math.floor(Date.now()/1000)-r*86400):0;
   rows=rows.filter(function(x){ if(cut&&(x.t||0)<cut)return false;
-    if(q&&((x.name||'')+' '+(x.cc||'')).toLowerCase().indexOf(q)<0)return false; return true;});
+    if(fd&&String(x.dpi||'')!==fd)return false;
+    if(fc&&String(x.col||'')!==fc)return false;
+    if(fs&&String(x.src||'')!==fs)return false;
+    if(q&&((x.name||'')+' '+(x.cc||'')+' '+(x.prof||'')+' '+(x.sm||'')).toLowerCase().indexOf(q)<0)return false; return true;});
   rows.sort(function(a,b){ var k=_sg.sort,va=a[k]||0,vb=b[k]||0;
     if(typeof va==='string'){va=va.toLowerCase();vb=(vb||'').toLowerCase();}
     return (va<vb?-1:va>vb?1:0)*_sg.dir;});
   return rows; }
+function sgKpis(rows){ var el=document.getElementById('sgKpis'); if(!el)return;
+  var today=new Date().toDateString(), tn=0, pg=0, colr=0, durS=0, durN=0;
+  rows.forEach(function(x){ pg+=(x.n||0);
+    if(new Date((x.t||0)*1000).toDateString()===today)tn++;
+    if(String(x.col||'').toLowerCase().indexOf('colour')>-1)colr++;
+    if(x.dur){durS+=x.dur;durN++;} });
+  el.innerHTML=_kpi('','📄',fmt(rows.length),'Scans (filter ke baad)')
+    +_kpi('g','🗓',tn,'Aaj ke scans')
+    +_kpi('p','🧾',fmt(pg),'Kul pages')
+    +_kpi('','📊',rows.length?(pg/rows.length).toFixed(1):'0','Avg pages/scan')
+    +_kpi('y','🎨',rows.length?Math.round(100*colr/rows.length)+'%':'—','Colour scans')
+    +(durN?_kpi('','⏱',Math.round(durS/durN)+'s','Avg samay/scan'):''); }
 function sgRender(){ var el=document.getElementById('sgGrid'); if(!el)return;
-  var rows=_sgData(); var tp=Math.max(1,Math.ceil(rows.length/_sg.per));
+  var rows=_sgData(); sgKpis(rows); var tp=Math.max(1,Math.ceil(rows.length/_sg.per));
   if(_sg.page>tp)_sg.page=tp;
   var pg=rows.slice((_sg.page-1)*_sg.per,_sg.page*_sg.per);
   function th(label,key){ var a=_sg.sort===key?(_sg.dir<0?' ↓':' ↑'):''; return '<th onclick="_sg.sort=\''+key+'\';_sg.dir=(_sg.sort===\''+key+'\'?-_sg.dir:-1);sgRender()">'+label+a+'</th>'; }
-  el.innerHTML='<div style="max-height:440px;overflow:auto"><table><thead><tr>'+th('Date/Time','t')+th('User','name')+th('Country','cc')+th('Pages','n')+'</tr></thead><tbody>'
-    +(pg.length?pg.map(function(x){ var d=new Date((x.t||0)*1000);
-      return '<tr><td style="white-space:nowrap">'+d.toLocaleDateString()+' '+d.toLocaleTimeString()+'</td><td><b>'+esc(x.name||'—')+'</b></td><td>'+flag(x.cc)+' '+esc(x.cc||'—')+'</td><td><span class="tag">'+(x.n||0)+' pages</span></td></tr>';}).join('')
-      :'<tr><td colspan="4" style="color:var(--mut);text-align:center;padding:20px">— koi scan nahi mila —</td></tr>')
-    +'</tbody></table></div>';
+  var body='';
+  if(pg.length){ pg.forEach(function(x,i){ var d=new Date((x.t||0)*1000); var gi=(_sg.page-1)*_sg.per+i;
+      body+='<tr style="cursor:pointer" onclick="_sg.open=(_sg.open==='+gi+'? -1:'+gi+');sgRender()">'
+        +'<td style="white-space:nowrap">'+d.toLocaleDateString()+' '+d.toLocaleTimeString()+'</td>'
+        +'<td><b>'+esc(x.name||'—')+'</b></td><td>'+flag(x.cc)+' '+esc(x.cc||'—')+'</td>'
+        +'<td><span class="tag">'+(x.n||0)+' pg</span></td>'
+        +'<td>'+esc(x.dpi||'—')+'</td><td>'+esc(x.col||'—')+'</td>'
+        +'<td>'+(x.src==='glass'?'🪟 Glass':(x.src?'📥 Feeder':'—'))+'</td>'
+        +'<td>'+(x.dur?x.dur+'s':'—')+'</td></tr>';
+      if(_sg.open===gi){ body+='<tr><td colspan="8" style="background:rgba(99,102,241,.06);font-size:11px;padding:9px 14px">'
+        +'🖨 Scanner: <b>'+esc(x.sm||'—')+'</b> &nbsp;·&nbsp; 🗂 Profile: <b>'+esc(x.prof||'—')+'</b>'
+        +' &nbsp;·&nbsp; 📐 Page size: <b>'+esc(x.sz||'—')+'</b> &nbsp;·&nbsp; 🔢 App: <b>'+(x.v?'v'+esc(x.v):'—')+'</b>'
+        +' &nbsp;·&nbsp; ⏱ Samay: <b>'+(x.dur?x.dur+' sec':'—')+'</b> &nbsp;·&nbsp; 🌍 '+flag(x.cc)+' '+esc(x.cc||'—')
+        +'</td></tr>'; }
+    }); }
+  else body='<tr><td colspan="8" style="color:var(--mut);text-align:center;padding:20px">— koi scan nahi mila —</td></tr>';
+  el.innerHTML='<div style="max-height:440px;overflow:auto"><table><thead><tr>'+th('Date/Time','t')+th('User','name')+th('Country','cc')+th('Pages','n')+th('DPI','dpi')+th('Rang','col')+th('Srot','src')+th('Samay','dur')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
   var pag=document.getElementById('sgPag');
   pag.innerHTML='<button class="btn gray" '+(_sg.page<=1?'disabled':'')+' onclick="_sg.page--;sgRender()">←</button>'
     +'<span style="color:var(--mut)">Page '+_sg.page+' / '+tp+' · '+fmt(rows.length)+' scans</span>'
     +'<button class="btn gray" '+(_sg.page>=tp?'disabled':'')+' onclick="_sg.page++;sgRender()">→</button>'; }
 function sgCSV(){ var rows=_sgData();
-  var csv='date,time,user,country,pages\n'+rows.map(function(x){ var d=new Date((x.t||0)*1000);
-    return d.toLocaleDateString()+','+d.toLocaleTimeString()+',"'+String(x.name||'').replace(/"/g,'""')+'",'+(x.cc||'')+','+(x.n||0);}).join('\n');
+  var csv='date,time,user,country,pages,dpi,colour,source,seconds,profile,scanner,app\n'+rows.map(function(x){ var d=new Date((x.t||0)*1000);
+    return d.toLocaleDateString()+','+d.toLocaleTimeString()+',"'+String(x.name||'').replace(/"/g,'""')+'",'+(x.cc||'')+','+(x.n||0)+','+(x.dpi||'')+','+(x.col||'')+','+(x.src||'')+','+(x.dur||'')+',"'+String(x.prof||'').replace(/"/g,'""')+'","'+String(x.sm||'').replace(/"/g,'""')+'",'+(x.v||'');}).join('\n');
   var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='apnescan-scans.csv'; a.click();
   showToast('⬇ Scans CSV download ho gayi','ok'); }
 (function(){ var q=document.getElementById('sgQ'); if(!q)return;
-  q.addEventListener('input',function(){_sg.page=1;sgRender();});
-  document.getElementById('sgRange').addEventListener('change',function(){_sg.page=1;sgRender();});
+  // DPI / Rang ke filter-option asli data se bhar do
+  var ds={},cs={}; (D.recentScans300||[]).forEach(function(x){ if(x.dpi)ds[x.dpi]=1; if(x.col)cs[x.col]=1; });
+  var sd=document.getElementById('sgDpi'); Object.keys(ds).sort(function(a,b){return a-b;}).forEach(function(k){ var o=document.createElement('option'); o.value=k; o.textContent=k+' dpi'; sd.appendChild(o); });
+  var sc=document.getElementById('sgCol'); Object.keys(cs).sort().forEach(function(k){ var o=document.createElement('option'); o.value=k; o.textContent=k; sc.appendChild(o); });
+  q.addEventListener('input',function(){_sg.page=1;_sg.open=-1;sgRender();});
+  ['sgRange','sgDpi','sgCol','sgSrc'].forEach(function(id){ var e=document.getElementById(id); if(e)e.addEventListener('change',function(){_sg.page=1;_sg.open=-1;sgRender();}); });
   sgRender(); })();
+// ---- (v3) DIN-BHAR KI POORI FEED — roz ki event-file se (har click) ----
+var _df={rows:[],date:''};
+function dfLoad(){ var dt=(document.getElementById('dfDate')||{}).value||'';
+  fetch('?admin=1&api=feed'+(dt?'&date='+dt:''),{credentials:'same-origin'})
+   .then(function(r){return r.json();}).then(function(j){
+    if(!j||!j.ok)return; _df.rows=j.events||[]; _df.date=j.date;
+    var sel=document.getElementById('dfDate');
+    if(sel&&!sel.options.length){ (j.dates&&j.dates.length?j.dates:[j.date]).forEach(function(dd){
+      var o=document.createElement('option'); o.value=dd; o.textContent=dd; sel.appendChild(o); }); sel.value=j.date; }
+    var us={}; _df.rows.forEach(function(e){ if(e.u)us[e.u]=1; });
+    var su=document.getElementById('dfUser');
+    if(su){ var cur=su.value; su.innerHTML='<option value="">👥 Sab users</option>';
+      Object.keys(us).sort().forEach(function(k){ var o=document.createElement('option'); o.value=k; o.textContent=k; su.appendChild(o); });
+      su.value=cur; }
+    dfRender(); }).catch(function(){});
+}
+function dfLbl(e){ var n=String(e||'');
+  if(n.indexOf('btn:')===0)return '🔘 '+n.slice(4)+' (toolbar)';
+  if(n.indexOf('menu:')===0)return '📋 '+n.slice(5)+' (menu)';
+  if(n.indexOf('nav:')===0)return '🧭 '+n.slice(4)+' (sidebar)';
+  if(n.indexOf('card:')===0)return '🃏 '+n.slice(5)+' (dashboard)';
+  if(n==='app:start')return 'App KHOLI';
+  if(n==='app:close')return 'App BAND ki';
+  return (window.flbl?flbl(n):n); }
+function dfRender(){ var el=document.getElementById('dfList'); if(!el)return;
+  var fu=(document.getElementById('dfUser')||{}).value||'';
+  var q=((document.getElementById('dfQ')||{}).value||'').toLowerCase();
+  var rows=_df.rows.filter(function(e){ if(fu&&e.u!==fu)return false;
+    if(q&&(String(e.e)+' '+(e.u||'')).toLowerCase().indexOf(q)<0)return false; return true;});
+  rows.sort(function(a,b){return (a.t||0)-(b.t||0);});
+  var out=[],last=0;
+  rows.forEach(function(e){
+    if(fu&&out.length&&((e.t-last>1800)||e.e==='app:start'))
+      out.push('<div style="color:var(--accent2);font-size:10px;margin:8px 0 4px;border-top:1px dashed rgba(148,163,184,.3);padding-top:6px">— nayi session shuru —</div>');
+    last=e.t;
+    out.push('<div class="aii"><span>'+(e.e==='app:start'?'🟢':(e.e==='app:close'?'🔴':'•'))+'</span><div>'
+      +(fu?'':'<b>'+esc(e.u||e.c||'user')+'</b> — ')+esc(dfLbl(e.e))
+      +'<div style="color:var(--mut);font-size:9px">'+new Date((e.t||0)*1000).toLocaleTimeString()+'</div></div></div>');
+  });
+  var kp=document.getElementById('dfKpi');
+  if(kp)kp.innerHTML='<b>'+rows.length+'</b> events · '+esc(_df.date||'')+(fu?' · <b>'+esc(fu)+'</b>':'');
+  el.innerHTML=out.length?out.join(''):'<div style="color:var(--mut)">— is din ki koi event nahi (users ke paas app v183+ hone par aayegi) —</div>';
+}
+(function(){ var e1=document.getElementById('dfUser'); if(e1)e1.addEventListener('change',dfRender);
+  var e2=document.getElementById('dfQ'); if(e2)e2.addEventListener('input',dfRender);
+  var e3=document.getElementById('dfDate'); if(e3)e3.addEventListener('change',dfLoad);
+  if(document.getElementById('dfList')) dfLoad(); })();
 // ---- SYSTEM HEALTH ----
 (function(){ var el=document.getElementById('healthKpis'); if(!el)return;
   var H=D.health||{}, SY=D.sys||{};
@@ -3125,8 +3245,18 @@ if ($action === 'scan') {
         // scan-event count (avg pages/scan ke liye) + live feed
         $d['scanEvents'] = intval(isset($d['scanEvents'])?$d['scanEvents']:0) + 1;
         if (!isset($d['recentScans'])) $d['recentScans'] = array();
+        // (v3) SCAN DETAIL: dpi / rang / srot / kitne second / profile / size /
+        // scanner / version bhi saath me — admin panel ki detailed grid ke liye
         $d['recentScans'][] = array('t'=>$now, 'name'=>substr(isset($_REQUEST['u'])?$_REQUEST['u']:'',0,40),
-            'cc'=>substr(isset($_REQUEST['c'])?$_REQUEST['c']:'',0,4), 'n'=>$n);
+            'cc'=>substr(isset($_REQUEST['c'])?$_REQUEST['c']:'',0,4), 'n'=>$n,
+            'dpi'=>substr(isset($_REQUEST['dpi'])?$_REQUEST['dpi']:'',0,6),
+            'col'=>substr(isset($_REQUEST['col'])?$_REQUEST['col']:'',0,10),
+            'sz'=>substr(isset($_REQUEST['sz'])?$_REQUEST['sz']:'',0,10),
+            'sm'=>substr(isset($_REQUEST['sm'])?$_REQUEST['sm']:'',0,40),
+            'dur'=>max(0,min(3600,intval(isset($_REQUEST['dur'])?$_REQUEST['dur']:0))),
+            'src'=>substr(isset($_REQUEST['src'])?$_REQUEST['src']:'',0,8),
+            'prof'=>substr(isset($_REQUEST['prof'])?$_REQUEST['prof']:'',0,24),
+            'v'=>substr(isset($_REQUEST['v'])?$_REQUEST['v']:'',0,8));
         $d['recentScans'] = array_slice($d['recentScans'], -1000);   // cap (spec #8)
         update_peak($d, $now, $today);
     }
@@ -3180,6 +3310,39 @@ if ($action === 'scan') {
     $pg = max(0, min(5000, intval(isset($_REQUEST['pg'])?$_REQUEST['pg']:0)));
     if ($kb) $d['metrics']['kbSaved'] = intval(isset($d['metrics']['kbSaved'])?$d['metrics']['kbSaved']:0) + $kb;
     if ($pg && !empty($_REQUEST['feat'])) { $fk = 'pg_'.substr($_REQUEST['feat'],0,16); $d['metrics'][$fk] = intval(isset($d['metrics'][$fk])?$d['metrics'][$fk]:0) + $pg; }
+} else if ($action === 'evbatch') {
+    // ---- (v3) HAR-KAAM FEED: app har 60 sec me apne saare chhote-bade
+    // kaam (button/menu/nav clicks) EK batch me bhejti hai. Ye ROZ ki
+    // alag file me jama hote hain (events-YYYY-MM-DD.jsonl) — poori
+    // history hamesha ke liye; recentEvents/user-timeline bhi taaza.
+    touch_client($d, $client, $_REQUEST, 0, $now, $today);
+    $evs = json_decode(isset($_REQUEST['events'])?$_REQUEST['events']:'', true);
+    if (is_array($evs) && $client !== '') {
+        $evs = array_slice($evs, 0, 40);
+        $edir = __DIR__ . '/apnescan_events';
+        if (!is_dir($edir)) { @mkdir($edir, 0755, true);
+            @file_put_contents($edir.'/.htaccess', "Require all denied\nDeny from all\n");
+            @file_put_contents($edir.'/index.html', ''); }
+        $unm = substr(trim(isset($_REQUEST['u'])?$_REQUEST['u']:''),0,40);
+        if (!isset($d['recentEvents'])||!is_array($d['recentEvents'])) $d['recentEvents']=array();
+        $lines = '';
+        foreach ($evs as $e) {
+            if (!is_array($e) || count($e) < 2) continue;
+            $et = intval($e[0]); if ($et <= 0 || $et > $now + 3600) $et = $now;
+            $en = substr(preg_replace('/[\x00-\x1F"\\\\]/','',(string)$e[1]),0,32);
+            if ($en === '') continue;
+            $lines .= json_encode(array('t'=>$et,'c'=>substr((string)$client,0,40),
+                'u'=>$unm,'e'=>$en), JSON_UNESCAPED_UNICODE)."\n";
+            $d['recentEvents'][] = array('t'=>$et,'client'=>substr((string)$client,0,40),'u'=>$unm,'feat'=>$en);
+            if (isset($d['clients'][$client])) {
+                if(!isset($d['clients'][$client]['ev'])||!is_array($d['clients'][$client]['ev']))$d['clients'][$client]['ev']=array();
+                $d['clients'][$client]['ev'][] = array($et,$en);
+                $d['clients'][$client]['ev'] = array_slice($d['clients'][$client]['ev'],-30);
+            }
+        }
+        $d['recentEvents'] = array_slice($d['recentEvents'],-400);
+        if ($lines !== '') @file_put_contents($edir.'/events-'.date('Y-m-d',$now).'.jsonl', $lines, FILE_APPEND|LOCK_EX);
+    }
 } else if ($action === 'crash') {
     $_cv = substr(isset($_REQUEST['v'])?$_REQUEST['v']:'',0,10);
     $_ce = substr(isset($_REQUEST['err'])?$_REQUEST['err']:'',0,200);

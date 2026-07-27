@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "182"
+VERSION = "183"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6658,6 +6658,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # PAKKA karo — aage koi naya option seedhe addAction se bhi joda jaye to
         # bhi ye use chhoot-ne nahi dega (chhupa hua safety-jaal).
         self._finalize_menu_help()
+        self._hook_menu_events()      # (v183) har menu-click admin feed me
+        self._ev_push("app:start")    # session timeline ka shuruaati nishaan
         self._build_shortcuts()
 
     def _finalize_menu_help(self):
@@ -7575,6 +7577,56 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
 
+    def _ev_push(self, name):
+        """(v183) HAR chhota-bada kaam admin Activity-Feed me dikhane ke liye —
+        events yahan jama hote hain aur 60 second me EK saath jaate hain
+        (server halka rahta hai). Sirf kaam ka NAAM jaata hai, koi data nahi."""
+        try:
+            q = getattr(self, "_ev_q", None)
+            if q is None:
+                q = self._ev_q = []
+                t = self._ev_timer = QtCore.QTimer(self)
+                t.setInterval(60000)
+                t.timeout.connect(self._ev_flush)
+                t.start()
+            q.append([int(time.time()), str(name)[:32]])
+            del q[:-200]                      # memory-cap
+            if len(q) >= 40:                  # bhara ho to abhi bhej do
+                self._ev_flush()
+        except Exception:
+            pass
+
+    def _ev_flush(self):
+        q = getattr(self, "_ev_q", None)
+        if not q:
+            return
+        batch, self._ev_q = q[:40], q[40:]
+        try:
+            p = {"action": "evbatch", "client": self._get_client_id(),
+                 "v": VERSION, "c": self._an_country(), "u": self._user_name(),
+                 "events": json.dumps(batch, separators=(",", ":"))}
+            self._an_fetch(p, lambda _d: None)
+        except Exception:
+            pass
+
+    def _hook_menu_events(self):
+        """Menu ke HAR option par chupchaap event-ginti (admin feed ke liye)."""
+        def walk(menu):
+            for a in menu.actions():
+                sub = a.menu()
+                if sub is not None:
+                    walk(sub)
+                elif not a.isSeparator() and a.text():
+                    a.triggered.connect(
+                        lambda _c=False, nm=a.text():
+                        self._ev_push("menu:" + nm.replace("&", "").replace("❓ ", "")[:24]))
+        try:
+            for act in self.menuBar().actions():
+                if act.menu() is not None:
+                    walk(act.menu())
+        except Exception:
+            pass
+
     def _an_event(self, feat, kb=0, pg=0):
         """Feature usage worldwide bhejo (OCR/compress/merge/sign/print…).
         kb = kitne KB bache (compress), pg = kitne pages (merge/print)."""
@@ -7593,9 +7645,21 @@ class ScannerWindow(QtWidgets.QMainWindow):
         breakdown ke liye. Sirf ginti/setting jaati hai, koi document nahi."""
         col = {"color": "Colour", "gray": "Grayscale", "bw": "B&W"}.get(
             str(self._opts.get("color", "")), str(self._opts.get("color", "")))
-        return {"dpi": self._opts.get("dpi", ""), "col": col,
-                "sz": self._opts.get("page_size", ""),
-                "sm": (self._opts.get("scanner_name", "") or "")[:40]}
+        m = {"dpi": self._opts.get("dpi", ""), "col": col,
+             "sz": self._opts.get("page_size", ""),
+             "sm": (self._opts.get("scanner_name", "") or "")[:40]}
+        # (v183) scan-detail: kitne second laga + srot + profile (privacy-safe)
+        try:
+            si = getattr(self, "_scan_info", None) or {}
+            if si.get("t0"):
+                m["dur"] = int(max(0, min(3600, time.time() - si["t0"])))
+            if si.get("src"):
+                m["src"] = si["src"]
+            if si.get("prof"):
+                m["prof"] = si["prof"]
+        except Exception:
+            pass
+        return m
 
     def _an_feedback(self, rating, msg):
         """User feedback + rating admin panel ko bhejo."""
@@ -11874,6 +11938,12 @@ if the toggle is ticked).</p>
         _bt = self._tb_buttons.get("tools")
         if _bt is not None:
             _bt.setText("🧰"); _bt.setFixedSize(38, 38); _bt.setMinimumWidth(38)
+        # (v183) HAR toolbar-button ki click admin Activity-Feed me (batch se)
+        for _k2, _b2 in list(self._tb_buttons.items()):
+            try:
+                _b2.clicked.connect(lambda _c=False, k=_k2: self._ev_push("btn:" + k))
+            except Exception:
+                pass
         pdfmenu = QtWidgets.QMenu(self.btn_save_pdf); pdfmenu.setToolTipsVisible(True)
         self._ma(pdfmenu, self.L("📄 PDF — sabhi pages", "📄 PDF — all pages"), self.save_pdf_all,
                  "हिन्दी: सभी पेजों की एक PDF बनाओ।\nEnglish: Save all pages as one PDF.")
@@ -12411,6 +12481,7 @@ if the toggle is ticked).</p>
                 _w9.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
             _bv.addWidget(_ic); _bv.addStretch(1); _bv.addWidget(_tt); _bv.addWidget(_ss)
             b.clicked.connect(slot)
+            b.clicked.connect(lambda _c=False, nm=text: self._ev_push("card:" + nm[:20]))
             _dr.addWidget(b)
         _dbtn("🖨", "#EEF2FF", "#4F46E5", self.L("New Scan", "New Scan"),
               self.L("panel setting se", "feeder ready"), lambda: self.do_scan(use_panel=True))
@@ -12941,6 +13012,7 @@ if the toggle is ticked).</p>
             if on:
                 b.setObjectName("navon")
             b.clicked.connect(slot)
+            b.clicked.connect(lambda _c=False, nm=txt: self._ev_push("nav:" + nm[:20]))
             nv.addWidget(b)
             return b
 
@@ -13669,6 +13741,16 @@ if the toggle is ticked).</p>
             self._state_timer.stop()
         except Exception:
             pass
+        # admin-panel detail ke liye: ye scan kaise chala (samay/srot/profile)
+        try:
+            self._scan_info = {
+                "t0": time.time(),
+                "src": ("glass" if "glass" in str(source or "").lower()
+                        or "flat" in str(source or "").lower() else "feeder"),
+                "prof": (prof or {}).get("name", "")[:24],
+            }
+        except Exception:
+            self._scan_info = {}
         self._worker.start(); self._progress.show()
         self._set_busy_display("busy")
 
@@ -13786,6 +13868,12 @@ if the toggle is ticked).</p>
         self._scan_place = None          # rescan/insert mode khatam
         self._save_after_scan_once = False
         self._pstats_bump(scan_fail=1)
+        # admin-panel: scan fail hua (vajah ke pehle 40 अक्षर — koi document nahi)
+        try:
+            self._an_report("event", feat="scanfail",
+                            meta={"err": str(msg)[:40]})
+        except Exception:
+            pass
         self._last_error = msg
         if self._progress:
             self._progress.close(); self._progress = None
@@ -20162,9 +20250,16 @@ if the toggle is ticked).</p>
         # pages ab SCAN par gine jaate hain (upar), isliye yahan sirf PDF ki
         # ginti — warna double count ho jaata.
         self._pstats_bump(pdfs=1, doc_type=dt)
-        # worldwide analytics: PDF-save feature ki ginti (naam/content nahi jaata)
+        # worldwide analytics: PDF-save feature ki ginti (naam/content nahi
+        # jaata) + (v183) bani PDF ki size KB me — admin Scans detail ke liye
         try:
-            self._an_event("save")
+            _fs = 0
+            try:
+                _fs = int(os.path.getsize(out) / 1024)
+            except Exception:
+                pass
+            self._an_report("event", feat="save",
+                            meta=({"fs": _fs} if _fs else None))
         except Exception:
             pass
         # recent
@@ -20942,6 +21037,12 @@ if the toggle is ticked).</p>
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
             if r != QtWidgets.QMessageBox.Yes:
                 event.ignore(); return
+        # (v183) band hone se pehle bache hue events bhej do (admin feed)
+        try:
+            self._ev_push("app:close")
+            self._ev_flush()
+        except Exception:
+            pass
         # Window ka size/jagah yaad rakho (agli baar wahi khule)
         if self._opts.get("remember_window", True):
             try:
