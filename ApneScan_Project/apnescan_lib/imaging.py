@@ -29,6 +29,7 @@ __all__ = [
     "deskew",
     "dewarp_page",
     "flatten_background",
+    "smart_jpeg_quality",
     "adaptive_bw",
     "straighten_photo_page",
     "auto_enhance",
@@ -296,6 +297,116 @@ def dewarp_page(img, max_shift_frac=0.04):
         return Image.fromarray(outc, "RGB")
     except Exception:
         return img
+
+
+def _box_mean(a, k=8):
+    """k×k box-window ka mean (integral-image se — tez)."""
+    c = np.cumsum(np.cumsum(a, axis=0, dtype=np.float64), axis=1)
+    c = np.pad(c, ((1, 0), (1, 0)), mode="constant")
+    return ((c[k:, k:] - c[:-k, k:] - c[k:, :-k] + c[:-k, :-k]) / float(k * k))
+
+
+def _ssim_lite(a, b, k=8):
+    """SSIM (structural similarity) — box-window version, [::2] subsample par
+    chalta hai (32-bit memory-safe). 1.0 = bilkul same."""
+    a = a[::2, ::2].astype(np.float64); b = b[::2, ::2].astype(np.float64)
+    mu_a = _box_mean(a, k); mu_b = _box_mean(b, k)
+    va = _box_mean(a * a, k) - mu_a * mu_a
+    vb = _box_mean(b * b, k) - mu_b * mu_b
+    cov = _box_mean(a * b, k) - mu_a * mu_b
+    C1, C2 = 6.5025, 58.5225
+    s = ((2 * mu_a * mu_b + C1) * (2 * cov + C2)) / ((mu_a * mu_a + mu_b * mu_b + C1) * (va + vb + C2))
+    return float(s.mean())
+
+
+try:
+    from pyzbar import pyzbar as _sjq_zbar
+except Exception:  # pragma: no cover - pyzbar optional
+    _sjq_zbar = None
+
+
+def smart_jpeg_quality(img, qualities=(95, 92, 88, 84, 80, 76)):
+    """INTELLIGENT JPEG QUALITY: har page ke liye quality KHUD chuno —
+    quality neeche utarte jao aur har baar ORIGINAL se compare karo; jis
+    quality par pehli DIKHNE-LAYAK kharabi aati us se theek pehle ruk jao.
+
+    Har trial par jaanch:
+      - mean/99.5-percentile pixel difference (poore page par),
+      - EDGE-MAP difference (text/patli line/QR ke kinare — sabse pehle
+        yahi toot'te hain),
+      - SSIM (structural similarity) >= 0.985,
+      - QR/barcode page par: compress ke baad bhi decode SAME aana chahiye
+        (pyzbar uplabdh ho to).
+    Binary search (~3 encode/page). Kuch bhi fail ho to unchi quality par
+    wapas — quality HAMESHA size se pehle. Returns (quality, report)."""
+    rep = {}
+    try:
+        if not HAS_NUMPY:
+            return 92, rep
+        rgb = img if img.mode in ("L", "RGB") else img.convert("RGB")
+        # Saari metrics HALF-RES par (4x tez; kinare/structure wahi pakde
+        # jaate hain) — encode/decode zaroor FULL-res hota hai (asli output).
+        g0 = np.asarray(rgb.convert("L"), dtype=np.float32)[::2, ::2]
+        gx = np.abs(np.diff(g0, axis=1)); gy = np.abs(np.diff(g0, axis=0))
+        em = np.zeros_like(g0); em[:, :-1] += gx; em[:-1, :] += gy
+        strong = em > 40.0
+        n_strong = int(strong.sum())
+        qr0 = None
+        if _sjq_zbar is not None:
+            try:
+                qr0 = sorted(set((d.type, bytes(d.data)) for d in _sjq_zbar.decode(rgb))) or None
+            except Exception:
+                qr0 = None
+
+        import io as _io
+
+        def _metrics(q):
+            buf = _io.BytesIO()
+            rgb.save(buf, "JPEG", quality=q)
+            buf.seek(0)
+            comp = Image.open(buf); comp.load()
+            g1 = np.asarray(comp.convert("L"), dtype=np.float32)[::2, ::2]
+            diff = np.abs(g1 - g0)
+            mm = {"mean": float(diff.mean()),
+                  "p99": float(np.percentile(diff, 99.5)),
+                  "edge": (float(diff[strong].mean()) if n_strong > 100 else 0.0),
+                  "ssim": _ssim_lite(g0, g1)}
+            return mm, comp
+
+        # Baseline: qualities[0] (95) khud kitna badalta hai — scanner-noise
+        # wale page par SSIM noise se girta hai, content se nahi; isliye
+        # aage ke sab trials 95-wale se RELATIVE naape jaate hain.
+        base, _ = _metrics(qualities[0])
+        ssim_floor = base["ssim"] - 0.015
+
+        def _passes(q):
+            mm, comp = _metrics(q)
+            if mm["mean"] > 2.2 or mm["p99"] > 9.0:
+                return False
+            if mm["edge"] > 2.5:
+                return False        # kinare (text/patli line/QR) toot rahe
+            if mm["ssim"] < ssim_floor:
+                return False
+            if qr0 is not None:
+                try:
+                    if sorted(set((d.type, bytes(d.data)) for d in _sjq_zbar.decode(comp))) != qr0:
+                        return False   # QR/barcode padhna band ho gaya
+                except Exception:
+                    return False
+            return True
+
+        ok = 0                       # qualities[0] hamesha fallback
+        lo, hi = 1, len(qualities) - 1
+        while lo <= hi:              # monotonic maan kar binary search
+            mid = (lo + hi) // 2
+            if _passes(qualities[mid]):
+                ok = mid; lo = mid + 1
+            else:
+                hi = mid - 1
+        rep["q"] = qualities[ok]; rep["edges"] = n_strong; rep["qr"] = bool(qr0)
+        return qualities[ok], rep
+    except Exception:
+        return 92, rep
 
 
 def flatten_background(img, target=246):

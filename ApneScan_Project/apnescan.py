@@ -41,7 +41,7 @@ from apnescan_lib.search_engine import _folder_search_score
 from apnescan_lib.imaging import (
     is_blank_page, whiten_dark_background, autocrop, deskew, auto_enhance,
     denoise, apply_enhance_mode, clean_edges, split_two_pages, flatten_background,
-    adaptive_bw, dewarp_page,
+    adaptive_bw, dewarp_page, smart_jpeg_quality,
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
 )
@@ -227,7 +227,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "160"
+VERSION = "161"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -19081,6 +19081,19 @@ if the toggle is ticked).</p>
         wm = self._opts.get("watermark")
         wt = self._opts.get("watermark_text", "")
         imgs, res = self._pdf_ready_pages(paths, max_side=_cap)
+        # SMART QUALITY (Best mode): har page ke liye quality khud jaancho —
+        # original se compare (SSIM + edge-map + pixel-diff + QR-decode) karke
+        # "dikhne-layak kharabi se theek pehle" ruk jaata hai. PDF me ek hi
+        # quality lag sakti hai, isliye sab pages me se SABSE UNCHI zaroorat
+        # wali lagti hai (quality hamesha size se pehle).
+        if not compress and q == 95:
+            try:
+                _needs = [smart_jpeg_quality(im)[0]
+                          for im in imgs if im.mode != "1"]
+                if _needs:
+                    q = max(_needs)
+            except Exception:
+                pass
         if wm and wt:
             # watermark RGBA me lagta hai — gray page ko wapas gray kar do
             # taaki file chhoti hi rahe
