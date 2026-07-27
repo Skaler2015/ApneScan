@@ -1201,7 +1201,11 @@ if (isset($_GET['admin'])) {
     // ---- (v2) REAL server metrics (sirf admin-blob me; kabhi fake nahi —
     // jo function host par uplabdh nahi, wo field aati hi nahi) ----
     $sys=array('php'=>PHP_VERSION);
-    if (function_exists('sys_getloadavg')) { $la=@sys_getloadavg(); if(is_array($la)&&isset($la[0])) $sys['load']=round($la[0],2); }
+    if (function_exists('sys_getloadavg')) { $la=@sys_getloadavg(); if(is_array($la)&&isset($la[0])) { $sys['load']=round($la[0],2);
+        // Shared host par load ka matlab CORES jaane bina nahi banta —
+        // /proc/cpuinfo mile to per-core % nikaalo, warna neutral dikhao.
+        $ci=@file_get_contents('/proc/cpuinfo');
+        if ($ci) { $nc=preg_match_all('/^processor\s*:/m',$ci,$mm2); if($nc>0){ $sys['cores']=$nc; $sys['loadPct']=round($la[0]/$nc*100); } } } }
     $df=@disk_free_space(__DIR__); $dt=@disk_total_space(__DIR__);
     if ($df!==false && $dt) { $sys['diskFreeGB']=round($df/1073741824,2); $sys['diskTotalGB']=round($dt/1073741824,2); $sys['diskFreePct']=round($df/$dt*100,1); }
     $sys['memMB']=round(memory_get_peak_usage(true)/1048576,1);
@@ -1439,7 +1443,7 @@ if (isset($_GET['admin'])) {
   <button class="tab jump" onclick="jumpTo('system','cardStorage')"><span class="tic">🗄️</span> Backup Manager</button>
   <button class="tab jump" onclick="jumpTo('system','cardUpdate')"><span class="tic">⚙️</span> Settings</button>
   <button class="tab" data-p="health"><span class="tic">❤️</span> System Health</button>
-  <button class="tab" data-p="logs"><span class="tic">🧾</span> Activity Logs</button>
+  <button class="tab" data-p="logs"><span class="tic">📋</span> Activity Logs</button>
   <div class="nlab">More analytics</div>
   <button class="tab jump2" data-p="growth"><span class="tic">🔁</span> Growth</button>
   <button class="tab jump2" data-p="devices"><span class="tic">🌍</span> Activity Feed</button>
@@ -1672,7 +1676,7 @@ if (isset($_GET['admin'])) {
   <div class="sec"><span class="em">🧰</span> Activity, Usage &amp; Devices</div>
   <div class="grid">
     <div class="card"><h3><span class="em">🟢</span> Abhi online (<span id="oncount"></span>)</h3><div id="onlist"></div></div>
-    <div class="card"><h3><span class="em">⏱</span> Recently active</h3><div id="recent"></div></div>
+    <div class="card"><h3><span class="em">🕒</span> Recently active</h3><div id="recent"></div></div>
     <div class="card"><h3><span class="em">😴</span> Chhute hue users (churn)</h3><div id="chn"></div></div>
     <div class="card"><h3><span class="em">🧰</span> Feature usage</h3><div id="ft"></div></div>
     <div class="card"><h3><span class="em">🖨</span> Scanner models</h3><div id="sm"></div></div>
@@ -1826,13 +1830,13 @@ if (isset($_GET['admin'])) {
   <div class="card" id="cardStorage"><h3><span class="em">🗄️</span> Storage health (JSON layer)</h3>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;font-size:12px">
       <div>📄 JSON size<br><b><?php echo $SH['fileKB']; ?> KB</b></div>
-      <div>🗂 Backups size (.bak×5 + daily)<br><b><?php echo $SH['backupKB']; ?> KB</b></div>
+      <div>📁 Backups size (.bak×5 + daily)<br><b><?php echo $SH['backupKB']; ?> KB</b></div>
       <div>🧠 Memory (peak)<br><b><?php echo $SH['memMB']; ?> MB</b></div>
       <div>💾 Last save<br><b><?php echo $SH['lastSave']?date('d M H:i:s',$SH['lastSave']):'—'; ?></b></div>
-      <div>🛟 Last backup<br><b><?php echo $SH['lastBackup']?date('d M H:i:s',$SH['lastBackup']):'—'; ?></b></div>
+      <div>📦 Last backup<br><b><?php echo $SH['lastBackup']?date('d M H:i:s',$SH['lastBackup']):'—'; ?></b></div>
       <div>♻️ Last recovery<br><b><?php echo $SH['lastRecovery']?date('d M H:i:s',$SH['lastRecovery']):'kabhi zaroorat nahi padi ✅'; ?></b></div>
-      <div>🧾 Total records<br><b><?php echo number_format($SH['records']); ?></b></div>
-      <div>⏱ Load / Save<br><b><?php echo $SH['loadMs']; ?> / <?php echo $SH['saveMs']; ?> ms</b></div>
+      <div>📋 Total records<br><b><?php echo number_format($SH['records']); ?></b></div>
+      <div>🕒 Load / Save<br><b><?php echo $SH['loadMs']; ?> / <?php echo $SH['saveMs']; ?> ms</b></div>
     </div>
     <div style="font-size:10px;color:var(--mut);margin-top:8px">flock locking · atomic verify-writes · rotating .bak..bak4 · auto-recovery · caps (scans 1000 / feedback 500 / crash 500) · errors → <code>logs/error.log</code></div>
   </div>
@@ -1944,12 +1948,12 @@ if (isset($_GET['admin'])) {
     <div class="kpis" id="healthKpis" style="margin-bottom:13px"></div>
     <div class="card"><h3><span class="em">🗄️</span> JSON storage layer</h3><div id="healthStore" class="skel"></div></div>
     <div class="grid" style="margin-top:13px">
-      <div class="card"><h3><span class="em">🛟</span> Backups (server par asli files)</h3><div id="healthBk" class="skel"></div></div>
-      <div class="card"><h3><span class="em">🧾</span> error.log (aakhri lines)</h3><div id="healthLog" class="skel"></div></div>
+      <div class="card"><h3><span class="em">📦</span> Backups (server par asli files)</h3><div id="healthBk" class="skel"></div></div>
+      <div class="card"><h3><span class="em">📋</span> error.log (aakhri lines)</h3><div id="healthLog" class="skel"></div></div>
     </div>
   </div>
   <div class="page" data-p="logs">
-    <div class="sec"><span class="em">🧾</span> Activity Logs</div>
+    <div class="sec"><span class="em">📋</span> Activity Logs</div>
     <div class="grid">
       <div class="card"><h3><span class="em">🔐</span> Admin logins</h3><div id="logLogins" class="skel"></div></div>
       <div class="card"><h3><span class="em">🛠</span> Admin actions (audit)</h3><div id="logAudit" class="skel"></div></div>
@@ -2124,7 +2128,7 @@ document.getElementById('rf').innerHTML=(D.refLeaders&&D.refLeaders.length)?'<ta
   var hpk=Math.max.apply(null,val.concat([0]));
   document.getElementById('hl').innerHTML='<table><tr><td>📦 Data file</td><td style="text-align:right"><b>'+last+' KB</b></td></tr>'+
     '<tr><td>⚡ Peak req/ghanta</td><td style="text-align:right"><b>'+hpk+'</b></td></tr>'+
-    '<tr><td>⏱ Response abhi</td><td style="text-align:right"><b>'+D.respMs+' ms</b></td></tr></table>';
+    '<tr><td>🕒 Response abhi</td><td style="text-align:right"><b>'+D.respMs+' ms</b></td></tr></table>';
   var c=document.getElementById('hlc'); if(c&&window.Chart) mkChart(c,{type:'bar',data:{labels:lab,datasets:[{data:val,backgroundColor:PAL.aqua}]},options:CO});
 })();
 
@@ -2425,7 +2429,7 @@ document.getElementById('kpis2').innerHTML=
   kpi('🔁',D.repeatRate+'%','Repeat rate','g')+
   kpi('🔥',D.globalStreak,'Day streak','r')+
   kpi('🕐',fmt(D.lastHour),'Last hour')+
-  kpi('⏱',fmt(D.last24h),'Last 24h')+
+  kpi('🕒',fmt(D.last24h),'Last 24h')+
   kpi('📆',fmt(D.thisYear),'This year')+
   kpi(D.userGrowthPct>=0?'🌱':'🍂',(D.userGrowthPct>=0?'+':'')+D.userGrowthPct+'%','User growth',D.userGrowthPct>=0?'g':'r')+
   kpi('😴',D.churnRate+'%','Churn rate','r')+
@@ -2550,7 +2554,7 @@ document.getElementById('impact').innerHTML=
   kpi('📄',fmt(D.impactPaper),'Paper digitize','g')+
   kpi('💾',(D.impactDataMB>=1024?(D.impactDataMB/1024).toFixed(1)+' GB':D.impactDataMB+' MB'),'Data bachaya','p')+
   kpi('🌳',D.impactTrees,'Ped bachaye (~)','g')+
-  kpi('⏱',fmt(D.impactHours)+'h','Samay bachaya','o')+
+  kpi('🕒',fmt(D.impactHours)+'h','Samay bachaya','o')+
   kpi('🖨',fmt(D.impactShares),'Print bachaye (digital)','o');
 // feature counts + adoption
 bars('featC',obj2rows(D.features),false,flbl);
@@ -2717,7 +2721,7 @@ function lvRender(){
     +_kpi('','📊',(D.avgPages||0),'Avg pages / scan')
     +_kpi(avgHealth>=80?'g':(avgHealth>=60?'y':'r'),'⭐',avgHealth+'%','Fleet health score')
     +_kpi('','💾',(D.fileKB||0)+' KB','JSON storage')
-    +_kpi(bakAge===null?'y':(bakAge<48?'g':'r'),'🛟',bakAge===null?'—':(bakAge<1?'<1h':bakAge+'h'),'Last backup')
+    +_kpi(bakAge===null?'y':(bakAge<48?'g':'r'),'📦',bakAge===null?'—':(bakAge<1?'<1h':bakAge+'h'),'Last backup')
     +_kpi(D.bcMsg?'g':'','📢',D.bcMsg?'Active':'—','Broadcast')
     +_kpi('p','💬',(D.feedback||[]).length,'Feedback stored')
     +_kpi(crashesToday?'r':'g','💥',crashesToday,'Crashes — 24h');
@@ -2737,7 +2741,7 @@ function lvRender(){
     var lat=String(D.latestVersion||'').trim();
     var oldv=U.filter(function(u){return u.version&&String(u.version).trim()!==lat;}).length;
     if(crashesToday) A.push(['crit','💥',crashesToday+' crash pichhle 24h me — Crash Center dekho']);
-    if(bakAge!==null&&bakAge>=48) A.push(['crit','🛟','Backup '+bakAge+' ghante purana — naya backup lo']);
+    if(bakAge!==null&&bakAge>=48) A.push(['crit','📦','Backup '+bakAge+' ghante purana — naya backup lo']);
     if(oldv) A.push(['warn','⚠',oldv+' user purane version par — update broadcast bhejo']);
     var inact=U.filter(function(u){return u.last&&(Date.now()/1000-u.last)>14*86400;}).length;
     if(inact) A.push(['warn','😴',inact+' user 14+ din se offline']);
@@ -2745,7 +2749,7 @@ function lvRender(){
     // (v2) naye REAL rules: disk, crash-spike, failed logins, CPU load
     var SY=D.sys||{};
     if(SY.diskFreePct!==undefined&&SY.diskFreePct<10) A.push(['crit','💽','Server disk sirf '+SY.diskFreePct+'% khaali ('+SY.diskFreeGB+' GB) — jagah banao']);
-    if(SY.load!==undefined&&SY.load>2) A.push(['warn','🧮','Server CPU load high hai ('+SY.load+')']);
+    if(SY.loadPct!==undefined&&SY.loadPct>90) A.push(['warn','💻','Server CPU '+SY.loadPct+'% par hai (load '+SY.load+', '+SY.cores+' cores)']);
     (function(){ var now=Date.now()/1000, c24=0, c7=0;
       (D.crashes||[]).forEach(function(c){ var a=now-(c.t||0); if(a<86400)c24++; if(a<7*86400)c7++; });
       var avg=(c7-c24)/6;
@@ -2770,7 +2774,7 @@ function lvRender(){
     if(ph>=0) I.push(['🕒','Peak scanning time: <b>'+ph+':00–'+(ph+1)+':00</b> ke aas-paas.']);
     var inact=U.filter(function(u){return u.last&&(Date.now()/1000-u.last)>7*86400;}).length;
     if(inact) I.push(['😴','<b>'+inact+' user</b> 7+ din se nahi aaye — wapas laane ka message bhejo.']);
-    if(bakAge!==null&&bakAge>=24) I.push(['🛟','Aakhri backup <b>'+bakAge+'h</b> pehle — aaj ka backup le lo.']);
+    if(bakAge!==null&&bakAge>=24) I.push(['📦','Aakhri backup <b>'+bakAge+'h</b> pehle — aaj ka backup le lo.']);
     if(!I.length) I.push(['✅','Sab stable — koi khaas pattern nahi.']);
     document.getElementById('lvAI').innerHTML=I.map(function(i){return '<div class="aii"><span>'+i[0]+'</span><div>'+i[1]+'</div></div>';}).join('');
   })();
@@ -2914,19 +2918,20 @@ function sgCSV(){ var rows=_sgData();
   var H=D.health||{}, SY=D.sys||{};
   el.innerHTML=_kpi('g','🌐','OK','Server — PHP '+esc(SY.php||D.srv||'?'))
     +_kpi('','⚡',(D.respMs||0)+' ms','API response')
-    +(SY.load!==undefined?_kpi(SY.load>2?'r':(SY.load>1?'y':'g'),'🧮',SY.load,'CPU load (1 min)'):'')
+    +(SY.loadPct!==undefined?_kpi(SY.loadPct>90?'r':(SY.loadPct>60?'y':'g'),'💻',SY.loadPct+'%','CPU load ('+SY.load+' / '+SY.cores+' cores)')
+      :(SY.load!==undefined?_kpi('','💻',SY.load,'CPU load (server-wide)'):''))
     +(SY.diskFreePct!==undefined?_kpi(SY.diskFreePct<10?'r':(SY.diskFreePct<25?'y':'g'),'💽',SY.diskFreePct+'%','Disk free ('+SY.diskFreeGB+'/'+SY.diskTotalGB+' GB)'):'')
     +_kpi('p','📄',(D.fileKB||0)+' KB','stats.json size')
-    +_kpi('y','🗂',(H.backupKB||0)+' KB','Backups size')
+    +_kpi('y','📁',(H.backupKB||0)+' KB','Backups size')
     +_kpi('','🧠',(SY.memMB||H.memMB||0)+' MB','Memory (peak)')
-    +(SY.logKB!==undefined?_kpi(SY.logKB>400?'y':'','🧾',SY.logKB+' KB','error.log size'):'')
-    +_kpi('g','🗃',fmt(H.records||0),'Total records');
+    +(SY.logKB!==undefined?_kpi(SY.logKB>400?'y':'','📋',SY.logKB+' KB','error.log size'):'')
+    +_kpi('g','📚',fmt(H.records||0),'Total records');
   document.getElementById('healthStore').innerHTML = D.health?
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;font-size:11.5px">'
     +'<div>💾 Last save<br><b>'+(H.lastSave?new Date(H.lastSave*1000).toLocaleString():'—')+'</b></div>'
-    +'<div>🛟 Last backup<br><b>'+(H.lastBackup?new Date(H.lastBackup*1000).toLocaleString():'—')+'</b></div>'
+    +'<div>📦 Last backup<br><b>'+(H.lastBackup?new Date(H.lastBackup*1000).toLocaleString():'—')+'</b></div>'
     +'<div>♻️ Last recovery<br><b>'+(H.lastRecovery?new Date(H.lastRecovery*1000).toLocaleString():'kabhi zaroorat nahi ✅')+'</b></div>'
-    +'<div>⏱ Load / Save<br><b>'+(H.loadMs||0)+' / '+(H.saveMs||0)+' ms</b></div>'
+    +'<div>🕒 Load / Save<br><b>'+(H.loadMs||0)+' / '+(H.saveMs||0)+' ms</b></div>'
     +'<div>🔒 Locking<br><b>flock (exclusive RMW)</b></div>'
     +'<div>🗄️ Backups<br><b>.bak ×5 + daily ×14</b></div></div>'
     : '<div style="color:var(--mut)">json_storage.php upload karke poori health dekho (System page → Storage module)</div>';
@@ -2934,7 +2939,7 @@ function sgCSV(){ var rows=_sgData();
   var SY2=D.sys||{};
   var bkEl=document.getElementById('healthBk');
   if(bkEl) bkEl.innerHTML=(SY2.backups&&SY2.backups.length)?
-    _tbl(SY2.backups.map(function(b){return '<tr><td>🛟 '+esc(b.n)+'</td><td style="text-align:right">'+b.kb+' KB</td><td style="text-align:right;color:var(--mut)">'+(b.t?ago(b.t):'—')+'</td></tr>';}),['File','Size','When'])
+    _tbl(SY2.backups.map(function(b){return '<tr><td>📦 '+esc(b.n)+'</td><td style="text-align:right">'+b.kb+' KB</td><td style="text-align:right;color:var(--mut)">'+(b.t?ago(b.t):'—')+'</td></tr>';}),['File','Size','When'])
     :'<div style="color:var(--mut)">— koi backup file nahi mili —</div>';
   var lgEl=document.getElementById('healthLog');
   if(lgEl) lgEl.innerHTML=(SY2.logTail&&SY2.logTail.length)?
@@ -2963,7 +2968,7 @@ function sgCSV(){ var rows=_sgData();
   document.body.appendChild(pal);
   var MODS=[['🏠','Dashboard','overview'],['🟢','Live Monitoring','live'],['👥','Users','users'],['🖨','Devices','hw'],
     ['📄','Scans','scans'],['📈','Analytics','trends'],['📑','Reports','reports'],['❤️','System Health','health'],
-    ['🧾','Activity Logs','logs'],['🔁','Growth','growth'],['🧰','Tools & Impact','tools'],['💡','Suggestions','ideas'],['🖥','System','system']];
+    ['📋','Activity Logs','logs'],['🔁','Growth','growth'],['🧰','Tools & Impact','tools'],['💡','Suggestions','ideas'],['🖥','System','system']];
   var q=document.getElementById('cpq'),res=document.getElementById('cpres'),sel=0,items=[];
   function build(){ var v=(q.value||'').toLowerCase(); items=[];
     MODS.forEach(function(m){ if(!v||m[1].toLowerCase().indexOf(v)>-1) items.push({ic:m[0],t:m[1],k:'Module',fn:(function(p){return function(){jumpToPage(p);};})(m[2])}); });
