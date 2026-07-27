@@ -228,7 +228,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "164"
+VERSION = "165"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1290,7 +1290,7 @@ def list_wia_sources():
 
 
 def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop=None,
-                   source="auto"):
+                   source="auto", page_size="auto"):
     wia_scan_pages.last_duplex_value = getattr(wia_scan_pages, "last_duplex_value", None)
     """Scan via Windows WIA. Kept simple: no forced properties (some drivers
     throw otherwise). Runs inside a thread that has called CoInitialize."""
@@ -1318,20 +1318,35 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
         return False
 
     def _wia_valid_dpi(props, want):
-        # Pick a resolution the device actually supports (avoids "parameter incorrect").
+        # NAPS2-jaisa "closest": device jo dpi sach me deta hai wahi chuno —
+        # LIST ho to sabse kareeb wali, RANGE ho to min/max me clamp.
         try:
             for p in props:
                 if int(p.PropertyID) == 6147:
-                    vals = None
                     try:
                         vals = [int(x) for x in p.SubType.Values]   # WIA_PROP_LIST
+                        if vals:
+                            return min(vals, key=lambda v: abs(v - want))
                     except Exception:
-                        vals = None
-                    if vals:
-                        return min(vals, key=lambda v: abs(v - want))
+                        pass
+                    try:
+                        lo = int(p.SubTypeMin); hi = int(p.SubTypeMax)   # WIA_PROP_RANGE
+                        if hi > lo > 0:
+                            return max(lo, min(hi, want))
+                    except Exception:
+                        pass
         except Exception:
             pass
         return want
+
+    def _wia_getint(props, pid):
+        try:
+            for p in props:
+                if int(p.PropertyID) == pid:
+                    return int(p.Value)
+        except Exception:
+            return None
+        return None
 
     def _has_feeder(dev):
         # WIA_DPS_DOCUMENT_HANDLING_CAPABILITIES (3086): bit 0x01 = FEEDER.
@@ -1377,20 +1392,47 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
                     or _feeder_cap is False)
 
     def _apply_quality(it):
+        # NAPS2 ke driver-pipeline se seekha hua tarika (concepts, code nahi):
+        #  - DATATYPE (4103) hi rang-mode ki asli property hai (0=BW, 2=gray,
+        #    3=colour); DEPTH (4104) set NAHI karte — NAPS2 bhi nahi karta,
+        #    driver datatype se khud sahi depth chunta hai (kam reject hote).
+        #  - dpi "closest" (list/range) — jo device sach me de sakta hai.
+        #  - SCAN-AREA (extents) EXPLICIT set hota hai — kuch HP driver purani
+        #    dpi ka extent rakh kar page KAAT dete the ya galat kshetra
+        #    scan karte the; ab har scan par sahi area (page-size ke hisaab
+        #    se, ADF me beech me aligned).
         try:
             props = it.Properties
-            # Rang-mode ki SAHI WIA properties: 6146 = CUR_INTENT (1=colour,
-            # 2=grayscale, 4=text/BW), 4103 = DATATYPE (0=BW, 2=gray, 3=colour),
-            # 4104 = DEPTH (bits: 1/8/24). Pehle galti se DATATYPE ki values
-            # DEPTH (4104) me likhi ja rahi thin — HP jaise drivers use reject
-            # karke apne DEFAULT (Colour) me hi scan karte the, isliye Grayscale
-            # chunne par bhi Colour (aur kabhi pink-tint) file banti thi.
             _wia_set(props, 6146, {"bw": 4, "gray": 2, "color": 1}.get(pixel_type, 1))
             _wia_set(props, 4103, {"bw": 0, "gray": 2, "color": 3}.get(pixel_type, 3))
-            _wia_set(props, 4104, {"bw": 1, "gray": 8, "color": 24}.get(pixel_type, 24))
+            # WIA2 item-level feeder/duplex (NAPS2: FRONT_ONLY=32, DUPLEX=4) —
+            # WIA1 drivers par ye property item me hoti hi nahi (no-op).
+            if not flatbed_only:
+                _wia_set(props, 3088, 4 if duplex else 32)
             dv = _wia_valid_dpi(props, int(dpi))
             _wia_set(props, 6147, dv)
             _wia_set(props, 6148, dv)
+            # ---- scan-area (sab maap 1/1000 inch me) ----
+            maxw = _wia_getint(props, 6165)          # WIA2: IPS_MAX_HORIZONTAL_SIZE
+            maxh = _wia_getint(props, 6166)
+            if not maxw or not maxh:
+                dprops = device.Properties            # WIA1: bed/feeder size
+                if flatbed_only:
+                    maxw = _wia_getint(dprops, 3074); maxh = _wia_getint(dprops, 3075)
+                else:
+                    maxw = _wia_getint(dprops, 3076); maxh = _wia_getint(dprops, 3077)
+            if maxw and maxh:
+                sizes = {"a4": (8267, 11692), "letter": (8500, 11000),
+                         "legal": (8500, 14000), "a5": (5827, 8268)}
+                want = sizes.get(str(page_size).lower().split()[0] if page_size else "")
+                ww, hh = want if want else (maxw, maxh)   # auto = poora area
+                ww = min(int(ww), int(maxw)); hh = min(int(hh), int(maxh))
+                pw = ww * dv // 1000; ph = hh * dv // 1000
+                if pw > 0 and ph > 0:
+                    xpos = max(0, (int(maxw) - ww) * dv // 2000)  # centre (ADF)
+                    _wia_set(props, 6149, xpos)       # IPS_XPOS
+                    _wia_set(props, 6151, pw)         # IPS_XEXTENT
+                    _wia_set(props, 6152, ph)         # IPS_YEXTENT
         except Exception:
             pass
 
@@ -2297,7 +2339,8 @@ class ScanWorker(QtCore.QThread):
                     wia_scan_pages(self.opts.get("wia_device_id"), self.dpi,
                                    self.pixel_type, self.duplex, _on_page,
                                    should_stop=self.isInterruptionRequested,
-                                   source=self.opts.get("paper_source", "auto"))
+                                   source=self.opts.get("paper_source", "auto"),
+                                   page_size=self.opts.get("page_size", "auto"))
                 finally:
                     try:
                         _pythoncom.CoUninitialize()
