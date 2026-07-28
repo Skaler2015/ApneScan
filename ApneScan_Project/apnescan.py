@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "193"
+VERSION = "194"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6507,6 +6507,20 @@ class ScannerWindow(QtWidgets.QMainWindow):
             _lo = self._config.get("options")
             if isinstance(_lo, dict):
                 _lo["ui_header"] = False
+            try:
+                save_config(self._config)
+            except Exception:
+                pass
+        # v194: My Files panel ki default chaudai ek baar 290px tak badhao
+        # (naam poore dikhein); user kheench kar badle to wahi yaad rahega
+        if not self._config.get("layout_v194"):
+            self._config["layout_v194"] = True
+            _lo = self._config.get("options")
+            if isinstance(_lo, dict):
+                try:
+                    _lo["files_panel_w"] = max(int(_lo.get("files_panel_w", 260) or 260), 290)
+                except Exception:
+                    _lo["files_panel_w"] = 290
             try:
                 save_config(self._config)
             except Exception:
@@ -12893,9 +12907,14 @@ if the toggle is ticked).</p>
         # Abhi kis folder me ho — chhoti si patti (breadcrumb) + uske saamne ⭐
         # (abhi khule folder ko seedhe favourite banao/hatao)
         _cwdrow = QtWidgets.QHBoxLayout(); _cwdrow.setSpacing(4); _cwdrow.setContentsMargins(0, 0, 0, 0)
+        # (v194) LEFT me ⬅ Back, BEECH me poora folder-naam (2 line tak wrap),
+        # RIGHT me ⭐ — user ki request
+        self.btn_panel_back.show()
+        _cwdrow.addWidget(self.btn_panel_back)
         self.lbl_panel_cwd = QtWidgets.QLabel("")
         self.lbl_panel_cwd.setStyleSheet("color:#4F46E5;font-size:11px;font-weight:600;")
         self.lbl_panel_cwd.setWordWrap(True)
+        self.lbl_panel_cwd.setAlignment(QtCore.Qt.AlignCenter)
         _cwdrow.addWidget(self.lbl_panel_cwd, 1)
         self.btn_cwd_fav = QtWidgets.QToolButton()
         self.btn_cwd_fav.setText("☆"); self.btn_cwd_fav.setAutoRaise(True)
@@ -16831,9 +16850,10 @@ if the toggle is ticked).</p>
                 idx = spl.indexOf(self.files_panel)
                 pidx = spl.indexOf(self._pages_col)
                 if 0 <= idx < len(sizes) and 0 <= pidx < len(sizes) and pidx != idx:
-                    extra = sizes[idx] - 230
+                    # (v194) default chaudai 290 — naam poore dikhein
+                    extra = sizes[idx] - 290
                     sizes[pidx] += extra
-                    sizes[idx] = 230
+                    sizes[idx] = 290
                     spl.setSizes(sizes)
             except Exception:
                 pass
