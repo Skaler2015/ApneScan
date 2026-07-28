@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "192"
+VERSION = "193"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5527,7 +5527,8 @@ class FilesCardDelegate(QtWidgets.QStyledItemDelegate):
         self.win = win
 
     def sizeHint(self, opt, idx):
-        return QtCore.QSize(max(200, opt.rect.width()), 62)
+        # (v193) patli rows — ek nazar me zyada folders dikhein
+        return QtCore.QSize(max(200, opt.rect.width()), 46)
 
     def paint(self, p, opt, idx):
         try:
@@ -5558,82 +5559,47 @@ class FilesCardDelegate(QtWidgets.QStyledItemDelegate):
             p.setPen(QtCore.Qt.NoPen)
             p.setBrush(QtGui.QColor("#2563EB"))
             p.drawRoundedRect(QtCore.QRectF(r.left() - 1, r.top() + 10, 3.5, r.height() - 20), 2, 2)
-        x = r.left() + 9
+        x = r.left() + 7
         cy = r.center().y()
         # ⭐ favourite
         favs = self.win._opts.get("fav_folders") or []
-        f = QtGui.QFont(opt.font); f.setPointSizeF(10)
+        f = QtGui.QFont(opt.font); f.setPointSizeF(8.5)
         p.setFont(f)
         p.setPen(QtGui.QColor("#F59E0B" if path in favs else "#D5DAE1"))
-        p.drawText(QtCore.QRectF(x, r.top(), 16, r.height()), QtCore.Qt.AlignCenter,
+        p.drawText(QtCore.QRectF(x, r.top(), 14, r.height()), QtCore.Qt.AlignCenter,
                    "★" if path in favs else "☆")
-        x += 22
-        # rangin gol icon
+        x += 18
+        # rangin gol icon — (v193) chhota, taaki rows patli rahein
         c1, c2 = self.PALETTE[(sum(ord(ch) for ch in name)) % 6]
-        g = QtGui.QLinearGradient(x, cy - 17, x + 34, cy + 17)
+        g = QtGui.QLinearGradient(x, cy - 12, x + 24, cy + 12)
         g.setColorAt(0, QtGui.QColor(c1)); g.setColorAt(1, QtGui.QColor(c2))
         p.setPen(QtCore.Qt.NoPen); p.setBrush(QtGui.QBrush(g))
-        p.drawEllipse(QtCore.QPointF(x + 17, cy), 17, 17)
-        p.setPen(QtGui.QPen(QtGui.QColor("#FFFFFF"), 1.8))
+        p.drawEllipse(QtCore.QPointF(x + 12, cy), 12, 12)
+        p.setPen(QtGui.QPen(QtGui.QColor("#FFFFFF"), 1.5))
         p.setBrush(QtGui.QColor(255, 255, 255, 60))
         if isdir:
-            fr = QtCore.QRectF(x + 9, cy - 4.5, 16, 10.5)
-            p.drawRoundedRect(fr, 2, 2)
-            p.drawLine(QtCore.QPointF(x + 9, cy - 4.5), QtCore.QPointF(x + 12, cy - 7.5))
-            p.drawLine(QtCore.QPointF(x + 12, cy - 7.5), QtCore.QPointF(x + 16, cy - 7.5))
-            p.drawLine(QtCore.QPointF(x + 16, cy - 7.5), QtCore.QPointF(x + 18, cy - 4.5))
+            p.drawRoundedRect(QtCore.QRectF(x + 6, cy - 3, 12, 7.5), 1.5, 1.5)
+            p.drawLine(QtCore.QPointF(x + 6, cy - 3), QtCore.QPointF(x + 8, cy - 5.2))
+            p.drawLine(QtCore.QPointF(x + 8, cy - 5.2), QtCore.QPointF(x + 11, cy - 5.2))
+            p.drawLine(QtCore.QPointF(x + 11, cy - 5.2), QtCore.QPointF(x + 12.5, cy - 3))
         else:
-            p.drawRoundedRect(QtCore.QRectF(x + 11, cy - 7.5, 12, 15), 2, 2)
-            p.drawLine(QtCore.QPointF(x + 14, cy - 2), QtCore.QPointF(x + 20, cy - 2))
-            p.drawLine(QtCore.QPointF(x + 14, cy + 2), QtCore.QPointF(x + 18, cy + 2))
-        x += 42
-        # right: ⋮ + status pill
+            p.drawRoundedRect(QtCore.QRectF(x + 7.5, cy - 5.5, 9, 11), 1.5, 1.5)
+            p.drawLine(QtCore.QPointF(x + 10, cy - 1.5), QtCore.QPointF(x + 14.5, cy - 1.5))
+            p.drawLine(QtCore.QPointF(x + 10, cy + 1.5), QtCore.QPointF(x + 13, cy + 1.5))
+        x += 30
+        # right: sirf ⋮ (v193: NEW/Recent pill + DP/SC badge hata diye)
         p.setPen(QtGui.QColor("#9CA3AF"))
-        f.setPointSizeF(10); p.setFont(f)
-        dots_x = r.right() - 16
+        f.setPointSizeF(9); p.setFont(f)
+        dots_x = r.right() - 14
         p.drawText(QtCore.QRectF(dots_x - 4, r.top(), 16, r.height()), QtCore.Qt.AlignCenter, "⋮")
-        pill_right = dots_x - 8
-        days = None
-        if mdt is not None:
-            days = (datetime.datetime.now().date() - mdt.date()).days
-        if days is not None and days <= 3:
-            txt = "NEW" if days == 0 else "Recent"
-            bgc, fgc = ("#DCFCE7", "#15803D") if days == 0 else ("#FFEDD5", "#C2410C")
-            f2 = QtGui.QFont(opt.font); f2.setPointSizeF(6.6); f2.setBold(True)
-            fm2 = QtGui.QFontMetricsF(f2)
-            w2 = fm2.horizontalAdvance(txt) + 12
-            pr = QtCore.QRectF(pill_right - w2, cy - 8, w2, 16)
-            p.setPen(QtCore.Qt.NoPen); p.setBrush(QtGui.QColor(bgc))
-            p.drawRoundedRect(pr, 8, 8)
-            p.setPen(QtGui.QColor(fgc)); p.setFont(f2)
-            p.drawText(pr, QtCore.Qt.AlignCenter, txt)
-            pill_right -= (w2 + 6)
-        # naam + (DP/SC) badge
-        disp = name
-        btxt = None
-        mm = re.search(r"\(([A-Za-z]{2,3})\)\s*$", name)
-        if mm:
-            btxt = mm.group(1).upper()
-            disp = name[:mm.start()].strip()
-        f3 = QtGui.QFont(opt.font); f3.setPointSizeF(9); f3.setBold(True)
+        avail = dots_x - 6 - x
+        # naam — poora, jaisa hai waisa (koi tag nahi)
+        f3 = QtGui.QFont(opt.font); f3.setPointSizeF(8.5); f3.setBold(True)
         fm3 = QtGui.QFontMetricsF(f3)
-        avail = pill_right - x - 4
-        bw = 0
-        if btxt:
-            f4 = QtGui.QFont(opt.font); f4.setPointSizeF(6.6); f4.setBold(True)
-            bw = QtGui.QFontMetricsF(f4).horizontalAdvance(btxt) + 12
-        nm = fm3.elidedText(disp, QtCore.Qt.ElideRight, max(30, avail - bw - 6))
+        nm = fm3.elidedText(name, QtCore.Qt.ElideRight, max(30, avail))
         p.setFont(f3); p.setPen(QtGui.QColor("#111827"))
-        nr = QtCore.QRectF(x, r.top() + 8, avail, 16)
-        p.drawText(nr, QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, nm)
-        if btxt:
-            bx = x + min(fm3.horizontalAdvance(nm), avail - bw) + 6
-            bgc, fgc = self.BADGE.get(btxt, ("#F3E8FF", "#7E22CE"))
-            br = QtCore.QRectF(bx, r.top() + 9, bw, 14)
-            p.setPen(QtCore.Qt.NoPen); p.setBrush(QtGui.QColor(bgc))
-            p.drawRoundedRect(br, 7, 7)
-            p.setFont(f4); p.setPen(QtGui.QColor(fgc))
-            p.drawText(br, QtCore.Qt.AlignCenter, btxt)
+        p.drawText(QtCore.QRectF(x, r.top() + 4, avail, 14),
+                   QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, nm)
         # meta line: date • files/size
         meta = ""
         if mdt is not None:
@@ -5649,9 +5615,9 @@ class FilesCardDelegate(QtWidgets.QStyledItemDelegate):
                 meta += ("  •  " + sz) if meta else sz
             except Exception:
                 pass
-        f5 = QtGui.QFont(opt.font); f5.setPointSizeF(7.2)
+        f5 = QtGui.QFont(opt.font); f5.setPointSizeF(6.8)
         p.setFont(f5); p.setPen(QtGui.QColor("#6B7280"))
-        p.drawText(QtCore.QRectF(x, r.top() + 28, avail, 14),
+        p.drawText(QtCore.QRectF(x, r.top() + 20, avail, 13),
                    QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, meta)
         p.restore()
 
@@ -12789,6 +12755,9 @@ if the toggle is ticked).</p>
         _grow.addWidget(_gtr, 1)
         _gv.addLayout(_grow)
         fp.addWidget(_ghd)
+        # (v193) user request: gradient header ab NAHI dikhta — panel seedha
+        # search se shuru hota hai (objects zinda hain, bas chhupe)
+        _ghd.hide()
         # Search: kisi bhi folder ke andar naam se dhoondo (folder chuna ho to
         # usi ke andar, warna poore save-folder me)
         _srow = QtWidgets.QHBoxLayout(); _srow.setSpacing(4)
