@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "189"
+VERSION = "190"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -12659,6 +12659,9 @@ if the toggle is ticked).</p>
         # favourite banana/hatana: folder par RIGHT-CLICK → ⭐
         self.fav_combo.hide()
         self.fav_star.hide()
+        # (v190) ⬅ Back button bhi hata diya (user request) — upar jaane ke
+        # liye breadcrumb / double-click hi kaafi hai; object zinda hai
+        self.btn_panel_back.hide()
         self.fav_bar.addWidget(self.btn_panel_sort)
         fp.addLayout(self.fav_bar)
         # ---- Filter · Recent · Grid (quick controls) ----
@@ -12689,6 +12692,12 @@ if the toggle is ticked).</p>
         self.btn_grid.toggled.connect(self._toggle_files_grid)
         _qrow.addWidget(self.btn_grid)
         fp.addLayout(_qrow)
+        # (v190) Ye poori row (All-filter · 🕘 Recent · ⧉ Grid) ab NAHI dikhti
+        # (user request — saaf look). Objects zinda hain: filter "All" par hi
+        # rehta hai, Recent sidebar me hai, Grid ki setting yaad rehti hai.
+        self.files_filter.hide()
+        self.btn_recent.hide()
+        self.btn_grid.hide()
         # Abhi kis folder me ho — chhoti si patti (breadcrumb) + uske saamne ⭐
         # (abhi khule folder ko seedhe favourite banao/hatao)
         _cwdrow = QtWidgets.QHBoxLayout(); _cwdrow.setSpacing(4); _cwdrow.setContentsMargins(0, 0, 0, 0)
