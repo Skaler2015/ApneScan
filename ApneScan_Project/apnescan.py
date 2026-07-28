@@ -243,7 +243,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "207"
+VERSION = "208"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3335,34 +3335,38 @@ class ImageEditor(QtWidgets.QDialog):
 
     _FONTS = ("nirmala.ttf", "arial.ttf", "DejaVuSans.ttf", "Arial.ttf")
     _QSS = """
-    QDialog { background:#eef2f6; }
-    QLabel#hdr { color:#0f172a; font-weight:700; font-size:13px; }
+    QDialog { background:#F4F5FA; }
+    QLabel#hdr { color:#1A1D29; font-weight:700; font-size:13px; }
+    QFrame#topbar { background:#ffffff; border-radius:12px; }
     QFrame#rail { background:#ffffff; border-radius:12px; }
     QFrame#side { background:#ffffff; border-radius:12px; }
     QFrame#strip { background:#ffffff; border-radius:12px; }
-    QLabel.grp { color:#64748b; font-size:10px; font-weight:700; letter-spacing:1px; }
-    QToolButton.tool { border:none; border-radius:10px; padding:7px 3px; color:#334155;
+    QFrame#vsep { background:#E7E9F2; }
+    QLabel.grp { color:#8A8FA3; font-size:10px; font-weight:700; letter-spacing:1px; }
+    QLabel.gcap { color:#B4B8C9; font-size:8px; font-weight:700; letter-spacing:1px; }
+    QLabel#status { color:#6B7280; font-size:10px; }
+    QToolButton.tool { border:none; border-radius:10px; padding:7px 3px; color:#3A3F52;
                        font-size:10px; background:transparent; }
-    QToolButton.tool:hover { background:#e6eef0; }
-    QToolButton.tool:checked { background:#4F46E5; color:#ffffff; }
-    QToolButton.act { border:1px solid #e2e8f0; border-radius:9px; padding:5px 7px;
-                      color:#334155; font-size:11px; background:#fff; }
-    QToolButton.act:hover { border-color:#4F46E5; color:#4F46E5; background:#f0fdfa; }
-    QToolButton.ai { border:1px solid #c7d2fe; border-radius:9px; padding:5px 7px;
-                     color:#4338CA; font-size:11px; font-weight:600; background:#eef2ff; }
-    QToolButton.ai:hover { border-color:#4F46E5; background:#e0e7ff; }
-    QPushButton#primary { background:#4F46E5; color:#fff; border:none; border-radius:9px;
+    QToolButton.tool:hover { background:#EFECFF; color:#5B4BD6; }
+    QToolButton.tool:checked { background:#6A5AE0; color:#ffffff; }
+    QToolButton.act { border:1px solid #E5E7F0; border-radius:9px; padding:5px 7px;
+                      color:#3A3F52; font-size:11px; background:#fff; }
+    QToolButton.act:hover { border-color:#6A5AE0; color:#6A5AE0; background:#F4F2FF; }
+    QToolButton.ai { border:1px solid #D6CFFB; border-radius:9px; padding:5px 7px;
+                     color:#5B4BD6; font-size:11px; font-weight:600; background:#EFECFF; }
+    QToolButton.ai:hover { border-color:#6A5AE0; background:#E4DEFF; }
+    QPushButton#primary { background:#6A5AE0; color:#fff; border:none; border-radius:9px;
                           padding:8px 16px; font-weight:700; }
-    QPushButton#primary:hover { background:#4338CA; }
-    QPushButton#ghost { background:#fff; color:#334155; border:1px solid #cbd5e1;
+    QPushButton#primary:hover { background:#5A4AD0; }
+    QPushButton#ghost { background:#fff; color:#3A3F52; border:1px solid #D7DAE6;
                         border-radius:9px; padding:8px 14px; }
-    QPushButton#ghost:hover { border-color:#4F46E5; color:#4F46E5; }
-    QPushButton#accent { background:#f59e0b; color:#1f2937; border:none; border-radius:9px;
-                         padding:7px 14px; font-weight:700; }
-    QPushButton#accent:hover { background:#d97706; color:#fff; }
-    QSlider::groove:horizontal { height:5px; background:#e2e8f0; border-radius:3px; }
-    QSlider::handle:horizontal { background:#4F46E5; width:14px; margin:-5px 0; border-radius:7px; }
-    QScrollArea#cv { background:#334155; border:none; border-radius:12px; }
+    QPushButton#ghost:hover { border-color:#6A5AE0; color:#6A5AE0; }
+    QPushButton#accent { background:#EFECFF; color:#5B4BD6; border:1px solid #D6CFFB;
+                         border-radius:9px; padding:7px 14px; font-weight:700; }
+    QPushButton#accent:hover { background:#E4DEFF; border-color:#6A5AE0; }
+    QSlider::groove:horizontal { height:5px; background:#E7E9F2; border-radius:3px; }
+    QSlider::handle:horizontal { background:#6A5AE0; width:14px; margin:-5px 0; border-radius:7px; }
+    QScrollArea#cv { background:#2B2F3A; border:none; border-radius:12px; }
     QListWidget { border:none; background:transparent; }
     """
 
@@ -3375,7 +3379,7 @@ class ImageEditor(QtWidgets.QDialog):
         L = win.L
         self.L = L
         self.setWindowTitle(L("🎨 Document editor", "🎨 Document editor"))
-        self.resize(1180, 900)
+        self.resize(1300, 900)
         self.setStyleSheet(self._QSS)
         try:
             self.row = self.win.list.currentRow()
@@ -3401,37 +3405,79 @@ class ImageEditor(QtWidgets.QDialog):
         root = QtWidgets.QVBoxLayout(self)
         root.setContentsMargins(10, 8, 10, 8); root.setSpacing(8)
 
-        # ---------- TOP HEADER ----------
-        top = QtWidgets.QHBoxLayout(); top.setSpacing(6)
+        # ---------- TOP TOOLBAR (v207 redesign — groups + captions) ----------
+        tf = QtWidgets.QFrame(); tf.setObjectName("topbar")
+        top = QtWidgets.QHBoxLayout(tf); top.setContentsMargins(10, 4, 10, 5); top.setSpacing(4)
+
+        def tsep():
+            s = QtWidgets.QFrame(); s.setObjectName("vsep"); s.setFixedWidth(1)
+            top.addWidget(s)
+
+        def tgrp(caption, widgets):
+            w = QtWidgets.QWidget(); v = QtWidgets.QVBoxLayout(w)
+            v.setContentsMargins(4, 0, 4, 0); v.setSpacing(1)
+            cap = QtWidgets.QLabel(caption); cap.setProperty("class", "gcap")
+            cap.setAlignment(QtCore.Qt.AlignHCenter)
+            h = QtWidgets.QHBoxLayout(); h.setSpacing(3)
+            for x in widgets:
+                h.addWidget(x)
+            v.addWidget(cap); v.addLayout(h)
+            top.addWidget(w)
+
+        def tbtn(txt, tip, fn):
+            b = QtWidgets.QToolButton(); b.setText(txt); b.setToolTip(tip)
+            b.setProperty("class", "act"); b.clicked.connect(fn)
+            return b
+
+        def aibt(txt, tip, fn):
+            b = QtWidgets.QToolButton(); b.setText(txt); b.setToolTip(tip)
+            b.setProperty("class", "ai"); b.clicked.connect(fn)
+            return b
+
         self.lbl_hdr = QtWidgets.QLabel(""); self.lbl_hdr.setObjectName("hdr")
         top.addWidget(self.lbl_hdr)
         top.addStretch(1)
-        bfix = QtWidgets.QPushButton("✨ " + L("Auto-Fix", "Auto-Fix")); bfix.setObjectName("accent")
-        bfix.setToolTip(L("Seedha + crop + saaf + whiten — sab ek saath",
-                          "Straighten + crop + enhance + whiten — all at once"))
-        bfix.clicked.connect(self._auto_fix)
-        bmagic = QtWidgets.QPushButton("🪄 " + L("Magic", "Magic")); bmagic.setObjectName("ghost")
-        bmagic.setToolTip(L("Scanner jaisa: background pura safed, akshar gehre-saaf",
-                            "Scanner-clean: pure white background, crisp dark text"))
-        bmagic.clicked.connect(self._magic_color)
-        bup = QtWidgets.QPushButton("🔤 " + L("Auto-seedha", "Auto-upright")); bup.setObjectName("ghost")
-        bup.setToolTip(L("Text padhkar ulta/tirchha page seedha karo",
-                         "Use OCR to turn a sideways page upright"))
-        bup.clicked.connect(self._auto_upright)
-        top.addWidget(bfix); top.addWidget(bmagic); top.addWidget(bup)
-        top.addSpacing(10)
-        for ic, tip, fn in (("➖", L("Zoom kam", "Zoom out"), lambda: self._set_zoom(self.zoom / 1.25)),
-                            ("🔳", L("Fit", "Fit"), lambda: self._set_zoom(1.0)),
-                            ("➕", L("Zoom zyada", "Zoom in"), lambda: self._set_zoom(self.zoom * 1.25)),
-                            ("⛶", L("Poori screen", "Fullscreen"), self._toggle_full)):
-            b = QtWidgets.QToolButton(); b.setText(ic); b.setToolTip(tip)
-            b.setProperty("class", "act"); b.clicked.connect(fn); top.addWidget(b)
+        tgrp("HISTORY", [tbtn("↶", L("Undo", "Undo"), self._undo_last),
+                         tbtn("↷", L("Redo", "Redo"), self._redo_last)])
+        tsep()
+        bfix = aibt("✨ " + L("Auto-Fix", "Auto-Fix"),
+                    L("Seedha + crop + saaf + whiten — sab ek saath",
+                      "Straighten + crop + enhance + whiten — all at once"), self._auto_fix)
+        bmagic = aibt("🪄 " + L("Magic", "Magic"),
+                      L("Scanner jaisa: background pura safed, akshar gehre-saaf",
+                        "Scanner-clean: pure white background, crisp dark text"), self._magic_color)
+        bup = aibt("🔤 " + L("Auto-seedha", "Auto-upright"),
+                   L("Text padhkar ulta/tirchha page seedha karo",
+                     "Use OCR to turn a sideways page upright"), self._auto_upright)
+        tgrp("AI", [bfix, bmagic, bup])
+        tsep()
+        self.lbl_zoom = QtWidgets.QLabel("100%")
+        self.lbl_zoom.setStyleSheet("font-size:11px;color:#3A3F52;font-weight:600;")
+        self.lbl_zoom.setAlignment(QtCore.Qt.AlignCenter); self.lbl_zoom.setFixedWidth(36)
+        tgrp("ZOOM", [tbtn("➖", L("Zoom kam", "Zoom out"), lambda: self._set_zoom(self.zoom / 1.25)),
+                      self.lbl_zoom,
+                      tbtn("➕", L("Zoom zyada", "Zoom in"), lambda: self._set_zoom(self.zoom * 1.25)),
+                      tbtn("🔳", L("Fit", "Fit"), lambda: self._set_zoom(1.0)),
+                      tbtn("⛶", L("Poori screen", "Fullscreen"), self._toggle_full)])
+        tsep()
         self.btn_ba = QtWidgets.QToolButton(); self.btn_ba.setText("👁 " + L("Pehle", "Before"))
         self.btn_ba.setCheckable(True); self.btn_ba.setProperty("class", "act")
         self.btn_ba.setToolTip(L("Dabao — original dikhega (pehle/baad)", "Toggle to see the original"))
         self.btn_ba.toggled.connect(self._toggle_before)
-        top.addWidget(self.btn_ba)
-        root.addLayout(top)
+        tgrp("PREVIEW", [self.btn_ba])
+        tsep()
+        bprint = QtWidgets.QPushButton("🖨 " + L("Print", "Print")); bprint.setObjectName("ghost")
+        bprint.clicked.connect(self._print)
+        bpdf = QtWidgets.QPushButton("📄 " + L("Poora PDF", "Save all PDF")); bpdf.setObjectName("ghost")
+        bpdf.clicked.connect(self._save_all_pdf)
+        bsaveas = QtWidgets.QPushButton("⇩ " + L("Alag", "Save as")); bsaveas.setObjectName("ghost")
+        bsaveas.clicked.connect(self._save_as)
+        bsave = QtWidgets.QPushButton("💾 " + L("Save", "Save")); bsave.setObjectName("primary")
+        bsave.clicked.connect(self._save)
+        bclose = QtWidgets.QPushButton("✖"); bclose.setObjectName("ghost"); bclose.clicked.connect(self.reject)
+        for b in (bprint, bpdf, bsaveas, bsave, bclose):
+            top.addWidget(b)
+        root.addWidget(tf)
 
         # ---------- MIDDLE: rail | canvas | side ----------
         mid = QtWidgets.QHBoxLayout(); mid.setSpacing(8)
@@ -3743,18 +3789,11 @@ class ImageEditor(QtWidgets.QDialog):
         bmore = QtWidgets.QPushButton("⋯ " + L("Aur", "More")); bmore.setObjectName("ghost")
         bmore.clicked.connect(self._more_menu)
         bot.addWidget(bmore)
-        bprint = QtWidgets.QPushButton("🖨 " + L("Print", "Print")); bprint.setObjectName("ghost")
-        bprint.clicked.connect(self._print)
-        bpdf = QtWidgets.QPushButton("📄 " + L("Poora PDF", "Save all PDF")); bpdf.setObjectName("ghost")
-        bpdf.clicked.connect(self._save_all_pdf)
-        bsaveas = QtWidgets.QPushButton("⇩ " + L("Alag", "Save as")); bsaveas.setObjectName("ghost")
-        bsaveas.clicked.connect(self._save_as)
-        bsave = QtWidgets.QPushButton("💾 " + L("Save", "Save")); bsave.setObjectName("primary")
-        bsave.clicked.connect(self._save)
-        bclose = QtWidgets.QPushButton("✖"); bclose.setObjectName("ghost"); bclose.clicked.connect(self.reject)
-        for b in (bprint, bpdf, bsaveas, bsave, bclose):
-            bot.addWidget(b)
         root.addLayout(bot)
+
+        # ---------- STATUS BAR (v207 redesign) ----------
+        self.lbl_status = QtWidgets.QLabel(""); self.lbl_status.setObjectName("status")
+        root.addWidget(self.lbl_status)
 
         self._load_current(initial=True)
         self._build_film()
@@ -3817,6 +3856,29 @@ class ImageEditor(QtWidgets.QDialog):
         self.canvas.setPixmap(self._pil_to_qpix(img.resize((dw, dh))))
         self.canvas.setFixedSize(dw, dh)
         self.canvas.update()
+        # (v207) zoom % + status bar
+        try:
+            self.lbl_zoom.setText("%d%%" % int(round(self.zoom * 100)))
+        except Exception:
+            pass
+        try:
+            parts = ["● " + self.L("Taiyaar", "Ready"), "%d × %d px" % (w, h)]
+            try:
+                d = (self.base.info.get("dpi") or (0,))[0]
+                if d:
+                    parts.append("%d DPI" % int(round(d)))
+            except Exception:
+                pass
+            n = self.win.list.count()
+            if self.row >= 0 and n:
+                parts.append("Page %d/%d" % (self.row + 1, n))
+            if self.tool:
+                parts.append(self.L("Tool: %s", "Tool: %s") % self.tool)
+            if self.show_original:
+                parts.append(self.L("PEHLE (original) dikh raha hai", "Showing ORIGINAL"))
+            self.lbl_status.setText("    ·    ".join(parts))
+        except Exception:
+            pass
 
     def _set_zoom(self, z):
         self.zoom = max(0.2, min(6.0, z)); self._render()
