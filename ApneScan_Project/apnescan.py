@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "190"
+VERSION = "191"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -12621,6 +12621,10 @@ if the toggle is ticked).</p>
             "or claim number. Turn on, then search again."))
         self.btn_search_text.toggled.connect(lambda _c: self._files_search_timer.start())
         _srow.addWidget(self.btn_search_text)
+        # (v191) 📄 button ki jagah ab yahan ⇅ Sort aata hai (user request);
+        # PDF-ke-andar-search ka object zinda hai, bas chhupa
+        self.btn_search_text.hide()
+        self._files_srow = _srow
         fp.addLayout(_srow)
         # ⬅ Peeche · ⭐ Favourites (dropdown) · ⇅ Sort
         self.fav_bar = QtWidgets.QHBoxLayout()
@@ -12662,7 +12666,8 @@ if the toggle is ticked).</p>
         # (v190) ⬅ Back button bhi hata diya (user request) — upar jaane ke
         # liye breadcrumb / double-click hi kaafi hai; object zinda hai
         self.btn_panel_back.hide()
-        self.fav_bar.addWidget(self.btn_panel_sort)
+        # (v191) Sort ab UPAR search ke bagal me (📄 ki jagah) — fav_bar khaali
+        self._files_srow.addWidget(self.btn_panel_sort)
         fp.addLayout(self.fav_bar)
         # ---- Filter · Recent · Grid (quick controls) ----
         _qrow = QtWidgets.QHBoxLayout(); _qrow.setSpacing(4)
