@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "200"
+VERSION = "201"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -7393,7 +7393,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             "dpi_600": lambda: self._scan_at_dpi(600),
             "dpi_custom": self._scan_at_dpi_custom,
             "import": self.import_images,
-            "rename": self.rename_current_page,
+            "rename": self._rename_shortcut,
             "save_all": self.save_pdf_all,
             "save_sel": self.save_pdf_selected,
             "save_pw": self.save_pdf_password,
@@ -12993,10 +12993,9 @@ if the toggle is ticked).</p>
         self.files_tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.files_tree.customContextMenuRequested.connect(self._files_tree_menu)
         self.files_tree.selectionModel().currentChanged.connect(self._files_sel_changed)
-        # (v196) F2 = rename — sirf jab focus My Files panel me ho
-        _f2 = QtWidgets.QShortcut(QtGui.QKeySequence("F2"), self.files_tree,
-                                  self._panel_rename_current)
-        _f2.setContext(QtCore.Qt.WidgetWithChildrenShortcut)
+        # (v201) F2 ab GLOBAL dispatcher se aata hai (_rename_shortcut) —
+        # v196 wala widget-shortcut global F2 se TAKRA kar dono ko rok deta
+        # tha (Qt ambiguous shortcut), isliye hata diya
         # ✨ (v192) PREMIUM card-view: har row ek card (mockup jaisa)
         self._fcnt_cache = {}
         self.files_tree.setItemDelegate(FilesCardDelegate(self, self.files_tree))
@@ -15676,8 +15675,25 @@ if the toggle is ticked).</p>
             pass
 
     def _print_library_file(self, path):
-        """Saved file ko seedha print par bhejo (default app se)."""
+        """(v201) Saved file APNE print-dialog se — printer/copies/pages
+        chunne ke poore option ke saath (pehle seedha default printer par
+        chala jaata tha, kuch pooche bina)."""
         try:
+            ext = os.path.splitext(path)[1].lower()
+            if ext == ".pdf":
+                self.status.showMessage(self.L("PDF ke pages taiyaar ho rahe hain…",
+                                               "Preparing PDF pages…"), 0)
+                QtWidgets.QApplication.processEvents()
+                pages = pdf_to_images(path, self._tmpdir, dpi=200) or []
+                self.status.showMessage("", 1)
+                if pages:
+                    self._do_print(pages)
+                    return
+            elif ext in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"):
+                self._do_print([path])
+                return
+            # PDF pages nahi ban paye ya Word/Excel jaisa format —
+            # purana raasta: system se print
             os.startfile(path, "print")
             self.status.showMessage(self.L("🖨 Print par bhej diya", "🖨 Sent to printer"), 4000)
         except Exception:
@@ -16668,6 +16684,19 @@ if the toggle is ticked).</p>
                 json.dump(items, fh, ensure_ascii=False)
         except Exception:
             pass
+
+    def _rename_shortcut(self):
+        """(v201) F2 — jahan FOCUS wahan rename: My Files panel me ho to
+        file/folder ka naam, warna thumbnail page ka naam."""
+        try:
+            fw = QtWidgets.QApplication.focusWidget()
+            ft = getattr(self, "files_tree", None)
+            if ft is not None and fw is not None and (fw is ft or ft.isAncestorOf(fw)):
+                self._panel_rename_current()
+                return
+        except Exception:
+            pass
+        self.rename_current_page()
 
     def _panel_rename_current(self):
         """(v196) My Files me F2 — chuni file YA folder ka naam badlo."""
