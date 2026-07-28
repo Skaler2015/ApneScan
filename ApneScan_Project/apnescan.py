@@ -241,7 +241,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "205"
+VERSION = "206"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -558,7 +558,7 @@ DEFAULT_OPTIONS = {
     "preview_panel_w": 310,       # preview panel width
     "ui_filmstrip": True,         # preview panel me niche filmstrip
     "show_ad_footer": True,       # sabse niche footer ad (official + ApneSoftware.com)
-    "ui_analytics": True,         # sidebar me analytics card
+    "ui_analytics": False,        # analytics card (v206: default band — sidebar ka Analytics hai)
     "ui_confirm_delete": True,    # delete se pehle pucho
     "footer_folder": True,        # status-bar: folder
     "footer_pages": True,         # status-bar: pages/selection
@@ -6570,6 +6570,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
             _lo = self._config.get("options")
             if isinstance(_lo, dict):
                 _lo["ui_header"] = False
+            try:
+                save_config(self._config)
+            except Exception:
+                pass
+        # v206: preview ke neeche ki ApneScan stats-card ek baar sab par band
+        # (user request) — Analytics ab sidebar se khulta hai; Settings ke
+        # ui_analytics checkbox se wapas on ho sakti hai
+        if not self._config.get("layout_v206"):
+            self._config["layout_v206"] = True
+            _lo = self._config.get("options")
+            if isinstance(_lo, dict):
+                _lo["ui_analytics"] = False
             try:
                 save_config(self._config)
             except Exception:
@@ -13327,6 +13339,9 @@ if the toggle is ticked).</p>
         _infhdr = QtWidgets.QLabel(self.L("<b>File info</b>", "<b>File info</b>"))
         _infhdr.setStyleSheet("color:#111827;font-size:12px;font-weight:700;margin-top:2px;")
         pv.addWidget(_infhdr)
+        # (v206) File-info wala hissa ab NAHI dikhta (user request) — poori
+        # jaankari waise bhi page ke hover-tooltip aur editor me milti hai
+        _infhdr.hide()
         self.pv_info = QtWidgets.QLabel("")
         self.pv_info.setTextFormat(QtCore.Qt.RichText)
         self.pv_info.setWordWrap(True)
@@ -13336,6 +13351,7 @@ if the toggle is ticked).</p>
             "color:#374151;font-size:11px;padding:9px 11px;background:#F9FAFB;"
             "border:1px solid #E5E7EB;border-radius:12px;")
         pv.addWidget(self.pv_info)
+        self.pv_info.hide()      # (v206) user request — box ab nahi dikhta
         # 'Info' ab alag tab me nahi — saari jaankari isi label me. Upar wale
         # sabhi pv_info2.setText(...) ab seedha isi complete-info par jaate hain.
         self.pv_info2 = self.pv_info
