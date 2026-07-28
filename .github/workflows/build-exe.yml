@@ -32,7 +32,7 @@ jobs:
       - name: Build EXE with PyInstaller
         working-directory: ApneScan_Project
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name "ApneScan" --icon apnescan.ico --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes --hidden-import PyQt5.QtMultimedia --hidden-import PyQt5.QtMultimediaWidgets --hidden-import PyQt5.QtNetwork --hidden-import qrcode --hidden-import qrcode.image.pil apnescan.py
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name "ApneScan" --icon apnescan.ico --add-data "apnescan.ico;." --add-data "apnescan_icon.png;." --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes --hidden-import PyQt5.QtMultimedia --hidden-import PyQt5.QtMultimediaWidgets --hidden-import PyQt5.QtNetwork --hidden-import qrcode --hidden-import qrcode.image.pil apnescan.py
 
       # (v205) Tesseract ko installer ke SAATH bundle karo — user ko alag
       # install nahi karna padta; auto-rotate/OCR/naam-padhna turant chalta
