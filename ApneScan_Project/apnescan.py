@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "196"
+VERSION = "197"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5541,9 +5541,27 @@ class FilesCardDelegate(QtWidgets.QStyledItemDelegate):
             p.setPen(QtCore.Qt.NoPen)
             p.setBrush(QtGui.QColor("#2563EB"))
             p.drawRoundedRect(QtCore.QRectF(r.left() - 1, r.top() + 10, 3.5, r.height() - 20), 2, 2)
-        # (v195) user request: gol icon aur ⭐ hata diye — card me sirf naam
-        # + neeche date/size; row aur bhi saaf/halki
-        x = r.left() + 12
+        # (v195) bada gol icon + ⭐ hataye the; (v197) folder/file ka FARK
+        # dikhane ke liye chhota FLAT nishaan wapas: amber folder / gray page
+        x = r.left() + 10
+        cy = r.center().y()
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        if isdir:
+            p.setPen(QtCore.Qt.NoPen)
+            p.setBrush(QtGui.QColor("#FBBF24"))
+            p.drawRoundedRect(QtCore.QRectF(x, cy - 6.5, 6, 3.5), 1, 1)      # tab
+            p.drawRoundedRect(QtCore.QRectF(x, cy - 4.5, 15, 11), 2, 2)      # body
+            p.setBrush(QtGui.QColor("#F59E0B"))
+            p.drawRoundedRect(QtCore.QRectF(x, cy - 2, 15, 8.5), 2, 2)       # front
+        else:
+            p.setPen(QtGui.QPen(QtGui.QColor("#9CA3AF"), 1.4))
+            p.setBrush(QtGui.QColor("#FFFFFF"))
+            p.drawRoundedRect(QtCore.QRectF(x + 2, cy - 7, 11, 14), 2, 2)
+            p.setPen(QtGui.QPen(QtGui.QColor("#C7CDD6"), 1.2))
+            p.drawLine(QtCore.QPointF(x + 4.5, cy - 2.5), QtCore.QPointF(x + 10.5, cy - 2.5))
+            p.drawLine(QtCore.QPointF(x + 4.5, cy + 0.5), QtCore.QPointF(x + 10.5, cy + 0.5))
+            p.drawLine(QtCore.QPointF(x + 4.5, cy + 3.5), QtCore.QPointF(x + 8.5, cy + 3.5))
+        x += 22
         f = QtGui.QFont(opt.font)
         # right: sirf ⋮ (v193: NEW/Recent pill + DP/SC badge hata diye)
         p.setPen(QtGui.QColor("#9CA3AF"))
