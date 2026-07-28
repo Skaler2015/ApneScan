@@ -46,7 +46,7 @@ from apnescan_lib.imaging import (
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
     ai_auto_enhance, ai_color_restore, ai_denoise, ai_smart_crop, ai_deskew,
-    ai_auto_all,
+    ai_auto_all, ai_inpaint_region,
 )
 # Smart Orientation engine. auto_orient is the only entry point the pipeline
 # calls; the app's cached tesseract_available() is injected into the module a
@@ -243,7 +243,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "208"
+VERSION = "209"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3499,6 +3499,9 @@ class ImageEditor(QtWidgets.QDialog):
             ("box", "🖍", L("Mark", "Mark"), L("Peela highlight", "Highlight")),
             ("redact", "🖤", L("Chhupao", "Redact"), L("Kaala box (jaankari sach me mit jaati hai)", "Black box (data truly erased)")),
             ("blur", "🌫", L("Dhundhla", "Blur"), L("Chehra/jaankari dhundhli", "Blur an area")),
+            ("heal", "🩹", L("Daag mitao", "Heal"),
+             L("AI: ungli/daag/nishaan par box kheencho — aas-paas se bhar jayega",
+               "AI: drag over a finger/stain — filled from the surroundings")),
             ("note", "🗒", L("Note", "Note"), L("Chipakne wala peela note", "Sticky note")),
             ("stamp", "✔", L("Mohar", "Stamp"), L("Tick / cross / star / date", "Tick / cross / star / date")),
             ("sign", "✍", L("Sign", "Sign"), L("Sign/mohar", "Signature/stamp")),
@@ -3729,6 +3732,11 @@ class ImageEditor(QtWidgets.QDialog):
         self.chk_searchable = QtWidgets.QCheckBox(L("PDF me text bhi (khoja ja sake)",
                                                     "Searchable PDF (embed text)"))
         self.chk_searchable.setStyleSheet("font-size:11px;color:#475569;")
+        try:
+            # (v209) Settings ki 'searchable_pdf' setting yahan default bane
+            self.chk_searchable.setChecked(bool(self.win._opts.get("searchable_pdf")))
+        except Exception:
+            pass
         sv.addWidget(self.chk_searchable)
 
         # ---- kis-kis page par lage ----
@@ -3950,7 +3958,7 @@ class ImageEditor(QtWidgets.QDialog):
         if t == "pan":
             self._panning = True; self._pan_ref = pos
             self.canvas.setCursor(QtCore.Qt.ClosedHandCursor)
-        elif t in ("crop", "arrow", "line", "box", "redact", "rect", "circle", "blur"):
+        elif t in ("crop", "arrow", "line", "box", "redact", "rect", "circle", "blur", "heal"):
             self._start = pos; self._cur = pos
         elif t == "erase":
             self._bake(); self._erasing = True; self._erase_at(pos)
@@ -4002,6 +4010,8 @@ class ImageEditor(QtWidgets.QDialog):
                 self._apply_circle(self._start, pos)
             elif t == "blur":
                 self._apply_blur(self._start, pos)
+            elif t == "heal":
+                self._apply_heal(self._start, pos)
         if self._panning:
             self.canvas.setCursor(QtCore.Qt.OpenHandCursor)
         self._start = self._cur = None
@@ -4122,6 +4132,24 @@ class ImageEditor(QtWidgets.QDialog):
         reg = self.base.crop((x0, y0, x1, y1))
         small = reg.resize((max(1, reg.width // 14), max(1, reg.height // 14)))
         self.base.paste(small.resize(reg.size), (x0, y0))
+        self._render()
+
+    def _apply_heal(self, a, b):
+        # (v209 charan 2) AI inpaint: daag/ungli ke upar box — aas-paas se fill
+        x0, y0 = self._d2i(a); x1, y1 = self._d2i(b)
+        x0, x1 = sorted((x0, x1)); y0, y1 = sorted((y0, y1))
+        if x1 - x0 < 6 or y1 - y0 < 6:
+            return
+        try:
+            self.win._ev_push("edit:ai-heal")
+        except Exception:
+            pass
+        self._bake()
+        self.setCursor(QtCore.Qt.WaitCursor)
+        try:
+            self.base = ai_inpaint_region(self.base, (x0, y0, x1, y1)).convert("RGB")
+        finally:
+            self.unsetCursor()
         self._render()
 
     def _place_text(self, pos):

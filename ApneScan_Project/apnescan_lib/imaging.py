@@ -51,6 +51,7 @@ __all__ = [
     "ai_smart_crop",
     "ai_deskew",
     "ai_auto_all",
+    "ai_inpaint_region",
     "save_image_keep_ext",
     "apply_watermark",
     "enhance_image",
@@ -1040,6 +1041,85 @@ def ai_deskew(img):
             return img
         return img.rotate(best_angle, resample=Image.BICUBIC,
                           fillcolor=(255, 255, 255), expand=True)
+    except Exception:
+        return img
+
+
+def ai_inpaint_region(img, box):
+    """(v209 charan 2) Daag/ungli mitao — chuna hua box aas-paas ke rang se
+    bhar jaata hai (multi-scale harmonic/diffusion inpainting, sirf numpy).
+    Documents par ungli ka kona, staple/punch ke nishaan, daag ke liye.
+    Smooth background par bilkul gayab; texture par halka soft fill."""
+    try:
+        rgb = img.convert("RGB")
+        if not HAS_NUMPY:
+            return rgb
+        x0, y0, x1, y1 = [int(v) for v in box]
+        x0 = max(0, x0); y0 = max(0, y0)
+        x1 = min(rgb.width, x1); y1 = min(rgb.height, y1)
+        if x1 - x0 < 3 or y1 - y0 < 3:
+            return rgb
+        # patch = box + aas-paas ka ring (source pixels)
+        pad = max(10, (x1 - x0 + y1 - y0) // 6)
+        px0 = max(0, x0 - pad); py0 = max(0, y0 - pad)
+        px1 = min(rgb.width, x1 + pad); py1 = min(rgb.height, y1 + pad)
+        patch = rgb.crop((px0, py0, px1, py1))
+        a = np.asarray(patch, dtype=np.float32).copy()
+        m = np.zeros(a.shape[:2], dtype=bool)
+        hy0, hy1 = y0 - py0, y1 - py0
+        hx0, hx1 = x0 - px0, x1 - px0
+        m[hy0:hy1, hx0:hx1] = True
+        ring = a[~m]
+        if ring.size == 0:
+            return rgb
+        # 4-kinaron se interpolation: text-line jo hole ke aar-paar jaati hai
+        # wo left↔right interpolation me bach jaati hai (sirf diffusion me
+        # dhul jaati thi). Kinare ke paas uska weight zyada (inverse-distance).
+        hh, hw = hy1 - hy0, hx1 - hx0
+        Lv = a[hy0:hy1, hx0 - 1] if hx0 > 0 else None          # left boundary col
+        Rv = a[hy0:hy1, hx1] if hx1 < a.shape[1] else None      # right boundary col
+        Tv = a[hy0 - 1, hx0:hx1] if hy0 > 0 else None           # top boundary row
+        Bv = a[hy1, hx0:hx1] if hy1 < a.shape[0] else None      # bottom boundary row
+        cc = np.arange(hw, dtype=np.float32)
+        rr = np.arange(hh, dtype=np.float32)
+        tx = ((cc + 1.0) / (hw + 1.0))[None, :, None]
+        ty = ((rr + 1.0) / (hh + 1.0))[:, None, None]
+        if Lv is not None and Rv is not None:
+            horiz = Lv[:, None, :] * (1.0 - tx) + Rv[:, None, :] * tx
+        else:
+            horiz = (Lv if Lv is not None else Rv)
+            horiz = None if horiz is None else np.repeat(horiz[:, None, :], hw, axis=1)
+        if Tv is not None and Bv is not None:
+            vert = Tv[None, :, :] * (1.0 - ty) + Bv[None, :, :] * ty
+        else:
+            vert = (Tv if Tv is not None else Bv)
+            vert = None if vert is None else np.repeat(vert[None, :, :], hh, axis=0)
+        if horiz is None and vert is None:
+            a[m] = np.median(ring.reshape(-1, 3), axis=0)
+        elif vert is None:
+            fill = horiz
+            if Lv is not None and Rv is not None and Tv is None and Bv is None:
+                pass                      # horiz hi sab kuch carry karta hai
+            a[hy0:hy1, hx0:hx1] = fill
+        else:
+            # base = upar-neeche ka smooth interpolation (khadi rekha/feature
+            # apne aap columns ke raaste carry hoti hai)
+            fill = vert.copy()
+            if Lv is not None and Rv is not None:
+                # left-right RESIDUAL carry: aar-paar jaati text-line/rekha
+                # (jo base me nahi hai) poori taakat se hole ke paar jaaye
+                rL = (Lv - fill[:, 0, :])[:, None, :]
+                rR = (Rv - fill[:, -1, :])[:, None, :]
+                fill = fill + rL * (1.0 - tx) + rR * tx
+            a[hy0:hy1, hx0:hx1] = np.clip(fill, 0.0, 255.0)
+        # bahut halki diffusion — sirf seams naram (structure na dhule)
+        for _ in range(8):
+            p = np.pad(a, ((1, 1), (1, 1), (0, 0)), mode="edge")
+            nb = (p[:-2, 1:-1] + p[2:, 1:-1] + p[1:-1, :-2] + p[1:-1, 2:]) / 4.0
+            a[m] = a[m] * 0.70 + nb[m] * 0.30
+        out = rgb.copy()
+        out.paste(Image.fromarray(np.clip(a, 0, 255).astype(np.uint8)), (px0, py0))
+        return out
     except Exception:
         return img
 
