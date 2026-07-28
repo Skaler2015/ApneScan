@@ -1489,6 +1489,7 @@ if (isset($_GET['admin'])) {
   <div class="nlab">Portal</div>
   <button class="tab" data-p="overview"><span class="tic">🏠</span> Dashboard</button>
   <button class="tab" data-p="live"><span class="tic">🟢</span> Live Monitoring</button>
+  <button class="tab jump2" data-p="useract"><span class="tic">📜</span> User Activity</button>
   <button class="tab" data-p="users"><span class="tic">👥</span> Users</button>
   <button class="tab" data-p="hw"><span class="tic">🖨</span> Devices</button>
   <button class="tab" data-p="scans"><span class="tic">📄</span> Scans</button>
@@ -1506,7 +1507,6 @@ if (isset($_GET['admin'])) {
   <div class="nlab">More analytics</div>
   <button class="tab jump2" data-p="growth"><span class="tic">🔁</span> Growth</button>
   <button class="tab jump2" data-p="devices"><span class="tic">🌍</span> Activity Feed</button>
-  <button class="tab jump2" data-p="useract"><span class="tic">📜</span> User Activity</button>
   <button class="tab jump2" data-p="tools"><span class="tic">🧰</span> Tools &amp; Impact</button>
   <button class="tab jump2" data-p="ideas"><span class="tic">💡</span> Suggestions</button>
   <button class="tab jump2" data-p="system"><span class="tic">🖥</span> System</button>
@@ -1807,8 +1807,8 @@ if (isset($_GET['admin'])) {
     </div>
   </div>
   <div class="card" style="margin-bottom:13px"><h3><span class="em">👥</span> Har user ka saraansh <span style="color:var(--mut);font-weight:500;font-size:11px">— naam par click = us par filter</span></h3><div id="uaUsers" style="max-height:260px;overflow:auto"></div></div>
-  <div class="card" style="margin-bottom:13px"><h3><span class="em">🔥</span> Sabse zyada hue kaam</h3><div id="uaTop" style="max-height:340px;overflow:auto"></div></div>
-  <div class="card"><h3><span class="em">🕐</span> Kis ghante kitna kaam</h3><div id="uaHours"></div></div>
+  <div class="card" style="margin-bottom:13px"><h3><span class="em">🕐</span> Kis ghante kitna kaam</h3><div id="uaHours"></div></div>
+  <div class="card"><h3><span class="em">🔥</span> Sabse zyada hue kaam</h3><div id="uaTop"></div></div>
   </div>
 
   </div><!-- /uaSplit -->
@@ -3245,10 +3245,8 @@ function uaRender(){ if(!document.getElementById('uaKpis'))return;
   var te=document.getElementById('uaTop');
   if(te)te.innerHTML=ta2.length?_tbl(ta2.map(function(r){
       return '<tr><td style="white-space:normal;word-break:break-word;font-size:11px">'+esc(r[0])+'</td>'
-        +'<td style="width:44px"><b>'+r[1]+'</b></td>'
-        +'<td style="width:34%;min-width:80px"><span class="bar" style="display:inline-block;width:'
-        +Math.max(4,Math.round(r[1]*100/mx))+'%;height:9px"></span></td></tr>'; }),
-      ['Kaam (poora naam)','Baar','—'])
+        +'<td style="width:52px;text-align:right"><b>'+r[1]+'</b></td></tr>'; }),
+      ['Kaam (poora naam)',''])
     :'<div style="color:var(--mut)">—</div>';
   // ---- hour bars ----
   var he=document.getElementById('uaHours');
