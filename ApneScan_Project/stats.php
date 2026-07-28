@@ -1799,7 +1799,7 @@ if (isset($_GET['admin'])) {
       <span id="tlPage" style="font-size:11px;color:var(--mut)">Page 1</span>
       <button class="btn gray" id="tlNext" onclick="tlGo(_tl.page+1)">Purane ▶</button>
     </div>
-    <div style="color:var(--mut);font-size:10px;margin-bottom:6px">💡 Sabse naya sabse upar · 100/page · 90 din tak · beech ki patti kheench kar chaudai badlo</div>
+    <div style="color:var(--mut);font-size:10px;margin-bottom:6px">💡 Sabse naya sabse upar · 50/page · 90 din tak · beech ki patti kheench kar chaudai badlo</div>
     <div id="tlList" style="flex:1;min-height:200px;overflow:auto"></div>
   </div>
   </div>
@@ -3170,7 +3170,7 @@ function uaCat(e){ var n=String(e||'');
 var _tl={page:0,total:0};
 function tlGo(p){ if(p<0)p=0; _tl.page=p;
   var q=((document.getElementById('tlQ')||{}).value||'').trim();
-  fetch('?admin=1&api=tl&off='+(p*100)+'&lim=100'+(q?'&q='+encodeURIComponent(q):''),{credentials:'same-origin'})
+  fetch('?admin=1&api=tl&off='+(p*50)+'&lim=50'+(q?'&q='+encodeURIComponent(q):''),{credentials:'same-origin'})
   .then(function(r){return r.json();}).then(function(j){
     if(!j||!j.ok)return; _tl.total=j.total||0;
     var el=document.getElementById('tlList'); if(!el)return;
@@ -3185,7 +3185,7 @@ function tlGo(p){ if(p<0)p=0; _tl.page=p;
         +'<div style="color:var(--mut);font-size:9px">'+d.toLocaleTimeString()+'</div></div></div>');
     });
     el.innerHTML=out.length?out.join(''):'<div style="color:var(--mut)">— kuch nahi mila —</div>';
-    var pages=Math.max(1,Math.ceil(_tl.total/100));
+    var pages=Math.max(1,Math.ceil(_tl.total/50));
     var pg=document.getElementById('tlPage'); if(pg)pg.textContent='Page '+(p+1)+' / '+pages;
     var inf=document.getElementById('tlInfo'); if(inf)inf.textContent='— kul '+fmt(_tl.total)+' events'+(q?' · "'+q+'"':'');
     var pv=document.getElementById('tlPrev'); if(pv)pv.disabled=(p<=0);
