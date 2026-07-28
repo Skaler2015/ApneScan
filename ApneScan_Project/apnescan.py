@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "195"
+VERSION = "196"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5202,27 +5202,9 @@ class LibraryModel(QtWidgets.QFileSystemModel):
 
     def data(self, index, role=QtCore.Qt.DisplayRole):
         if index.column() == 0:
-            if role == QtCore.Qt.DisplayRole:
-                try:
-                    fi = self.fileInfo(index)
-                    if fi.isFile():
-                        # QFileSystemModel ka cached size kabhi-kabhi 0/stale hota
-                        # hai (file abhi bani/likhi gayi ho). Isliye asli size
-                        # seedha disk se padho — taaki HAR file ka size sahi dikhe.
-                        sz = 0
-                        try:
-                            sz = os.path.getsize(self.filePath(index))
-                        except Exception:
-                            sz = 0
-                        if not sz:
-                            try:
-                                sz = int(fi.size())
-                            except Exception:
-                                sz = 0
-                        return "(%s) %s" % (self._fmt_size(sz), fi.fileName())
-                except Exception:
-                    pass
-            elif role == QtCore.Qt.ForegroundRole:
+            # (v196) naam ke aage "(size)" ab NAHI — size card ki neechli
+            # line me pehle se dikhta hai (user request: naam saaf rahe)
+            if role == QtCore.Qt.ForegroundRole:
                 try:
                     fi = self.fileInfo(index)
                     if fi.isFile() and fi.lastModified().date() == QtCore.QDate.currentDate():
@@ -12937,6 +12919,10 @@ if the toggle is ticked).</p>
         self.files_tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.files_tree.customContextMenuRequested.connect(self._files_tree_menu)
         self.files_tree.selectionModel().currentChanged.connect(self._files_sel_changed)
+        # (v196) F2 = rename — sirf jab focus My Files panel me ho
+        _f2 = QtWidgets.QShortcut(QtGui.QKeySequence("F2"), self.files_tree,
+                                  self._panel_rename_current)
+        _f2.setContext(QtCore.Qt.WidgetWithChildrenShortcut)
         # ✨ (v192) PREMIUM card-view: har row ek card (mockup jaisa)
         self._fcnt_cache = {}
         self.files_tree.setItemDelegate(FilesCardDelegate(self, self.files_tree))
@@ -15247,9 +15233,9 @@ if the toggle is ticked).</p>
         except Exception as exc:
             self._warn("Could not create folder:\n%s" % exc)
             return
+        # (v196) naya folder bante hi APNE AAP khul jaata hai
         try:
-            self.files_tree.setCurrentIndex(self.files_model.index(p))
-            self.files_tree.expand(self.files_model.index(base))
+            self._jump_to_folder(p)
         except Exception:
             pass
         self.status.showMessage("Folder created: %s" % os.path.basename(p), 4000)
@@ -15565,9 +15551,9 @@ if the toggle is ticked).</p>
         except Exception as exc:
             self._warn("Could not create folder:\n%s" % exc)
             return
+        # (v196) naya folder bante hi APNE AAP khul jaata hai
         try:
-            self.files_tree.expand(self.files_model.index(base))
-            self.files_tree.setCurrentIndex(self.files_model.index(p))
+            self._jump_to_folder(p)
         except Exception:
             pass
         self.status.showMessage("Folder created: %s" % os.path.basename(p), 4000)
@@ -16602,6 +16588,39 @@ if the toggle is ticked).</p>
         except Exception:
             pass
 
+    def _panel_rename_current(self):
+        """(v196) My Files me F2 — chuni file YA folder ka naam badlo."""
+        try:
+            idx = self.files_tree.currentIndex()
+            if not idx.isValid():
+                return
+            path = self.files_model.filePath(idx)
+        except Exception:
+            return
+        if os.path.isfile(path):
+            try:
+                self._rename_library_file(path)
+            except Exception:
+                pass
+            return
+        old = os.path.basename(path) or path
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Naam badlo", "Rename"),
+            self.L("Folder ka naya naam:", "New folder name:"), text=old)
+        name = (name or "").strip()
+        if not ok or not name or name == old:
+            return
+        newp = os.path.join(os.path.dirname(path), folder_safe_name(name))
+        try:
+            os.rename(path, newp)
+            self._invalidate_files_index()
+            self._update_panel_nav()
+            self.status.showMessage(self.L('✏ "%s" → "%s"', '✏ "%s" → "%s"')
+                                    % (old, os.path.basename(newp)), 5000)
+        except Exception as exc:
+            self._warn(self.L("Naam nahi badla ja saka:\n%s",
+                              "Could not rename:\n%s") % exc)
+
     def _delete_folder(self, path):
         """(v195) Poora folder Recycle Bin me — pehle poochta hai (andar ki
         files ki ginti ke saath); wapas Recycle Bin se laa sakte hain."""
@@ -16867,6 +16886,11 @@ if the toggle is ticked).</p>
                     sizes[pidx] += extra
                     sizes[idx] = 290
                     spl.setSizes(sizes)
+            except Exception:
+                pass
+            # (v196) panel khulte hi list HAMESHA TOP se — beech se nahi
+            try:
+                QtCore.QTimer.singleShot(0, self.files_tree.scrollToTop)
             except Exception:
                 pass
 
@@ -20376,17 +20400,8 @@ if the toggle is ticked).</p>
             if not item:
                 return
             items = [item]
-        # (F13) 3+ pages ek saath delete par ek baar poochh lo (galti se
-        # selection samet delete na ho jaaye) — single page par nahi poochhte
-        # kyunki Ctrl+Z undo hamesha hai.
-        if len(items) >= 3:
-            if QtWidgets.QMessageBox.question(
-                    self, self.L("Delete", "Delete"),
-                    self.L("%d pages delete karein? (Ctrl+Z se wapas aa sakte hain)",
-                           "Delete %d pages? (Ctrl+Z can undo)") % len(items),
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                    QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
-                return
+        # (v196) delete par ab KOI confirm nahi (user request) — Ctrl+Z se
+        # kabhi bhi wapas aa jaata hai, isliye seedha delete
         # delete from the highest row down so earlier indices stay valid
         rows = sorted((self.list.row(it) for it in items), reverse=True)
         deleted = []
