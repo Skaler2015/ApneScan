@@ -34,6 +34,25 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --clean --onefile --windowed --name "ApneScan" --icon apnescan.ico --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes --hidden-import PyQt5.QtMultimedia --hidden-import PyQt5.QtMultimediaWidgets --hidden-import PyQt5.QtNetwork --hidden-import qrcode --hidden-import qrcode.image.pil apnescan.py
 
+      # (v205) Tesseract ko installer ke SAATH bundle karo — user ko alag
+      # install nahi karna padta; auto-rotate/OCR/naam-padhna turant chalta
+      # hai. (64-bit tesseract.exe alag subprocess me chalta hai — 32-bit
+      # app ke saath koi dikkat nahi.) Hindi + OSD traineddata bhi saath.
+      - name: Bundle Tesseract OCR
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          choco install tesseract -y --no-progress
+          $src = "C:\Program Files\Tesseract-OCR"
+          if (!(Test-Path $src)) { $src = "C:\Program Files (x86)\Tesseract-OCR" }
+          Copy-Item $src "ApneScan_Project\tesseract_dist" -Recurse
+          $td = "ApneScan_Project\tesseract_dist\tessdata"
+          if (!(Test-Path "$td\osd.traineddata")) { Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata/raw/main/osd.traineddata" -OutFile "$td\osd.traineddata" }
+          if (!(Test-Path "$td\hin.traineddata")) { Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/hin.traineddata" -OutFile "$td\hin.traineddata" }
+          New-Item -ItemType Directory -Force -Path "ApneScan_Project\Output" | Out-Null
+          Compress-Archive -Path "ApneScan_Project\tesseract_dist\*" -DestinationPath "ApneScan_Project\Output\Tesseract-OCR.zip" -Force
+          Get-ChildItem "ApneScan_Project\tesseract_dist"
+
       # One-click installer (Start menu + desktop icon ke saath)
       - name: Build installer (Inno Setup)
         shell: pwsh
@@ -58,6 +77,7 @@ jobs:
           files: |
             ApneScan_Project/dist/ApneScan.exe
             ApneScan_Project/Output/ApneScan-Setup.exe
+            ApneScan_Project/Output/Tesseract-OCR.zip
           generate_release_notes: true
 
       # ---- Artifacts (best-effort) — sirf deploy-website ke same-SHA match ke

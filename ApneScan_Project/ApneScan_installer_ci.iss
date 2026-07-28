@@ -3,7 +3,7 @@
 
 [Setup]
 AppName=ApneScan
-AppVersion=204
+AppVersion=205
 AppPublisher=ApneSoft
 AppPublisherURL=https://apnescan.apnesoft.com
 DefaultDirName={autopf}\ApneScan
@@ -21,6 +21,8 @@ Name: "desktopicon"; Description: "Desktop par icon banao"; GroupDescription: "S
 [Files]
 Source: "dist\ApneScan.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "apnescan.ico"; DestDir: "{app}"
+; (v205) Tesseract OCR BUNDLED — auto-rotate/OCR ke liye alag install nahi
+Source: "tesseract_dist\*"; DestDir: "{app}\tesseract"; Flags: recursesubdirs ignoreversion skipifsourcedoesntexist
 
 [Icons]
 Name: "{autoprograms}\ApneScan"; Filename: "{app}\ApneScan.exe"

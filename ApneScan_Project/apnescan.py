@@ -170,8 +170,20 @@ def _configure_tesseract():
     if not HAS_OCR_LIBS:
         return
     try:
+        # (v205) BUNDLED Tesseract SABSE PEHLE — ab installer ke saath hi
+        # aata hai ({app}\tesseract), user ko alag install nahi karna padta
+        _exed = (os.path.dirname(os.path.abspath(sys.executable))
+                 if getattr(sys, "frozen", False)
+                 else os.path.dirname(os.path.abspath(__file__)))
+        _bt = os.path.join(_exed, "tesseract", "tesseract.exe")
+        if os.path.isfile(_bt):
+            pytesseract.pytesseract.tesseract_cmd = _bt
+            os.environ["TESSDATA_PREFIX"] = os.path.join(os.path.dirname(_bt), "tessdata")
+            return
         home = os.path.expanduser("~")
-        for c in (r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        for c in (os.path.join(os.environ.get("LOCALAPPDATA", ""), "ApneScan",
+                               "Tesseract", "tesseract.exe"),   # (v205) self-install
+                  r"C:\Program Files\Tesseract-OCR\tesseract.exe",
                   r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
                   os.path.join(home, "AppData", "Local", "Tesseract-OCR", "tesseract.exe"),
                   os.path.join(home, "AppData", "Local", "Programs", "Tesseract-OCR", "tesseract.exe")):
@@ -229,7 +241,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "204"
+VERSION = "205"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9274,6 +9286,77 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
 
+    def _use_tess_at(self, exe):
+        """(v205) pytesseract ko is tesseract.exe par point karo + cache reset."""
+        global _TESS_OK
+        try:
+            pytesseract.pytesseract.tesseract_cmd = exe
+            os.environ["TESSDATA_PREFIX"] = os.path.join(os.path.dirname(exe), "tessdata")
+            _TESS_OK = None            # agli baar dobara janch ho
+        except Exception:
+            pass
+
+    def _ensure_tesseract_bg(self):
+        """(v205) Tesseract na ho to app use KHUD download+install kar leta
+        hai — release ke saath bundled Tesseract-OCR.zip se, LocalAppData me
+        (koi admin nahi chahiye). Background me; ho jaane par auto-rotate/
+        OCR turant chalu."""
+        if not HAS_OCR_LIBS or tesseract_available():
+            return
+        if getattr(self, "_tess_dl_running", False):
+            return
+        dest = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+                            "ApneScan", "Tesseract")
+        exe = os.path.join(dest, "tesseract.exe")
+        if os.path.isfile(exe):
+            self._use_tess_at(exe)
+            return
+        self._tess_dl_running = True
+        url = ("https://github.com/Skaler2015/ApneScan/releases/download/v%s/"
+               "Tesseract-OCR.zip" % VERSION)
+        try:
+            self.status.showMessage(self.L(
+                "⬇ Auto-rotate/OCR engine (Tesseract) khud download ho raha hai… (~60 MB, ek hi baar)",
+                "⬇ Downloading the auto-rotate/OCR engine (Tesseract)… (~60 MB, one time)"), 0)
+        except Exception:
+            pass
+
+        def job():
+            import zipfile
+            import urllib.request
+            fd, tmp = tempfile.mkstemp(suffix=".zip")
+            os.close(fd)
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "ApneScan/%s" % VERSION})
+                with urllib.request.urlopen(req, timeout=300) as r, open(tmp, "wb") as f:
+                    shutil.copyfileobj(r, f)
+                os.makedirs(dest, exist_ok=True)
+                with zipfile.ZipFile(tmp) as z:
+                    z.extractall(dest)
+                return os.path.isfile(exe)
+            except Exception:
+                return False
+            finally:
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+
+        def done(ok):
+            self._tess_dl_running = False
+            if ok:
+                self._use_tess_at(exe)
+                self.status.showMessage(self.L(
+                    "✅ Auto-rotate/OCR taiyaar — Tesseract khud install ho gaya",
+                    "✅ Auto-rotate/OCR ready — Tesseract installed itself"), 9000)
+                try:
+                    self._ev_push("orient:tess-autoinstalled")
+                except Exception:
+                    pass
+            else:
+                self.status.showMessage("", 1)
+        self._run_bg_quiet(job, done)
+
     def _dash_fill_recent(self):
         """Dashboard ke 'Recent Files' cards ko taaza karo — naam, samay,
         size ke saath; card par click = file kholo (mockup jaisa look)."""
@@ -13639,6 +13722,8 @@ if the toggle is ticked).</p>
         QtCore.QTimer.singleShot(1500, self._an_refresh)
         # Pehli baar: user se naam pucho (analytics me naam ke saath dikhe)
         QtCore.QTimer.singleShot(2200, self._ensure_user_name)
+        # (v205) Tesseract na ho to chupchaap khud download/install (ek baar)
+        QtCore.QTimer.singleShot(6000, self._ensure_tesseract_bg)
         # ApneSoftware ke tools ki nayi list (agar ho) background me le aao
         QtCore.QTimer.singleShot(5000, lambda: self._run_bg_quiet(
             self._fetch_apnesoft_tools, lambda _r: None))
@@ -14233,6 +14318,8 @@ if the toggle is ticked).</p>
                     msg += self.L("  ·  ⚠ Auto-rotate band (Tesseract nahi)",
                                   "  ·  ⚠ Auto-rotate off (no Tesseract)")
                     self._ev_push("orient:no-tesseract")
+                    # (v205) khud hi download/install shuru kar do
+                    self._ensure_tesseract_bg()
                     if not self._config.get("tess_rotate_warned"):
                         self._config["tess_rotate_warned"] = True
                         try:
@@ -14241,18 +14328,17 @@ if the toggle is ticked).</p>
                             pass
                         QtWidgets.QMessageBox.information(
                             self, "Auto-rotate",
-                            self.L("Page apne aap seedha karne (auto-rotate) ke liye is PC par\n"
-                                   "Tesseract OCR chahiye — abhi INSTALLED NAHI hai.\n\n"
-                                   "Free install (2 minute):\n"
-                                   "https://github.com/UB-Mannheim/tesseract/wiki\n"
-                                   "se 32-bit ya 64-bit setup chala dein — bas. Uske baad\n"
-                                   "ulta/tirchha page khud seedha hone lagega.",
-                                   "Auto-rotate needs Tesseract OCR on this PC —\n"
-                                   "it is NOT installed right now.\n\n"
-                                   "Free install (2 minutes):\n"
-                                   "https://github.com/UB-Mannheim/tesseract/wiki\n"
-                                   "Run the setup — after that, upside-down/sideways\n"
-                                   "pages will straighten automatically."))
+                            self.L("Page apne aap seedha karne (auto-rotate) ke liye Tesseract\n"
+                                   "OCR chahiye — is PC par abhi nahi hai.\n\n"
+                                   "Chinta nahi: app use ABHI KHUD download kar raha hai\n"
+                                   "(~60 MB, sirf ek baar; internet chahiye). Kuch minute me\n"
+                                   "neeche status me '✅ taiyaar' aayega — uske baad ulta/\n"
+                                   "tirchha page apne aap seedha hone lagega.",
+                                   "Auto-rotate needs Tesseract OCR — not on this PC yet.\n\n"
+                                   "No worries: the app is downloading it ITSELF right now\n"
+                                   "(~60 MB, one time; needs internet). In a few minutes the\n"
+                                   "status bar will show '✅ ready' — after that upside-down/\n"
+                                   "sideways pages straighten automatically."))
                 elif _ot:
                     msg += self.L("  ·  🔁 %d/%d page seedhe kiye",
                                   "  ·  🔁 straightened %d/%d") % (_orr, _ot)
