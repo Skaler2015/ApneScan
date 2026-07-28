@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "187"
+VERSION = "188"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -12166,7 +12166,11 @@ if the toggle is ticked).</p>
         # Profile — MAIN bar par sirf combo (kam clutter); edit-buttons
         # "Advanced settings" ke andar (user: sirf kaam ki details dikhein)
         self.cmb_profile = QtWidgets.QComboBox(); self.cmb_profile.currentTextChanged.connect(self._on_profile_changed)
-        sb.addWidget(_col(tr("profile", self._lang), self.cmb_profile, 150))
+        # (v188) Profile combo ab BAR par nahi dikhta (user: kam cheezein) —
+        # object zinda hai: Enter-scan / Profiles-toolbar isi se chalte hain
+        _profw = _col(tr("profile", self._lang), self.cmb_profile, 150)
+        sb.addWidget(_profw)
+        _profw.hide()
         prow = QtWidgets.QHBoxLayout(); prow.setContentsMargins(0, 0, 0, 0); prow.setSpacing(2)
         bnew = QtWidgets.QPushButton("➕"); bnew.setFixedWidth(26); bnew.setToolTip(self.L("Naya profile", "New profile")); bnew.clicked.connect(self._quick_new_profile); prow.addWidget(bnew)
         bedit = QtWidgets.QPushButton("✏️"); bedit.setFixedWidth(26); bedit.setToolTip(self.L("Profile badlo", "Edit profile")); bedit.clicked.connect(self._quick_edit_profile); prow.addWidget(bedit)
@@ -12241,11 +12245,11 @@ if the toggle is ticked).</p>
         _av = QtWidgets.QHBoxLayout(self._adv_box); _av.setContentsMargins(0, 0, 0, 0); _av.setSpacing(8)
         _av.addWidget(_col(self.L("Profile tools", "Profile tools"), self._prof_tools))
         self.cmb_source = QtWidgets.QComboBox(); self.cmb_source.addItems(["Feeder (ADF)", "Glass (Flatbed)"])
-        _av.addWidget(_col("Paper source", self.cmb_source, 108))
+        sb.addWidget(_col("Paper source", self.cmb_source, 108))   # (v188) main line par
         self.cmb_sides = QtWidgets.QComboBox()
         self.cmb_sides.addItems(["Single side", "Both sides (duplex)"])
         self.cmb_sides.setToolTip("Both side = scan both sides of the paper (duplex)")
-        _av.addWidget(_col("Scan sides", self.cmb_sides, 100))
+        sb.addWidget(_col("Scan sides", self.cmb_sides, 100))      # (v188) main line par
 
         # ---- ⚙ Auto-fixes quick chips (yahin on/off) ----
         _ocrow = QtWidgets.QHBoxLayout(); _ocrow.setContentsMargins(0, 0, 0, 0); _ocrow.setSpacing(11)
@@ -12297,7 +12301,11 @@ if the toggle is ticked).</p>
             _cb.toggled.connect(lambda on, k=_key: self._set_scan_opt(k, on))
             self._opt_chips[_key] = _cb; _ocrow.addWidget(_cb)
         _ocw = QtWidgets.QWidget(); _ocw.setLayout(_ocrow)
-        sb.addWidget(_col(self.L("Auto sudhaar", "Auto fixes"), _ocw))
+        # (v188) Auto-fix switches ab bar par NAHI dikhte (user: saaf look) —
+        # objects zinda hain: Settings/profiles se yahi opts control hote hain
+        _ocw_wrap = _col(self.L("Auto sudhaar", "Auto fixes"), _ocw)
+        sb.addWidget(_ocw_wrap)
+        _ocw_wrap.hide()
 
         # ---- 📂 "Scan ke baad" ----
         self.cmb_after_scan = QtWidgets.QComboBox()
@@ -12313,10 +12321,13 @@ if the toggle is ticked).</p>
         _av.addWidget(_col(self.L("Baad me", "After"), self.cmb_after_scan, 100))
         # ⚙ toggle + Advanced box (chips ke baad, ek saath)
         sb.addWidget(self.btn_adv)
-        # Advanced settings ab NEECHE ki dusri line me khulti hain
+        # (v188) SAB kaam ki cheezein ab EK hi line par hain — "Advanced
+        # settings" button aur neechli line ab nahi dikhti (Profile tools /
+        # After objects zinda hain, bas chhupe hue)
+        self.btn_adv.hide()
         _av.addStretch(1)
         _sbv.addWidget(self._adv_box)
-        self._adv_box.setVisible(self.btn_adv.isChecked())
+        self._adv_box.setVisible(False)
         self._refresh_adv_toggle_text()
 
         sb.addStretch(1)
