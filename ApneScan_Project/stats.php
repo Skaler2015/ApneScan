@@ -1772,7 +1772,7 @@ if (isset($_GET['admin'])) {
 
   <!-- BHAAG 1 (LEFT): POORI TIMELINE — sab din, naya sabse upar -->
   <div id="uaLeft" style="flex:0 0 52%;min-width:260px;overflow:hidden">
-  <div class="card" style="height:100%">
+  <div class="card" style="height:100%;display:flex;flex-direction:column;box-sizing:border-box">
     <h3><span class="em">🕒</span> Poori timeline (sab din) <span id="tlInfo" style="color:var(--mut);font-weight:500;font-size:11px"></span></h3>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
       <input id="tlQ" placeholder="🔍 user ya kaam se dhoondo… (poore itihaas me)" style="flex:1;min-width:140px">
@@ -1782,7 +1782,7 @@ if (isset($_GET['admin'])) {
       <button class="btn gray" id="tlNext" onclick="tlGo(_tl.page+1)">Purane ▶</button>
     </div>
     <div style="color:var(--mut);font-size:10px;margin-bottom:6px">💡 Sabse naya sabse upar · 100/page · 90 din tak · beech ki patti kheench kar chaudai badlo</div>
-    <div id="tlList" style="max-height:640px;overflow:auto"></div>
+    <div id="tlList" style="flex:1;min-height:200px;overflow:auto"></div>
   </div>
   </div>
 
@@ -1807,7 +1807,7 @@ if (isset($_GET['admin'])) {
     </div>
   </div>
   <div class="card" style="margin-bottom:13px"><h3><span class="em">👥</span> Har user ka saraansh <span style="color:var(--mut);font-weight:500;font-size:11px">— naam par click = us par filter</span></h3><div id="uaUsers" style="max-height:260px;overflow:auto"></div></div>
-  <div class="card" style="margin-bottom:13px"><h3><span class="em">🔥</span> Sabse zyada hue kaam</h3><div id="uaTop"></div></div>
+  <div class="card" style="margin-bottom:13px"><h3><span class="em">🔥</span> Sabse zyada hue kaam</h3><div id="uaTop" style="max-height:340px;overflow:auto"></div></div>
   <div class="card"><h3><span class="em">🕐</span> Kis ghante kitna kaam</h3><div id="uaHours"></div></div>
   </div>
 
@@ -3239,21 +3239,23 @@ function uaRender(){ if(!document.getElementById('uaKpis'))return;
         +'<td style="font-size:10px">'+new Date(U.first*1000).toLocaleTimeString()+' → '+new Date(U.last*1000).toLocaleTimeString()+'</td>'
         +'<td>'+Math.max(1,U.sess)+'</td></tr>'; });
     uu.innerHTML=ur.length?_tbl(ur,['User','Events','Sabse zyada','Pehli → aakhri','Sessions']):'<div style="color:var(--mut)">— aaj koi activity nahi —</div>'; }
-  // ---- top actions bars ----
-  var ta2=Object.keys(acts).map(function(k){return [k,acts[k]];}).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
+  // ---- top actions: TABLE — poora naam dikhe, sabse bada number sabse upar ----
+  var ta2=Object.keys(acts).map(function(k){return [k,acts[k]];}).sort(function(a,b){return b[1]-a[1];});
   var mx=ta2.length?ta2[0][1]:1;
   var te=document.getElementById('uaTop');
-  if(te)te.innerHTML=ta2.length?ta2.map(function(r){
-    return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:5px;font-size:11px">'
-      +'<span style="width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(r[0])+'</span>'
-      +'<span class="bar" style="flex:0 0 '+Math.max(5,Math.round(r[1]*60/mx))+'%;height:10px"></span><b>'+r[1]+'</b></div>'; }).join('')
+  if(te)te.innerHTML=ta2.length?_tbl(ta2.map(function(r){
+      return '<tr><td style="white-space:normal;word-break:break-word;font-size:11px">'+esc(r[0])+'</td>'
+        +'<td style="width:44px"><b>'+r[1]+'</b></td>'
+        +'<td style="width:34%;min-width:80px"><span class="bar" style="display:inline-block;width:'
+        +Math.max(4,Math.round(r[1]*100/mx))+'%;height:9px"></span></td></tr>'; }),
+      ['Kaam (poora naam)','Baar','—'])
     :'<div style="color:var(--mut)">—</div>';
   // ---- hour bars ----
   var he=document.getElementById('uaHours');
   if(he){ var hm=1; Object.keys(hours).forEach(function(h){ if(hours[h]>hm)hm=hours[h]; });
     var hh=''; for(var h=0;h<24;h++){ if(!hours[h])continue;
       hh+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;font-size:11px">'
-        +'<span style="width:56px">'+(h%12||12)+(h<12?' AM':' PM')+'</span>'
+        +'<span style="flex:0 0 56px;white-space:nowrap">'+(h%12||12)+(h<12?' AM':' PM')+'</span>'
         +'<span class="bar" style="flex:0 0 '+Math.max(5,Math.round(hours[h]*60/hm))+'%;height:9px"></span><b>'+hours[h]+'</b></div>'; }
     he.innerHTML=hh||'<div style="color:var(--mut)">—</div>'; }
 }
