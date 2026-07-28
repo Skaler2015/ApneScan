@@ -161,10 +161,16 @@ def _orient_ocr_vote(img):
     Returns (angle, conf%). Kam margin par conf ghata deta hai — galat
     rotation kabhi nahi."""
     import pytesseract
+    from PIL import ImageOps
     g = img.convert("L")
+    # (v203) FAINT/halke letterhead bhi padhe ja sakein — contrast stretch
+    try:
+        g = ImageOps.autocontrast(g, 2)
+    except Exception:
+        pass
     w, h = g.size
-    if max(w, h) > 900:
-        sc = 900.0 / max(w, h)
+    if max(w, h) > 1000:
+        sc = 1000.0 / max(w, h)
         g = g.resize((max(1, int(w * sc)), max(1, int(h * sc))))
     best, second, besta = -1.0, -1.0, 0
     for a in (0, 90, 180, 270):
@@ -174,7 +180,11 @@ def _orient_ocr_vote(img):
                 t, output_type=pytesseract.Output.DICT, config="--psm 6")
             confs = [int(float(c)) for c in d.get("conf", [])
                      if str(c).replace(".", "").lstrip("-").isdigit() and float(c) >= 0]
-            score = (sum(confs) / float(len(confs))) if len(confs) >= 5 else 0.0
+            # kam shabdon wale (letterhead jaise) pages par bhi kaam kare —
+            # 3 shabd kaafi; shabd-ginti ka halka bonus bhi (sahi disha me
+            # OCR ko hamesha ZYADA shabd milte hain)
+            n = len(confs)
+            score = ((sum(confs) / float(n)) + min(10.0, n * 0.5)) if n >= 3 else 0.0
         except Exception:
             score = 0.0
         if score > best:
@@ -184,9 +194,16 @@ def _orient_ocr_vote(img):
             second = score
     if best <= 0:
         return 0, 0
+    # (v203) faisla ab MARGIN se — sparse/faint page par bhi:
+    # avg-conf bhale 60 ho, sahi disha baaki se saaf aage ho to ghumao
     margin = best - max(0.0, second)
-    conf = int(min(99, best if margin >= 8 else best * 0.6))
-    return besta, conf
+    if best >= 35 and margin >= 12:
+        conf = 90
+    elif best >= 45 and margin >= 8:
+        conf = 84
+    else:
+        conf = int(min(79, best * 0.6))
+    return besta, int(min(99, conf))
 
 
 def detect_orientation(img, use_ocr=True, use_text=True, use_layout=True, threshold=80,
