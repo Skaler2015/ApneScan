@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "214"
+VERSION = "215"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2469,7 +2469,7 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
             if e.code in (503, 409, 429):        # busy -> wait and keep trying
                 _t.sleep(1.5)
                 continue
-            raise ScannerError("eSCL job error: HTTP %s. Scanner network-scan (eSCL) support karta hai?" % e.code)
+            raise ScannerError("eSCL job error: HTTP %s. Does the scanner support network scanning (eSCL)?" % e.code)
         except Exception as e:
             last_code = str(e)
             _t.sleep(1.2)
@@ -3248,10 +3248,10 @@ class OptionsDialog(QtWidgets.QDialog):
         self.chk_autocolour = QtWidgets.QCheckBox("Auto colour-detect (colourless pages to gray)")
         self.chk_autocolour.setChecked(bool(self.opts.get("auto_colour")))
         form.addRow(chkrow(self.chk_autocolour, 'हिन्दी: चालू करने पर (सिर्फ़ Colour स्कैन में): जिस पेज पर रंग नहीं है वह अपने-आप ग्रे में सेव होगा — छोटी फ़ाइल, साफ़ प्रिंट।\nEnglish: ON (colour scans only): pages with no real colour are saved as grayscale — smaller files.'))
-        self.chk_qwatch = QtWidgets.QCheckBox("⚠ Scan-quality chowkidaar (kamzor page ki turant chetavni)")
+        self.chk_qwatch = QtWidgets.QCheckBox("⚠ Scan quality guard (instant warning for weak pages)")
         self.chk_qwatch.setChecked(bool(self.opts.get("quality_watch", True)))
         form.addRow(chkrow(self.chk_qwatch, 'हिन्दी: स्कैन ख़त्म होते ही AI हर पेज जाँचता है — धुँधला/बहुत गहरा/बहुत फीका पेज मिले तो पेज-नंबर के साथ तुरंत चेतावनी, ताकि उसी समय दोबारा स्कैन कर सकें।\nEnglish: Right after a scan the AI checks every page — if one looks blurry/too dark/too faint you get an instant warning with the page number, so you can re-scan immediately.'))
-        self.chk_photoclean = QtWidgets.QCheckBox("📱 Phone-photo aate hi scan-jaisi saaf (auto)")
+        self.chk_photoclean = QtWidgets.QCheckBox("📱 Auto-clean phone photos on arrival")
         self.chk_photoclean.setChecked(bool(self.opts.get("photo_auto_clean", True)))
         form.addRow(chkrow(self.chk_photoclean, 'हिन्दी: फ़ोन से आई photo (QR/upload) आते ही अपने आप सुधरती है — 4 कोनों से सीधी, छाया हटती है, रंग वापस, साफ़ — बिलकुल स्कैन जैसी।\nEnglish: Photos received from the phone are auto-fixed on arrival — perspective-straightened, de-shadowed, colour-restored — just like a scan.'))
         self.spin_custlen = QtWidgets.QSpinBox(); self.spin_custlen.setRange(100, 3000)
@@ -3329,7 +3329,7 @@ class OptionsDialog(QtWidgets.QDialog):
         _kbv = QtWidgets.QVBoxLayout(_kb)
         # (v202) user apne hisaab se shortcut BADAL sake — editor ka bada
         # button sabse upar (pehle ye sirf chhupi menu-patti me tha)
-        _kbtn = QtWidgets.QPushButton("✏  Shortcut apne hisaab se badlein…  (Change shortcuts)")
+        _kbtn = QtWidgets.QPushButton("✏  Change shortcuts…")
         _kbtn.setObjectName("primary")
         _kbtn.setMinimumHeight(34)
         _kbtn.setCursor(QtCore.Qt.PointingHandCursor)
@@ -3338,8 +3338,8 @@ class OptionsDialog(QtWidgets.QDialog):
         if parent is not None and hasattr(parent, "show_shortcuts"):
             _kbtn.clicked.connect(parent.show_shortcuts)
         _kbv.addWidget(_kbtn)
-        _kbn = QtWidgets.QLabel("Neeche DEFAULT shortcuts hain — badalne par aapke naye "
-                                "shortcuts hi chalenge (upar wale button se badlein):")
+        _kbn = QtWidgets.QLabel("These are the DEFAULT shortcuts — if you change any, "
+                                "your custom keys take over (use the button above):")
         _kbn.setWordWrap(True)
         _kbn.setStyleSheet("color:#6B7280;font-size:11px;")
         _kbv.addWidget(_kbn)
@@ -3347,30 +3347,30 @@ class OptionsDialog(QtWidgets.QDialog):
             "<style>td{padding:2px 10px;font-size:12px;} b{color:#4F46E5;}"
             "h4{margin:10px 0 3px 0;}</style>"
             "<h4>🖨 Scan</h4><table>"
-            "<tr><td><b>Enter</b></td><td>Profile ki setting se scan</td></tr>"
-            "<tr><td><b>F3 / F4 / F5 / F6</b></td><td>150 / 200 / 300 / 600 dpi par scan</td></tr>"
-            "<tr><td><b>F7</b></td><td>Apni dpi likh kar scan</td></tr>"
-            "<tr><td><b>Space</b></td><td>Chune pages save</td></tr>"
-            "<tr><td><b>Ctrl+S</b></td><td>Sabhi pages save (PDF)</td></tr></table>"
+            "<tr><td><b>Enter</b></td><td>Scan with the profile's settings</td></tr>"
+            "<tr><td><b>F3 / F4 / F5 / F6</b></td><td>Scan at 150 / 200 / 300 / 600 dpi</td></tr>"
+            "<tr><td><b>F7</b></td><td>Scan at a custom dpi</td></tr>"
+            "<tr><td><b>Space</b></td><td>Save selected pages</td></tr>"
+            "<tr><td><b>Ctrl+S</b></td><td>Save all pages (PDF)</td></tr></table>"
             "<h4>📄 Pages (thumbnail area)</h4><table>"
-            "<tr><td><b>F2</b></td><td>Page ka naam badlo</td></tr>"
-            "<tr><td><b>Delete</b></td><td>Page hatao (seedha — confirm nahi)</td></tr>"
-            "<tr><td><b>Ctrl+Z / Ctrl+Y</b></td><td>Wapas lao / dobara karo</td></tr>"
-            "<tr><td><b>Ctrl+C / Ctrl+V</b></td><td>Page copy / paste</td></tr>"
+            "<tr><td><b>F2</b></td><td>Rename the page</td></tr>"
+            "<tr><td><b>Delete</b></td><td>Delete the page (instant — no confirm)</td></tr>"
+            "<tr><td><b>Ctrl+Z / Ctrl+Y</b></td><td>Undo / redo</td></tr>"
+            "<tr><td><b>Ctrl+C / Ctrl+V</b></td><td>Copy / paste page</td></tr>"
             "<tr><td><b>Ctrl+P</b></td><td>Print</td></tr>"
-            "<tr><td><b>Ctrl+scroll</b></td><td>Thumbnail / preview zoom</td></tr></table>"
-            "<h4>📁 Meri Files</h4><table>"
-            "<tr><td><b>F2</b></td><td>File/folder ka naam badlo</td></tr>"
-            "<tr><td><b>Ctrl+Shift+N</b></td><td>Naya folder (bante hi khulta hai)</td></tr>"
-            "<tr><td><b>Ctrl+O</b></td><td>Koi bhi folder kholo</td></tr>"
-            "<tr><td><b>Esc</b></td><td>Meri Files panel band</td></tr>"
-            "<tr><td><b>Double-click</b></td><td>Folder ke andar jao</td></tr></table>"
+            "<tr><td><b>Ctrl+scroll</b></td><td>Zoom thumbnails / preview</td></tr></table>"
+            "<h4>📁 My Files</h4><table>"
+            "<tr><td><b>F2</b></td><td>Rename the file/folder</td></tr>"
+            "<tr><td><b>Ctrl+Shift+N</b></td><td>New folder (opens right away)</td></tr>"
+            "<tr><td><b>Ctrl+O</b></td><td>Open any folder</td></tr>"
+            "<tr><td><b>Esc</b></td><td>Close the My Files panel</td></tr>"
+            "<tr><td><b>Double-click</b></td><td>Enter the folder</td></tr></table>"
             "<h4>🖥 Layout</h4><table>"
-            "<tr><td><b>F8</b></td><td>Left sidebar dikhao/chhupao</td></tr>"
-            "<tr><td><b>F9</b></td><td>Scan-settings patti dikhao/chhupao</td></tr>"
-            "<tr><td><b>Ctrl+K</b></td><td>Upar wali search me jao</td></tr>"
-            "<tr><td><b>Alt+M</b></td><td>File/Edit menu-patti dikhao/chhupao</td></tr>"
-            "<tr><td><b>Alt+K</b></td><td>Shortcut-line dikhao/chhupao</td></tr></table>")
+            "<tr><td><b>F8</b></td><td>Show/hide the left sidebar</td></tr>"
+            "<tr><td><b>F9</b></td><td>Show/hide the scan-settings bar</td></tr>"
+            "<tr><td><b>Ctrl+K</b></td><td>Jump to the top search box</td></tr>"
+            "<tr><td><b>Alt+M</b></td><td>Show/hide the File/Edit menu bar</td></tr>"
+            "<tr><td><b>Alt+K</b></td><td>Show/hide the shortcut line</td></tr></table>")
         _kbl.setTextFormat(QtCore.Qt.RichText)
         _kbl.setWordWrap(True)
         _kbv.addWidget(_kbl); _kbv.addStretch(1)
@@ -7612,7 +7612,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, "👤 Analytics me naam…", self.set_user_name, "हिन्दी: Analytics में आपका नाम/clinic — ताकि किसने कितने scan किए, नाम के साथ दिखे।\nEnglish: Your name/clinic for analytics — so scans show per name.")
         self._ma(ms, "🔤 OCR bhashaayein…", self.choose_ocr_langs, "हिन्दी: OCR किन भाषाओं में पढ़े चुनो (Hindi, English, Gujarati, Marathi, Tamil आदि)। ज़्यादा भाषा = थोड़ा धीमा।\nEnglish: Choose which languages OCR should read (Hindi, English, Gujarati, Marathi, Tamil, …). More languages = a bit slower.")
         self._ma(ms, "🧠 Document Memory / Auto-naam…", self.ai_memory_settings, "हिन्दी: document याद रखने + auto-नाम/folder सुझाव की settings — threshold, auto-save, learning, export/import, optimize। सब offline, आपके PC पर।\nEnglish: Document-memory & auto-name/folder settings — threshold, auto-save, learning, export/import, optimise. All offline, on your PC.")
-        self._ma(ms, "💬 Feedback / rating bhejo…", self.send_feedback, "हिन्दी: App को rating दो और अपनी राय भेजो — सीधे developer तक पहुँचेगी।\nEnglish: Rate the app and send feedback — reaches the developer directly.")
+        self._ma(ms, "💬 Send feedback / rating…", self.send_feedback, "हिन्दी: App को rating दो और अपनी राय भेजो — सीधे developer तक पहुँचेगी।\nEnglish: Rate the app and send feedback — reaches the developer directly.")
         self._ma(ms, "Keyboard Shortcuts…", self.show_shortcuts, "हिन्दी: कीबोर्ड के shortcuts की सूची देखो।\nEnglish: View keyboard shortcuts.")
         self.act_simple = self._ma(ms, tr("simple_on", self._lang), self.toggle_simple_mode, "हिन्दी: Simple mode: सिर्फ़ ज़रूरी buttons दिखें (नए users के लिए आसान)।\nEnglish: Simple mode: show only the essential buttons.")
         self.act_simple.setCheckable(True)
@@ -7642,7 +7642,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         mh.addSeparator()
         self._ma(mh, "❓ FAQ (aksar puchhe sawaal)…", self.show_faq, "हिन्दी: आम सवाल-जवाब — स्कैनर कनेक्ट, OCR, PDF, update वग़ैरह।\nEnglish: Frequently asked questions.")
         self._ma(mh, "📣 Share ApneScan (tell friends)…", self.share_app, "हिन्दी: इस free ऐप को दोस्तों/customers तक पहुँचाओ — WhatsApp, link copy, QR code या poster/pamphlet (दुकान/अस्पताल में लगाने लायक)। जितने ज़्यादा लोग, उतना अच्छा।\nEnglish: Spread this free app — WhatsApp, copy link, QR code, or a printable poster for your shop/clinic.")
-        self._ma(mh, "☕ Support / Donate (app free rakhne me madad)…", self.donate, "हिन्दी: ApneScan हमेशा FREE है। पसंद आया तो थोड़ा सहयोग करके इसे चलते रहने में मदद कर सकते हैं।\nEnglish: ApneScan is always FREE. If you like it, a small donation helps keep it running.")
+        self._ma(mh, "☕ Support / Donate (helps keep the app free)…", self.donate, "हिन्दी: ApneScan हमेशा FREE है। पसंद आया तो थोड़ा सहयोग करके इसे चलते रहने में मदद कर सकते हैं।\nEnglish: ApneScan is always FREE. If you like it, a small donation helps keep it running.")
         self._ma(mh, "⭐ Review / Star (GitHub)…", self.ask_review, "हिन्दी: पसंद आया तो GitHub पर ⭐ star या review दें — इससे ऐप और लोगों तक पहुँचेगा।\nEnglish: Like it? Give a ⭐ or a review on GitHub — it helps others find ApneScan.")
         self._ma(mh, tr("about", self._lang), self.show_about, "हिन्दी: ऐप के बारे में।\nEnglish: About this app.")
 
@@ -12314,7 +12314,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
         self.status.clearMessage()
-        self._show_report("eSCL Test (network scan jaanch)", report)
+        self._show_report("eSCL Test (network scan check)", report)
 
     def run_diagnostics(self):
         """Collect scanner + app info and any errors into one report the user
@@ -13083,7 +13083,7 @@ if the toggle is ticked).</p>
             _sharebtn.setMenu(shmenu)
             _sharebtn.setPopupMode(QtWidgets.QToolButton.MenuButtonPopup)
         printmenu = QtWidgets.QMenu(self.btn_print); printmenu.setToolTipsVisible(True)
-        self._ma(printmenu, "All print (sabhi pages)", self.print_all,
+        self._ma(printmenu, "Print all pages", self.print_all,
                  "हिन्दी: सारे पेज प्रिंट करो।\nEnglish: Print all pages.")
         self._ma(printmenu, "Selected print (chune hue)", self.print_selected,
                  "हिन्दी: सिर्फ़ चुने हुए पेज प्रिंट करो।\nEnglish: Print only the selected pages.")
@@ -15107,7 +15107,7 @@ if the toggle is ticked).</p>
             pass
         msg = '%d page(s) scanned.' % kept
         if skipped:
-            msg += " (%d blank hataye)" % skipped
+            msg += " (%d blank removed)" % skipped
         # (v204) AUTO-ROTATE ki saaf jaankari — chhupi khamoshi khatam:
         # Tesseract na ho to EK baar bata do (install link ke saath);
         # ho to status me dikhao kitne pages seedhe kiye
@@ -16307,7 +16307,7 @@ if the toggle is ticked).</p>
         base = self._selected_library_folder()
         name, ok = QtWidgets.QInputDialog.getText(
             self, "New folder",
-            "Folder name:\n(will be created inside: '%s')" % (os.path.basename(base) or "Meri Files"))
+            "Folder name:\n(will be created inside: '%s')" % (os.path.basename(base) or "My Files"))
         if not ok or not name.strip():
             return
         p = os.path.join(base, folder_safe_name(name))   # NEW folders: spaces, readable
@@ -16625,7 +16625,7 @@ if the toggle is ticked).</p>
     def _new_folder_in(self, base):
         name, ok = QtWidgets.QInputDialog.getText(
             self, "New folder",
-            "Folder name:\n(will be created inside: '%s')" % (os.path.basename(base) or "Meri Files"))
+            "Folder name:\n(will be created inside: '%s')" % (os.path.basename(base) or "My Files"))
         if not ok or not name.strip():
             return
         p = os.path.join(base, folder_safe_name(name))   # NEW folders: spaces, readable
@@ -19863,7 +19863,7 @@ if the toggle is ticked).</p>
             if f:
                 self._opts["sign_image"] = f; self._save_opts()
         btn.clicked.connect(_chg)
-        form.addRow("Jagah:", cmb)
+        form.addRow("Position:", cmb)
         form.addRow("Size:", spn)
         form.addRow(btn)
         bb = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
@@ -22422,7 +22422,7 @@ if the toggle is ticked).</p>
                 pass
         QtWidgets.QMessageBox.information(
             self, "Monthly report (%s)" % month,
-            "Is mahine:\n\nKul PDF: %d\nKul pages: %s"
+            "This month:\n\nTotal PDFs: %d\nTotal pages: %s"
             % (total_files, total_pages if total_pages else "—"))
 
     def _draw_fit(self, painter, path, target):
