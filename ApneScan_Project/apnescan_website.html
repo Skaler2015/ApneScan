@@ -60,7 +60,7 @@
 "image":"https://apnescan.apnesoft.com/apnescan_logo.png",
 "offers":{"@type":"Offer","price":"0","priceCurrency":"INR"},
 "publisher":{"@type":"Organization","name":"ApneSoft"},
-"featureList":"Scan to PDF, Searchable PDF OCR (Hindi + English), Batch ADF scanning, Auto crop, Deskew, Auto rotate, Auto rename, Auto organize, PDF merge/split/compress, Password PDF, Barcode & QR reading, Network eSCL scanning, Dark mode"}
+"featureList":"Scan to PDF, Searchable PDF OCR (Hindi + English, bundled Tesseract), Batch ADF scanning, Auto crop, Deskew, Auto rotate, Auto rename, Auto organize, Pro document editor, Offline AI tools (enhance, colour restore, smart crop, de-noise), Stain and finger removal (inpainting), Signature extraction, Scan quality guard, Duplicate document warning, Phone photo cleanup, PDF merge/split/compress, Password PDF, Barcode & QR reading, Network eSCL scanning, Dark mode"}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[
@@ -468,6 +468,7 @@ html[data-theme="dark"] .fgrid2 a:hover{color:var(--acc)}
         <span role="listitem"><b>✓</b> Scan to PDF</span><span role="listitem"><b>✓</b> Searchable PDF</span>
         <span role="listitem"><b>✓</b> OCR</span><span role="listitem"><b>✓</b> Auto Organize</span>
         <span role="listitem"><b>✓</b> Auto Rename</span><span role="listitem"><b>✓</b> Batch Scan</span>
+        <span role="listitem"><b>✓</b> AI Editor</span>
         <span role="listitem"><b>✓</b> Works with Any Scanner</span>
       </div>
       <div class="hbtns">
@@ -584,6 +585,14 @@ html[data-theme="dark"] .fgrid2 a:hover{color:var(--acc)}
       <div class="fcard rv"><i>✂️</i><b>Auto Crop</b><span>Black borders and scanner backing removed. Just the paper.</span></div>
       <div class="fcard rv"><i>🗑</i><b>Blank Page Removal</b><span>Empty backsides in duplex scans are dropped automatically.</span></div>
       <div class="fcard rv"><i>✨</i><b>Image Enhancement</b><span>Whiten background, boost text, denoise — old documents look new.</span></div>
+      <div class="fcard rv"><i>🎨</i><b>Pro Document Editor</b><span>Acrobat-class editor: pen, text, highlight, redact, blur, stamps, crop, sliders — all built in.</span></div>
+      <div class="fcard rv"><i>🤖</i><b>Offline AI Tools</b><span>AI enhance, colour restore, smart crop, fine deskew, de-noise — one click, fully offline.</span></div>
+      <div class="fcard rv"><i>🩹</i><b>Stain &amp; Finger Removal</b><span>Drag a box over a stain, staple mark or finger — AI fills it from the surroundings.</span></div>
+      <div class="fcard rv"><i>✍️</i><b>Signature Extractor</b><span>Lift a signature or stamp off any page — background turns transparent, reuse it anywhere.</span></div>
+      <div class="fcard rv"><i>⚠️</i><b>Scan Quality Guard</b><span>Blurry, too-dark or faint pages are flagged the moment a scan finishes — re-scan instantly.</span></div>
+      <div class="fcard rv"><i>🔁</i><b>Duplicate Warning</b><span>Saving the same document twice? ApneScan recognises it and asks first.</span></div>
+      <div class="fcard rv"><i>📱</i><b>Phone Photo → Scan</b><span>Photos sent from your phone are auto-straightened, de-shadowed and cleaned on arrival.</span></div>
+      <div class="fcard rv"><i>📦</i><b>OCR Built In</b><span>Tesseract OCR ships inside the installer — auto-rotate and text reading work out of the box.</span></div>
       <div class="fcard rv"><i>📊</i><b>Barcode + QR Reading</b><span>Reads codes on documents and uses them to recognise records.</span></div>
       <div class="fcard rv"><i>🖼</i><b>Thumbnail Preview</b><span>Every page visible at a glance. Drag to reorder, click to edit.</span></div>
       <div class="fcard rv"><i>📑</i><b>Multi-Page PDF</b><span>Pages group by name into one or many PDFs — automatically.</span></div>
@@ -798,7 +807,7 @@ html[data-theme="dark"] .fgrid2 a:hover{color:var(--acc)}
       <div class="amt">₹0</div>
       <p style="color:var(--mut);font-weight:600">No trials · No subscriptions · No feature locks</p>
       <ul>
-        <li>All 25+ professional features included</li>
+        <li>All 35+ professional features included</li>
         <li>Unlimited scans, PDFs and OCR</li>
         <li>Free automatic updates</li>
         <li>Hindi + English interface</li>
@@ -849,7 +858,10 @@ html[data-theme="dark"] .fgrid2 a:hover{color:var(--acc)}
       <details><summary>Which Windows versions are supported?</summary><div class="a">Windows 10 and Windows 11. The app is built 32-bit, so it also runs on older 32-bit machines still common in offices.</div></details>
       <details><summary>Will it work with my scanner?</summary><div class="a">Almost certainly. ApneScan speaks TWAIN, WIA and network eSCL — covering Canon, HP, Brother, Epson, Ricoh, Kodak, Fujitsu, Xerox, Plustek, Panasonic and more, over USB or network, including ADF sheet-feeders.</div></details>
       <details><summary>My scanner has no Windows 11 driver. Can ApneScan still use it?</summary><div class="a">Often yes — network scanners are used via driver-less eSCL, so many "unsupported" office scanners work out of the box. Just connect it to your network and let ApneScan find it.</div></details>
-      <details><summary>Does OCR support Hindi?</summary><div class="a">Yes — Hindi, English and mixed documents. OCR powers searchable PDFs, auto-naming and text extraction to Word/Excel.</div></details>
+      <details><summary>Does OCR support Hindi?</summary><div class="a">Yes — Hindi, English and mixed documents. OCR powers searchable PDFs, auto-naming and text extraction to Word/Excel. The OCR engine (Tesseract) now ships inside the installer, so it works out of the box — nothing extra to install.</div></details>
+      <details><summary>Do the AI features need internet?</summary><div class="a">No. Every AI feature — auto enhance, colour restore, smart crop, stain/finger removal, signature extraction, quality guard, duplicate detection, auto-naming — runs 100% offline on your PC. No cloud, no limits, no cost.</div></details>
+      <details><summary>Can it remove a stain or a finger from a scan?</summary><div class="a">Yes — open the page in the editor, pick the 🩹 Heal tool and drag a box over the stain, staple mark or finger. The AI fills the area from its surroundings, keeping lines that pass through intact.</div></details>
+      <details><summary>Can I reuse my signature or office stamp?</summary><div class="a">Yes — the editor can lift a signature/stamp off any scanned page with a transparent background, save it, and place it on any document with one click.</div></details>
       <details><summary>What is a searchable PDF?</summary><div class="a">A normal-looking PDF with an invisible text layer underneath the scan. You can press Ctrl+F in any PDF reader and find a name or claim number inside the scanned image.</div></details>
       <details><summary>How does auto-rename work?</summary><div class="a">ApneScan reads the document with OCR, recognises what it is (prescription, bill, Aadhaar, report…) and who it belongs to, then suggests a clean name like "Rajendra_Kumar-Prescription". It learns your corrections over time.</div></details>
       <details><summary>Can it scan both sides of a page automatically?</summary><div class="a">Yes — duplex ADF scanning is fully supported, and blank back sides are removed automatically.</div></details>
@@ -860,7 +872,7 @@ html[data-theme="dark"] .fgrid2 a:hover{color:var(--acc)}
       <details><summary>Can I password-protect PDFs?</summary><div class="a">Yes — save any document as an encrypted, password-protected PDF for sensitive records.</div></details>
       <details><summary>Can I merge or split PDFs?</summary><div class="a">Yes — merge many files into one PDF, split pages out, reorder, rotate, compress and edit metadata, all inside ApneScan.</div></details>
       <details><summary>Can I share scans on WhatsApp?</summary><div class="a">Yes — one click copies the PDF ready to paste into WhatsApp or email.</div></details>
-      <details><summary>Does it import photos from my phone?</summary><div class="a">Yes — send phone photos to ApneScan and they are cleaned up (crop, deskew, enhance) and turned into PDFs like scanner pages.</div></details>
+      <details><summary>Does it import photos from my phone?</summary><div class="a">Yes — scan a QR to send phone photos straight into ApneScan (over Wi-Fi or the internet). Photos are auto-fixed the moment they arrive: perspective-straightened, de-shadowed, colour-restored and enhanced — just like scanner pages.</div></details>
       <details><summary>How do updates work?</summary><div class="a">ApneScan checks for updates and installs new versions automatically — you always have the latest features without reinstalling.</div></details>
       <details><summary>Is there a portable version?</summary><div class="a">Yes — download ApneScan.exe and run it directly from a folder or USB stick, no installation required.</div></details>
       <details><summary>Does it keep a register of scans?</summary><div class="a">Yes — an automatic Excel register records what was scanned and when, ready for audits.</div></details>
@@ -920,7 +932,8 @@ html[data-theme="dark"] .fgrid2 a:hover{color:var(--acc)}
 {"@type":"Question","name":"Is ApneScan really 100% free?","acceptedAnswer":{"@type":"Answer","text":"Yes. Every feature — OCR, batch scanning, PDF tools, auto-rename, search — is free, with no trial period, ads, or locked pro tier. Commercial use is allowed."}},
 {"@type":"Question","name":"Which Windows versions are supported?","acceptedAnswer":{"@type":"Answer","text":"Windows 10 and Windows 11, including older 32-bit PCs."}},
 {"@type":"Question","name":"Will it work with my scanner?","acceptedAnswer":{"@type":"Answer","text":"ApneScan supports TWAIN, WIA and network eSCL scanners — Canon, HP, Brother, Epson, Ricoh, Kodak, Fujitsu, Xerox, Plustek, Panasonic and more, over USB or network, including ADF feeders."}},
-{"@type":"Question","name":"Does OCR support Hindi?","acceptedAnswer":{"@type":"Answer","text":"Yes — Hindi, English and mixed documents, powering searchable PDFs and automatic file naming."}},
+{"@type":"Question","name":"Does OCR support Hindi?","acceptedAnswer":{"@type":"Answer","text":"Yes — Hindi, English and mixed documents, powering searchable PDFs and automatic file naming. Tesseract OCR ships inside the installer, so it works out of the box."}},
+{"@type":"Question","name":"Do the AI features need internet?","acceptedAnswer":{"@type":"Answer","text":"No. AI enhance, colour restore, smart crop, stain and finger removal, signature extraction, scan quality guard, duplicate detection and auto-naming all run 100% offline on your PC — free and unlimited."}},
 {"@type":"Question","name":"Does ApneScan work offline?","acceptedAnswer":{"@type":"Answer","text":"Completely. Everything runs on your PC — no cloud, no account, and no data leaves your machine."}}]}
 </script>
 

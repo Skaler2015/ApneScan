@@ -34,6 +34,18 @@
 - Built-in file manager panel (folder tree, in-folder search, drag-and-drop
   save, favourites) and a live preview editor (zoom, per-page OCR text,
   one-click rotate/crop/deskew/enhance/whiten/sign)
+- Premium Document Editor (Acrobat-class): pen/text/highlight/redact/blur/
+  stamps/notes, adjustment sliders, page thumbnails, undo/redo, status bar
+- Offline AI suite (no internet, free, unlimited): one-click AI Auto,
+  AI enhance (adaptive levels), colour restore for yellowed paper,
+  edge-preserving de-noise, smart content crop, 0.1-degree fine deskew,
+  stain/finger removal (structure-preserving inpainting), signature/stamp
+  extraction with transparent background
+- Scan quality guard (flags blurry / too-dark / faint pages right after the
+  scan), duplicate-document warning before re-saving, and automatic cleanup
+  of phone photos on arrival (perspective, shadows, colour, enhance)
+- Tesseract OCR is bundled with the installer (Hindi + English + OSD) and
+  self-installs on older setups — auto-rotate/OCR work out of the box
 - Tags, instant full-text search over saved PDFs (local index)
 - Personal + worldwide statistics dashboard with charts
 - Fully non-blocking: all saving/OCR/compression runs in the background
