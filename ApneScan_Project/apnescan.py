@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "201"
+VERSION = "202"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2747,6 +2747,22 @@ class OptionsDialog(QtWidgets.QDialog):
         # ---- (v198) ⌨ SHORTCUTS tab — saare shortcuts EK jagah ----
         _kb = QtWidgets.QWidget()
         _kbv = QtWidgets.QVBoxLayout(_kb)
+        # (v202) user apne hisaab se shortcut BADAL sake — editor ka bada
+        # button sabse upar (pehle ye sirf chhupi menu-patti me tha)
+        _kbtn = QtWidgets.QPushButton("✏  Shortcut apne hisaab se badlein…  (Change shortcuts)")
+        _kbtn.setObjectName("primary")
+        _kbtn.setMinimumHeight(34)
+        _kbtn.setCursor(QtCore.Qt.PointingHandCursor)
+        _kbtn.setToolTip("हिन्दी: सूची में से कोई भी shortcut चुनकर अपनी पसंद की key लगाओ।\n"
+                         "English: Pick any action and assign your own key.")
+        if parent is not None and hasattr(parent, "show_shortcuts"):
+            _kbtn.clicked.connect(parent.show_shortcuts)
+        _kbv.addWidget(_kbtn)
+        _kbn = QtWidgets.QLabel("Neeche DEFAULT shortcuts hain — badalne par aapke naye "
+                                "shortcuts hi chalenge (upar wale button se badlein):")
+        _kbn.setWordWrap(True)
+        _kbn.setStyleSheet("color:#6B7280;font-size:11px;")
+        _kbv.addWidget(_kbn)
         _kbl = QtWidgets.QLabel(
             "<style>td{padding:2px 10px;font-size:12px;} b{color:#4F46E5;}"
             "h4{margin:10px 0 3px 0;}</style>"
