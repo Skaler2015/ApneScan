@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "194"
+VERSION = "195"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5559,34 +5559,10 @@ class FilesCardDelegate(QtWidgets.QStyledItemDelegate):
             p.setPen(QtCore.Qt.NoPen)
             p.setBrush(QtGui.QColor("#2563EB"))
             p.drawRoundedRect(QtCore.QRectF(r.left() - 1, r.top() + 10, 3.5, r.height() - 20), 2, 2)
-        x = r.left() + 7
-        cy = r.center().y()
-        # ⭐ favourite
-        favs = self.win._opts.get("fav_folders") or []
-        f = QtGui.QFont(opt.font); f.setPointSizeF(8.5)
-        p.setFont(f)
-        p.setPen(QtGui.QColor("#F59E0B" if path in favs else "#D5DAE1"))
-        p.drawText(QtCore.QRectF(x, r.top(), 14, r.height()), QtCore.Qt.AlignCenter,
-                   "★" if path in favs else "☆")
-        x += 18
-        # rangin gol icon — (v193) chhota, taaki rows patli rahein
-        c1, c2 = self.PALETTE[(sum(ord(ch) for ch in name)) % 6]
-        g = QtGui.QLinearGradient(x, cy - 12, x + 24, cy + 12)
-        g.setColorAt(0, QtGui.QColor(c1)); g.setColorAt(1, QtGui.QColor(c2))
-        p.setPen(QtCore.Qt.NoPen); p.setBrush(QtGui.QBrush(g))
-        p.drawEllipse(QtCore.QPointF(x + 12, cy), 12, 12)
-        p.setPen(QtGui.QPen(QtGui.QColor("#FFFFFF"), 1.5))
-        p.setBrush(QtGui.QColor(255, 255, 255, 60))
-        if isdir:
-            p.drawRoundedRect(QtCore.QRectF(x + 6, cy - 3, 12, 7.5), 1.5, 1.5)
-            p.drawLine(QtCore.QPointF(x + 6, cy - 3), QtCore.QPointF(x + 8, cy - 5.2))
-            p.drawLine(QtCore.QPointF(x + 8, cy - 5.2), QtCore.QPointF(x + 11, cy - 5.2))
-            p.drawLine(QtCore.QPointF(x + 11, cy - 5.2), QtCore.QPointF(x + 12.5, cy - 3))
-        else:
-            p.drawRoundedRect(QtCore.QRectF(x + 7.5, cy - 5.5, 9, 11), 1.5, 1.5)
-            p.drawLine(QtCore.QPointF(x + 10, cy - 1.5), QtCore.QPointF(x + 14.5, cy - 1.5))
-            p.drawLine(QtCore.QPointF(x + 10, cy + 1.5), QtCore.QPointF(x + 13, cy + 1.5))
-        x += 30
+        # (v195) user request: gol icon aur ⭐ hata diye — card me sirf naam
+        # + neeche date/size; row aur bhi saaf/halki
+        x = r.left() + 12
+        f = QtGui.QFont(opt.font)
         # right: sirf ⋮ (v193: NEW/Recent pill + DP/SC badge hata diye)
         p.setPen(QtGui.QColor("#9CA3AF"))
         f.setPointSizeF(9); p.setFont(f)
@@ -13550,6 +13526,8 @@ if the toggle is ticked).</p>
         QtCore.QTimer.singleShot(1400, self._detect_device_name)   # Device me naam dikhao
         # Ctrl+O = koi folder kholo (sidebar me) · Ctrl+V = clipboard se paste
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+O"), self, self.open_existing_folder)
+        # (v195) Ctrl+Shift+N = naya folder (Explorer jaisa)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+N"), self, self.new_library_folder)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+V"), self, self._paste_from_clipboard)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+C"), self, self._copy_pages_to_clipboard)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Y"), self, self._hist_redo_do)   # redo (alt)
@@ -15522,6 +15500,11 @@ if the toggle is ticked).</p>
                 favs = self._opts.get("fav_folders") or []
                 menu.addAction("⭐ Remove favourite" if path in favs else "⭐ Add favourite",
                                lambda: self._toggle_fav(path))
+                # (v195) folder DELETE — Recycle Bin me (wapas laa sakte hain)
+                menu.addSeparator()
+                menu.addAction(self.L("🗑 Folder delete (Recycle Bin)",
+                                      "🗑 Delete folder (Recycle Bin)"),
+                               lambda: self._delete_folder(path))
             else:
                 menu.addAction("📖 Open", lambda: self._open_path(path))
                 pinned = self._opts.get("pinned_files") or []
@@ -16618,6 +16601,35 @@ if the toggle is ticked).</p>
                 json.dump(items, fh, ensure_ascii=False)
         except Exception:
             pass
+
+    def _delete_folder(self, path):
+        """(v195) Poora folder Recycle Bin me — pehle poochta hai (andar ki
+        files ki ginti ke saath); wapas Recycle Bin se laa sakte hain."""
+        try:
+            n = self._fcnt(path)
+        except Exception:
+            n = -1
+        nm = os.path.basename(path) or path
+        msg = (self.L('"%s" folder (andar %d files) Recycle Bin me daalein?\n(wapas la sakte hain)',
+                      'Move folder "%s" (%d files inside) to Recycle Bin?\n(restorable)') % (nm, max(0, n))
+               if n >= 0 else
+               self.L('"%s" folder Recycle Bin me daalein? (wapas la sakte hain)',
+                      'Move folder "%s" to Recycle Bin? (restorable)') % nm)
+        if QtWidgets.QMessageBox.question(
+                self, "Delete", msg,
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            return
+        if self._trash_file(path):
+            self.status.showMessage(self.L('🗑 "%s" Recycle Bin me chala gaya',
+                                           '🗑 "%s" moved to Recycle Bin') % nm, 6000)
+            try:
+                self._ev_push("folder:delete")
+            except Exception:
+                pass
+        else:
+            self._warn(self.L("Folder delete nahi ho paya (koi file khuli ho sakti hai).",
+                              "Could not delete the folder (a file inside may be open)."))
 
     def _trash_file(self, path):
         """File ko Recycle Bin me le jao (delete karne ke bajay) — wapas laai
