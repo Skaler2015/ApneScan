@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="420" viewBox="0 0 1600 420">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#15283E"/><stop offset="1" stop-color="#0B1930"/>
+  </linearGradient>
+  <linearGradient id="ribbonL" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#2FD9C8"/><stop offset="1" stop-color="#0E8FA0"/>
+  </linearGradient>
+  <linearGradient id="ribbonR" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#12809A"/><stop offset="1" stop-color="#0A5B77"/>
+  </linearGradient>
+  <linearGradient id="doc" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#FFFFFF"/><stop offset=".8" stop-color="#F2F7FB"/>
+    <stop offset="1" stop-color="#DCE9F4"/>
+  </linearGradient>
+  <linearGradient id="img" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#3BE3D2"/><stop offset="1" stop-color="#14B4AC"/>
+  </linearGradient>
+  <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#2EE6E6" stop-opacity="0"/>
+    <stop offset=".2" stop-color="#7DF6F2" stop-opacity=".85"/>
+    <stop offset=".5" stop-color="#EAFFFF"/>
+    <stop offset=".8" stop-color="#7DF6F2" stop-opacity=".85"/>
+    <stop offset="1" stop-color="#2EE6E6" stop-opacity="0"/>
+  </linearGradient>
+  <linearGradient id="trayTop" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#25384E"/><stop offset="1" stop-color="#101F33"/>
+  </linearGradient>
+  <linearGradient id="trayFace" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#FDFEFF"/><stop offset=".55" stop-color="#C7D2DE"/>
+    <stop offset="1" stop-color="#8E9AAB"/>
+  </linearGradient>
+  <radialGradient id="slotGlow" cx=".5" cy=".5" r=".62">
+    <stop offset="0" stop-color="#5BF3EC" stop-opacity=".95"/>
+    <stop offset=".7" stop-color="#19C8D8" stop-opacity=".55"/>
+    <stop offset="1" stop-color="#19C8D8" stop-opacity="0"/>
+  </radialGradient>
+  <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+    <feGaussianBlur stdDeviation="10"/>
+  </filter>
+  <filter id="soft4" x="-40%" y="-40%" width="180%" height="180%">
+    <feGaussianBlur stdDeviation="4"/>
+  </filter>
+  <filter id="dropsh" x="-30%" y="-30%" width="160%" height="160%">
+    <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.38"/>
+  </filter>
+</defs>
+<!-- mark: icon ka artwork chhota karke -->
+<g transform="translate(30,30) scale(0.3515)">
+<rect x="8" y="8" width="1008" height="1008" rx="216" fill="url(#bg)"/>
+<rect x="8" y="8" width="1008" height="1008" rx="216" fill="none" stroke="#3A5573" stroke-opacity=".55" stroke-width="3"/>
+
+<rect x="8" y="8" width="1008" height="1008" rx="216" fill="url(#bg)"/>
+<rect x="8" y="8" width="1008" height="1008" rx="216" fill="none" stroke="#3A5573" stroke-opacity=".55" stroke-width="3"/>
+
+<!-- A ribbon (behind document) -->
+<g>
+  <path d="M512 74 L208 706 L296 706 L512 190 Z" fill="url(#ribbonL)"/>
+  <path d="M512 74 L816 706 L728 706 L512 190 Z" fill="url(#ribbonR)"/>
+</g>
+
+<!-- document (fold top-right) -->
+<g filter="url(#dropsh)">
+  <path d="M330 210 L610 210 L700 300 L700 762 L330 762 Z" fill="url(#doc)"/>
+  <path d="M610 210 L610 300 L700 300 Z" fill="#C3D2E0"/>
+</g>
+
+<!-- document content -->
+<rect x="368" y="262" width="180" height="160" rx="16" fill="url(#img)"/>
+<circle cx="414" cy="304" r="20" fill="#123B5C"/>
+<path d="M376 404 L432 344 L466 380 L500 336 L548 404 Z" fill="#0E6E80"/>
+<g fill="#6C8AA6">
+  <rect x="576" y="292" width="96" height="14" rx="7"/>
+  <rect x="576" y="322" width="96" height="14" rx="7"/>
+  <rect x="576" y="352" width="76" height="14" rx="7"/>
+</g>
+<g fill="#9FB4C8">
+  <rect x="368" y="452" width="304" height="14" rx="7"/>
+  <rect x="368" y="484" width="304" height="14" rx="7"/>
+  <rect x="368" y="516" width="240" height="14" rx="7"/>
+</g>
+<g fill="#9FB4C8">
+  <rect x="368" y="600" width="304" height="14" rx="7"/>
+  <rect x="368" y="632" width="220" height="14" rx="7"/>
+</g>
+
+<!-- scan beam -->
+<rect x="120" y="540" width="784" height="34" fill="url(#beam)" opacity=".55" filter="url(#soft)"/>
+<rect x="150" y="551" width="724" height="12" fill="url(#beam)"/>
+<rect x="330" y="553" width="370" height="8" fill="#F4FFFF"/>
+
+<!-- scanner tray -->
+<g>
+  <!-- top surface (perspective slab) -->
+  <path d="M330 640 Q322 632 348 632 L676 632 Q702 632 694 640 L764 744 Q772 756 748 756 L276 756 Q252 756 260 744 Z" fill="url(#trayTop)"/>
+  <!-- glowing slot -->
+  <rect x="308" y="650" width="408" height="72" rx="22" fill="url(#slotGlow)" filter="url(#soft4)"/>
+  <rect x="330" y="666" width="364" height="40" rx="14" fill="#0D2135"/>
+  <rect x="330" y="666" width="364" height="40" rx="14" fill="none" stroke="#43E9E4" stroke-width="5" filter="url(#soft4)"/>
+  <!-- silver front face -->
+  <path d="M240 752 L784 752 Q800 752 800 772 L800 806 Q800 830 776 830 L248 830 Q224 830 224 806 L224 772 Q224 752 240 752 Z" fill="url(#trayFace)"/>
+  <!-- dark underside -->
+  <path d="M236 830 L788 830 Q776 856 744 856 L280 856 Q248 856 236 830 Z" fill="#132238"/>
+  <!-- indicator light -->
+  <rect x="700" y="782" width="58" height="14" rx="7" fill="#26E2DC"/>
+  <rect x="700" y="782" width="58" height="14" rx="7" fill="none" stroke="#7DF6F2" stroke-width="3" opacity=".6" filter="url(#soft4)"/>
+</g>
+
+
+</g>
+<text x="440" y="235" font-family="Arial, 'DejaVu Sans', sans-serif" font-weight="800"
+      font-size="190" letter-spacing="1"><tspan fill="#15283E">Apne</tspan><tspan fill="#14B4AC">Scan</tspan></text>
+<text x="448" y="316" font-family="Arial, 'DejaVu Sans', sans-serif" font-weight="600"
+      font-size="46" letter-spacing="20" fill="#5D7490">SCAN · SAVE · SHARE</text>
+</svg>
