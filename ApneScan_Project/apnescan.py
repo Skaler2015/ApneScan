@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "197"
+VERSION = "198"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2524,12 +2524,23 @@ class OptionsDialog(QtWidgets.QDialog):
         self.opts = dict(DEFAULT_OPTIONS); self.opts.update(opts or {})
 
         outer = QtWidgets.QVBoxLayout(self)
-        scroll = QtWidgets.QScrollArea(); scroll.setWidgetResizable(True)
-        inner = QtWidgets.QWidget(); form = QtWidgets.QFormLayout(inner)
-        scroll.setWidget(inner); outer.addWidget(scroll, 1)
+        # (v198) Settings ab CATEGORY-WISE TABS me — har section apna tab,
+        # sab kuch ek saath, dhoondhna aasaan (user request)
+        self.tabs = QtWidgets.QTabWidget()
+        outer.addWidget(self.tabs, 1)
+        form = None
+        _TICON = {"Interface": "🎨", "Save": "💾", "Image cleanup": "🪄",
+                  "Output": "📤", "Workflow": "⚡", "Records & safety": "🛟"}
 
         def header(t):
-            lbl = QtWidgets.QLabel("<b>%s</b>" % t); form.addRow(lbl)
+            # har section = naya TAB (apni scroll ke saath)
+            nonlocal form
+            page = QtWidgets.QWidget()
+            form = QtWidgets.QFormLayout(page)
+            sc = QtWidgets.QScrollArea(); sc.setWidgetResizable(True)
+            sc.setFrameShape(QtWidgets.QFrame.NoFrame)
+            sc.setWidget(page)
+            self.tabs.addTab(sc, _TICON.get(t, "⚙") + " " + t)
 
         def qhelp(tip):
             h = QtWidgets.QLabel("?")
@@ -2732,6 +2743,45 @@ class OptionsDialog(QtWidgets.QDialog):
         djr.addWidget(self.djpeg_edit, 1); djr.addWidget(djb)
         djw = QtWidgets.QWidget(); djw.setLayout(djr)
         form.addRow(lblhelp("Daily backup folder:", 'हिन्दी: रोज़ के JPEG बैकअप किस जगह बनें, वह फ़ोल्डर (अपने हिसाब से बदलो)।\nEnglish: Where the daily JPEG backups are created (change as you like).'), djw)
+
+        # ---- (v198) ⌨ SHORTCUTS tab — saare shortcuts EK jagah ----
+        _kb = QtWidgets.QWidget()
+        _kbv = QtWidgets.QVBoxLayout(_kb)
+        _kbl = QtWidgets.QLabel(
+            "<style>td{padding:2px 10px;font-size:12px;} b{color:#4F46E5;}"
+            "h4{margin:10px 0 3px 0;}</style>"
+            "<h4>🖨 Scan</h4><table>"
+            "<tr><td><b>Enter</b></td><td>Profile ki setting se scan</td></tr>"
+            "<tr><td><b>F3 / F4 / F5 / F6</b></td><td>150 / 200 / 300 / 600 dpi par scan</td></tr>"
+            "<tr><td><b>F7</b></td><td>Apni dpi likh kar scan</td></tr>"
+            "<tr><td><b>Space</b></td><td>Chune pages save</td></tr>"
+            "<tr><td><b>Ctrl+S</b></td><td>Sabhi pages save (PDF)</td></tr></table>"
+            "<h4>📄 Pages (thumbnail area)</h4><table>"
+            "<tr><td><b>F2</b></td><td>Page ka naam badlo</td></tr>"
+            "<tr><td><b>Delete</b></td><td>Page hatao (seedha — confirm nahi)</td></tr>"
+            "<tr><td><b>Ctrl+Z / Ctrl+Y</b></td><td>Wapas lao / dobara karo</td></tr>"
+            "<tr><td><b>Ctrl+C / Ctrl+V</b></td><td>Page copy / paste</td></tr>"
+            "<tr><td><b>Ctrl+P</b></td><td>Print</td></tr>"
+            "<tr><td><b>Ctrl+scroll</b></td><td>Thumbnail / preview zoom</td></tr></table>"
+            "<h4>📁 Meri Files</h4><table>"
+            "<tr><td><b>F2</b></td><td>File/folder ka naam badlo</td></tr>"
+            "<tr><td><b>Ctrl+Shift+N</b></td><td>Naya folder (bante hi khulta hai)</td></tr>"
+            "<tr><td><b>Ctrl+O</b></td><td>Koi bhi folder kholo</td></tr>"
+            "<tr><td><b>Esc</b></td><td>Meri Files panel band</td></tr>"
+            "<tr><td><b>Double-click</b></td><td>Folder ke andar jao</td></tr></table>"
+            "<h4>🖥 Layout</h4><table>"
+            "<tr><td><b>F8</b></td><td>Left sidebar dikhao/chhupao</td></tr>"
+            "<tr><td><b>F9</b></td><td>Scan-settings patti dikhao/chhupao</td></tr>"
+            "<tr><td><b>Ctrl+K</b></td><td>Upar wali search me jao</td></tr>"
+            "<tr><td><b>Alt+M</b></td><td>File/Edit menu-patti dikhao/chhupao</td></tr>"
+            "<tr><td><b>Alt+K</b></td><td>Shortcut-line dikhao/chhupao</td></tr></table>")
+        _kbl.setTextFormat(QtCore.Qt.RichText)
+        _kbl.setWordWrap(True)
+        _kbv.addWidget(_kbl); _kbv.addStretch(1)
+        _kbs = QtWidgets.QScrollArea(); _kbs.setWidgetResizable(True)
+        _kbs.setFrameShape(QtWidgets.QFrame.NoFrame)
+        _kbs.setWidget(_kb)
+        self.tabs.addTab(_kbs, "⌨ Shortcuts")
 
         btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept); btns.rejected.connect(self.reject)
