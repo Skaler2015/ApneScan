@@ -153,7 +153,44 @@ def _orient_layout(img):
         return (0, 0)
 
 
-def detect_orientation(img, use_ocr=True, use_text=True, use_layout=True, threshold=80):
+def _orient_ocr_vote(img):
+    """METHOD 1.5 (v200) — 4-DISHA OCR VOTE: page ko 0/90/180/270 me ghuma
+    kar chhota OCR chalao; jis disha me shabd sabse BHAROSE se pade wahi
+    sahi disha. OSD fail ho jaye tab bhi 180° ULTA page pakad leta hai
+    (text/layout methods ye nahi kar sakte). Chhoti copy par chalta hai.
+    Returns (angle, conf%). Kam margin par conf ghata deta hai — galat
+    rotation kabhi nahi."""
+    import pytesseract
+    g = img.convert("L")
+    w, h = g.size
+    if max(w, h) > 900:
+        sc = 900.0 / max(w, h)
+        g = g.resize((max(1, int(w * sc)), max(1, int(h * sc))))
+    best, second, besta = -1.0, -1.0, 0
+    for a in (0, 90, 180, 270):
+        t = g if a == 0 else g.rotate(-a, expand=True)
+        try:
+            d = pytesseract.image_to_data(
+                t, output_type=pytesseract.Output.DICT, config="--psm 6")
+            confs = [int(float(c)) for c in d.get("conf", [])
+                     if str(c).replace(".", "").lstrip("-").isdigit() and float(c) >= 0]
+            score = (sum(confs) / float(len(confs))) if len(confs) >= 5 else 0.0
+        except Exception:
+            score = 0.0
+        if score > best:
+            second = best
+            best, besta = score, a
+        elif score > second:
+            second = score
+    if best <= 0:
+        return 0, 0
+    margin = best - max(0.0, second)
+    conf = int(min(99, best if margin >= 8 else best * 0.6))
+    return besta, conf
+
+
+def detect_orientation(img, use_ocr=True, use_text=True, use_layout=True, threshold=80,
+                       use_vote=None):
     """Smart multi-method orientation detection (offline, priority-ordered).
     Returns {'angle':0/90/180/270, 'conf':0-100, 'method':'osd'/'text'/'layout'/'none',
     'decision':'rotate'/'keep'}. Rotates ONLY when confidence >= threshold, so an
@@ -165,6 +202,18 @@ def detect_orientation(img, use_ocr=True, use_text=True, use_layout=True, thresh
             rot, raw, _script = _orient_osd(img)
             res = {"angle": (rot if rot in (90, 180, 270) else 0),
                    "conf": _orient_osd_pct(raw), "method": "osd", "decision": "keep"}
+        except Exception:
+            pass
+    # METHOD 1.5 — (v200) 4-disha OCR-vote: OSD na ho ya kam bharosa ho to
+    # chaaron disha me chhota OCR — 180° ulta page bhi pakda jaata hai
+    if use_vote is None:
+        use_vote = use_text
+    if use_vote and tesseract_available() and (res["method"] == "none" or res["conf"] < threshold):
+        try:
+            _a, _c = _orient_ocr_vote(img)
+            if _c > res["conf"]:
+                res = {"angle": (_a if _a in (90, 180, 270) else 0),
+                       "conf": _c, "method": "ocr4", "decision": "keep"}
         except Exception:
             pass
     # METHODS 2 & 3 — fallbacks when OSD is unavailable or not confident enough

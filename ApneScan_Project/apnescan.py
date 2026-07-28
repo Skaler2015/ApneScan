@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "199"
+VERSION = "200"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -20279,6 +20279,16 @@ if the toggle is ticked).</p>
         if it is None:
             self._warn("Select a page first."); return
         cur = it.data(TITLE_ROLE) or ""
+        # (v200) naam khaali/generic ("Page 3") ho to SMART sujhaav pehle se
+        # bhara milta hai — shakl-yaaddasht se (offline, turant); pasand na
+        # aaye to bas type karke badal do
+        if not cur or re.match(r"^page[ _]?\d*$", cur.strip(), re.I):
+            try:
+                _sug = self._visual_name_for_path(it.data(QtCore.Qt.UserRole))
+                if _sug:
+                    cur = _sug
+            except Exception:
+                pass
         name, ok = self._ask_name("Rename", "Name for this page:", cur)
         if not ok:
             return
