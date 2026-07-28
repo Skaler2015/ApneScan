@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "191"
+VERSION = "192"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -5509,6 +5509,151 @@ class ThumbDelegate(QtWidgets.QStyledItemDelegate):
                 painter.restore()
             except Exception:
                 pass
+
+
+class FilesCardDelegate(QtWidgets.QStyledItemDelegate):
+    """(v192) My Files ka PREMIUM card-view — har folder/file ek white
+    rounded CARD: rangin gol icon, bold naam + (DP/SC/MR) badge, date •
+    file-count, NEW/Recent pill, ⭐ aur ⋮. Selection = neeli border +
+    left-bar (user ke mockup jaisa)."""
+    PALETTE = (("#3B82F6", "#1D4ED8"), ("#34D399", "#059669"),
+               ("#FBBF24", "#EA580C"), ("#A78BFA", "#7C3AED"),
+               ("#F472B6", "#DB2777"), ("#22D3EE", "#0891B2"))
+    BADGE = {"DP": ("#DBEAFE", "#1D4ED8"), "SC": ("#DCFCE7", "#15803D"),
+             "MR": ("#FFEDD5", "#C2410C"), "VIP": ("#FEE2E2", "#B91C1C")}
+
+    def __init__(self, win, view):
+        super().__init__(view)
+        self.win = win
+
+    def sizeHint(self, opt, idx):
+        return QtCore.QSize(max(200, opt.rect.width()), 62)
+
+    def paint(self, p, opt, idx):
+        try:
+            self._paint(p, opt, idx)
+        except Exception:
+            QtWidgets.QStyledItemDelegate.paint(self, p, opt, idx)
+
+    def _paint(self, p, opt, idx):
+        m = idx.model()
+        path = m.filePath(idx)
+        name = m.fileName(idx)
+        isdir = m.isDir(idx)
+        try:
+            mt = m.lastModified(idx)
+            mdt = mt.toPyDateTime() if hasattr(mt, "toPyDateTime") else None
+        except Exception:
+            mdt = None
+        r = QtCore.QRectF(opt.rect).adjusted(2, 3, -6, -3)
+        sel = bool(opt.state & QtWidgets.QStyle.State_Selected)
+        hov = bool(opt.state & QtWidgets.QStyle.State_MouseOver)
+        p.save()
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        # card
+        p.setPen(QtGui.QPen(QtGui.QColor("#2563EB" if sel else ("#93C5FD" if hov else "#E5E7EB")), 1.6 if sel else 1))
+        p.setBrush(QtGui.QColor("#EFF6FF" if sel else "#FFFFFF"))
+        p.drawRoundedRect(r, 11, 11)
+        if sel:
+            p.setPen(QtCore.Qt.NoPen)
+            p.setBrush(QtGui.QColor("#2563EB"))
+            p.drawRoundedRect(QtCore.QRectF(r.left() - 1, r.top() + 10, 3.5, r.height() - 20), 2, 2)
+        x = r.left() + 9
+        cy = r.center().y()
+        # ⭐ favourite
+        favs = self.win._opts.get("fav_folders") or []
+        f = QtGui.QFont(opt.font); f.setPointSizeF(10)
+        p.setFont(f)
+        p.setPen(QtGui.QColor("#F59E0B" if path in favs else "#D5DAE1"))
+        p.drawText(QtCore.QRectF(x, r.top(), 16, r.height()), QtCore.Qt.AlignCenter,
+                   "★" if path in favs else "☆")
+        x += 22
+        # rangin gol icon
+        c1, c2 = self.PALETTE[(sum(ord(ch) for ch in name)) % 6]
+        g = QtGui.QLinearGradient(x, cy - 17, x + 34, cy + 17)
+        g.setColorAt(0, QtGui.QColor(c1)); g.setColorAt(1, QtGui.QColor(c2))
+        p.setPen(QtCore.Qt.NoPen); p.setBrush(QtGui.QBrush(g))
+        p.drawEllipse(QtCore.QPointF(x + 17, cy), 17, 17)
+        p.setPen(QtGui.QPen(QtGui.QColor("#FFFFFF"), 1.8))
+        p.setBrush(QtGui.QColor(255, 255, 255, 60))
+        if isdir:
+            fr = QtCore.QRectF(x + 9, cy - 4.5, 16, 10.5)
+            p.drawRoundedRect(fr, 2, 2)
+            p.drawLine(QtCore.QPointF(x + 9, cy - 4.5), QtCore.QPointF(x + 12, cy - 7.5))
+            p.drawLine(QtCore.QPointF(x + 12, cy - 7.5), QtCore.QPointF(x + 16, cy - 7.5))
+            p.drawLine(QtCore.QPointF(x + 16, cy - 7.5), QtCore.QPointF(x + 18, cy - 4.5))
+        else:
+            p.drawRoundedRect(QtCore.QRectF(x + 11, cy - 7.5, 12, 15), 2, 2)
+            p.drawLine(QtCore.QPointF(x + 14, cy - 2), QtCore.QPointF(x + 20, cy - 2))
+            p.drawLine(QtCore.QPointF(x + 14, cy + 2), QtCore.QPointF(x + 18, cy + 2))
+        x += 42
+        # right: ⋮ + status pill
+        p.setPen(QtGui.QColor("#9CA3AF"))
+        f.setPointSizeF(10); p.setFont(f)
+        dots_x = r.right() - 16
+        p.drawText(QtCore.QRectF(dots_x - 4, r.top(), 16, r.height()), QtCore.Qt.AlignCenter, "⋮")
+        pill_right = dots_x - 8
+        days = None
+        if mdt is not None:
+            days = (datetime.datetime.now().date() - mdt.date()).days
+        if days is not None and days <= 3:
+            txt = "NEW" if days == 0 else "Recent"
+            bgc, fgc = ("#DCFCE7", "#15803D") if days == 0 else ("#FFEDD5", "#C2410C")
+            f2 = QtGui.QFont(opt.font); f2.setPointSizeF(6.6); f2.setBold(True)
+            fm2 = QtGui.QFontMetricsF(f2)
+            w2 = fm2.horizontalAdvance(txt) + 12
+            pr = QtCore.QRectF(pill_right - w2, cy - 8, w2, 16)
+            p.setPen(QtCore.Qt.NoPen); p.setBrush(QtGui.QColor(bgc))
+            p.drawRoundedRect(pr, 8, 8)
+            p.setPen(QtGui.QColor(fgc)); p.setFont(f2)
+            p.drawText(pr, QtCore.Qt.AlignCenter, txt)
+            pill_right -= (w2 + 6)
+        # naam + (DP/SC) badge
+        disp = name
+        btxt = None
+        mm = re.search(r"\(([A-Za-z]{2,3})\)\s*$", name)
+        if mm:
+            btxt = mm.group(1).upper()
+            disp = name[:mm.start()].strip()
+        f3 = QtGui.QFont(opt.font); f3.setPointSizeF(9); f3.setBold(True)
+        fm3 = QtGui.QFontMetricsF(f3)
+        avail = pill_right - x - 4
+        bw = 0
+        if btxt:
+            f4 = QtGui.QFont(opt.font); f4.setPointSizeF(6.6); f4.setBold(True)
+            bw = QtGui.QFontMetricsF(f4).horizontalAdvance(btxt) + 12
+        nm = fm3.elidedText(disp, QtCore.Qt.ElideRight, max(30, avail - bw - 6))
+        p.setFont(f3); p.setPen(QtGui.QColor("#111827"))
+        nr = QtCore.QRectF(x, r.top() + 8, avail, 16)
+        p.drawText(nr, QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, nm)
+        if btxt:
+            bx = x + min(fm3.horizontalAdvance(nm), avail - bw) + 6
+            bgc, fgc = self.BADGE.get(btxt, ("#F3E8FF", "#7E22CE"))
+            br = QtCore.QRectF(bx, r.top() + 9, bw, 14)
+            p.setPen(QtCore.Qt.NoPen); p.setBrush(QtGui.QColor(bgc))
+            p.drawRoundedRect(br, 7, 7)
+            p.setFont(f4); p.setPen(QtGui.QColor(fgc))
+            p.drawText(br, QtCore.Qt.AlignCenter, btxt)
+        # meta line: date • files/size
+        meta = ""
+        if mdt is not None:
+            meta = mdt.strftime("%d %b %Y")
+        if isdir:
+            n = self.win._fcnt(path)
+            if n >= 0:
+                meta += ("  •  %d files" % n) if meta else ("%d files" % n)
+        else:
+            try:
+                kb = m.size(idx) / 1024.0
+                sz = ("%.1f MB" % (kb / 1024.0)) if kb >= 1024 else ("%.0f KB" % kb)
+                meta += ("  •  " + sz) if meta else sz
+            except Exception:
+                pass
+        f5 = QtGui.QFont(opt.font); f5.setPointSizeF(7.2)
+        p.setFont(f5); p.setPen(QtGui.QColor("#6B7280"))
+        p.drawText(QtCore.QRectF(x, r.top() + 28, avail, 14),
+                   QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, meta)
+        p.restore()
 
 
 class SearchHLDelegate(QtWidgets.QStyledItemDelegate):
@@ -12589,19 +12734,61 @@ if the toggle is ticked).</p>
         self.files_panel.setObjectName("panel")
         fp = QtWidgets.QVBoxLayout(self.files_panel)
         fp.setContentsMargins(8, 8, 8, 8)
-        _hdr = QtWidgets.QLabel(self.L("📁 <b>Meri Files</b>", "📁 <b>My Files</b>"))
-        _hdr.setTextFormat(QtCore.Qt.RichText)
-        _hdr.setToolTip("Folders and documents in the save folder — create a new folder here "
-                        "and save scanned PDFs straight into it.")
-        _hdrrow = QtWidgets.QHBoxLayout(); _hdrrow.setContentsMargins(0, 0, 0, 0)
-        _hdrrow.addWidget(_hdr); _hdrrow.addStretch(1)
+        # ✨ (v192) PREMIUM gradient header — user ke mockup jaisa
+        _ghd = QtWidgets.QFrame(); _ghd.setObjectName("mfhead")
+        _ghd.setStyleSheet(
+            "#mfhead{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #2563EB,stop:1 #1D4ED8);"
+            "border-radius:12px;}#mfhead QLabel{background:transparent;color:#fff;border:none;}"
+            "#mfhead QToolButton{background:rgba(255,255,255,0.16);border:none;border-radius:8px;"
+            "color:#fff;font-size:12px;padding:4px;min-width:26px;min-height:22px;}"
+            "#mfhead QToolButton:hover{background:rgba(255,255,255,0.3);}")
+        _gv = QtWidgets.QVBoxLayout(_ghd)
+        _gv.setContentsMargins(11, 9, 11, 9); _gv.setSpacing(3)
+        _g1 = QtWidgets.QHBoxLayout(); _g1.setSpacing(7)
+        _gt = QtWidgets.QLabel("📁  <b style='font-size:14px'>My Files</b>")
+        _gt.setTextFormat(QtCore.Qt.RichText)
+        _g1.addWidget(_gt)
+        self._mf_count = QtWidgets.QLabel("")
+        self._mf_count.setStyleSheet(
+            "background:rgba(255,255,255,0.22);color:#fff;font-size:10px;font-weight:700;"
+            "border-radius:9px;padding:1px 8px;")
+        _g1.addWidget(self._mf_count)
+        _g1.addStretch(1)
+        _bset = QtWidgets.QToolButton(); _bset.setText("⚙")
+        _bset.setCursor(QtCore.Qt.PointingHandCursor)
+        _bset.setToolTip(self.L("Settings kholo", "Open settings"))
+        _bset.clicked.connect(self.open_options)
+        _g1.addWidget(_bset)
         _bfhelp = QtWidgets.QToolButton(); _bfhelp.setText("❓")
-        _bfhelp.setAutoRaise(True); _bfhelp.setCursor(QtCore.Qt.PointingHandCursor)
+        _bfhelp.setCursor(QtCore.Qt.PointingHandCursor)
         _bfhelp.setToolTip(self.L("Meri Files ki poori guide (Hindi + English)",
                                   "Full My Files guide (Hindi + English)"))
         _bfhelp.clicked.connect(self.show_files_guide)
-        _hdrrow.addWidget(_bfhelp)
-        fp.addLayout(_hdrrow)
+        _g1.addWidget(_bfhelp)
+        _gv.addLayout(_g1)
+        _gsub = QtWidgets.QLabel(self.L("Aapke saare scan kiye documents",
+                                        "Manage all your scanned documents"))
+        _gsub.setStyleSheet("color:#DBEAFE;font-size:10px;")
+        _gv.addWidget(_gsub)
+        _grow = QtWidgets.QHBoxLayout(); _grow.setSpacing(8)
+        try:
+            _du2 = shutil.disk_usage(os.path.expanduser("~"))
+            _gb2 = 1024.0 ** 3
+            _stx = "Storage  <b>%.0f / %.0f GB</b>" % ((_du2.total - _du2.free) / _gb2, _du2.total / _gb2)
+            _sfrac = max(0.03, min(1.0, 1.0 - _du2.free / float(_du2.total or 1)))
+        except Exception:
+            _stx, _sfrac = "", 0.0
+        _gst = QtWidgets.QLabel(_stx); _gst.setTextFormat(QtCore.Qt.RichText)
+        _gst.setStyleSheet("color:#DBEAFE;font-size:9.5px;")
+        _grow.addWidget(_gst)
+        _gtr = QtWidgets.QFrame(); _gtr.setFixedHeight(6)
+        _gtr.setStyleSheet("background:rgba(255,255,255,0.25);border-radius:3px;border:none;")
+        _gfl = QtWidgets.QFrame(_gtr)
+        _gfl.setStyleSheet("background:#fff;border-radius:3px;border:none;")
+        _gfl.setGeometry(0, 0, int(120 * _sfrac), 6)
+        _grow.addWidget(_gtr, 1)
+        _gv.addLayout(_grow)
+        fp.addWidget(_ghd)
         # Search: kisi bhi folder ke andar naam se dhoondo (folder chuna ho to
         # usi ke andar, warna poore save-folder me)
         _srow = QtWidgets.QHBoxLayout(); _srow.setSpacing(4)
@@ -12626,6 +12813,37 @@ if the toggle is ticked).</p>
         self.btn_search_text.hide()
         self._files_srow = _srow
         fp.addLayout(_srow)
+        # ✨ (v192) Filter CHIPS — mockup jaise (Fav/Recent/Today/All);
+        # andar se wahi purana files_filter combo chalta hai
+        _chrow = QtWidgets.QHBoxLayout(); _chrow.setSpacing(5)
+        self._mf_chips = {}
+
+        def _chip(txt, val):
+            b = QtWidgets.QPushButton(txt)
+            b.setCheckable(True)
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setStyleSheet(
+                "QPushButton{background:#fff;border:1px solid #E5E7EB;border-radius:12px;"
+                "padding:4px 9px;font-size:10px;font-weight:600;color:#374151;}"
+                "QPushButton:checked{background:#2563EB;border-color:#2563EB;color:#fff;}"
+                "QPushButton:hover{border-color:#93C5FD;}")
+
+            def _on(_c=False, v=val, me=b):
+                for _o in self._mf_chips.values():
+                    _o.setChecked(_o is me)
+                ix = self.files_filter.findData(v)
+                if ix >= 0:
+                    self.files_filter.setCurrentIndex(ix)
+            b.clicked.connect(_on)
+            self._mf_chips[val] = b
+            _chrow.addWidget(b)
+            return b
+        _chip("⭐ Fav", "pinned")
+        _chip("🕒 " + self.L("Hafta", "Recent"), "week")
+        _chip("📅 " + self.L("Aaj", "Today"), "today")
+        _chip("📂 " + self.L("Sab", "All"), "all").setChecked(True)
+        _chrow.addStretch(1)
+        fp.addLayout(_chrow)
         # ⬅ Peeche · ⭐ Favourites (dropdown) · ⇅ Sort
         self.fav_bar = QtWidgets.QHBoxLayout()
         self.fav_bar.setSpacing(4)
@@ -12755,6 +12973,21 @@ if the toggle is ticked).</p>
         self.files_tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.files_tree.customContextMenuRequested.connect(self._files_tree_menu)
         self.files_tree.selectionModel().currentChanged.connect(self._files_sel_changed)
+        # ✨ (v192) PREMIUM card-view: har row ek card (mockup jaisa)
+        self._fcnt_cache = {}
+        self.files_tree.setItemDelegate(FilesCardDelegate(self, self.files_tree))
+        try:
+            self.files_model.directoryLoaded.connect(self._mf_update_count)
+        except Exception:
+            pass
+        self.files_tree.setMouseTracking(True)
+        self.files_tree.setIndentation(0)
+        self.files_tree.setUniformRowHeights(True)
+        self.files_tree.setStyleSheet(
+            "QTreeView{background:#F8FAFC;border:none;outline:0;}"
+            "QTreeView::item{border:none;background:transparent;}"
+            "QTreeView::item:selected{background:transparent;}"
+            "QTreeView::branch{background:transparent;border-image:none;image:none;}")
         self._apply_files_sort()          # user ki saved sort-pasand lagao
         self._update_panel_nav()          # breadcrumb + back-button
         self.files_tree.setToolTip("Double-click a folder = go INSIDE it (shows only\n"
@@ -12815,6 +13048,16 @@ if the toggle is ticked).</p>
             "Save the currently scanned/imported pages as a PDF straight into the selected folder."))
         self.btn_save_here.clicked.connect(self.save_into_selected_folder)
         fp.addWidget(self.btn_save_here)
+        # ✨ (v192) premium look: Save-here neela gradient + tip line (mockup)
+        self.btn_save_here.setStyleSheet(
+            "QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #2563EB,stop:1 #1D4ED8);"
+            "border:none;border-radius:11px;color:#fff;font-weight:700;font-size:12.5px;}"
+            "QPushButton:hover{background:#1D4ED8;}QPushButton:pressed{background:#1E40AF;}")
+        _mtip = QtWidgets.QLabel(self.L("💡 Folder kholne ke liye double-click karein",
+                                        "💡 Tip: Double click on any folder to open"))
+        _mtip.setAlignment(QtCore.Qt.AlignCenter)
+        _mtip.setStyleSheet("color:#9CA3AF;font-size:9px;")
+        fp.addWidget(_mtip)
         self.files_panel.setMinimumWidth(180)
         # user ki request: My Files ab BAAYIN taraf (jahan pehle settings-panel
         # tha); customize se right bhi ho sakta hai
@@ -16625,6 +16868,40 @@ if the toggle is ticked).</p>
                     spl.setSizes(sizes)
             except Exception:
                 pass
+
+    def _fcnt(self, path):
+        """(v192) Folder ke andar kitni files — card-view ke liye; cache ke
+        saath (mtime badle to hi dobara ginta hai). Fail par -1."""
+        try:
+            mt = os.path.getmtime(path)
+        except Exception:
+            return -1
+        c = self._fcnt_cache.get(path)
+        if c is not None and c[1] == mt:
+            return c[0]
+        try:
+            n = 0
+            with os.scandir(path) as it:
+                for e in it:
+                    if e.is_file():
+                        n += 1
+                    if n > 999:
+                        break
+        except Exception:
+            n = -1
+        self._fcnt_cache[path] = (n, mt)
+        if len(self._fcnt_cache) > 3000:
+            self._fcnt_cache.clear()
+        return n
+
+    def _mf_update_count(self, *_a):
+        """Header ki '248' badge — abhi khule folder ke items ki ginti."""
+        try:
+            ix = self.files_tree.rootIndex()
+            n = self.files_model.rowCount(ix)
+            self._mf_count.setText("{:,}".format(n))
+        except Exception:
+            pass
 
     def _nav_refresh_favs(self):
         """(v187) Sidebar me favourite FOLDERS ke seedhe buttons — jab bhi
