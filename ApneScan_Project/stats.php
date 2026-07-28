@@ -583,8 +583,9 @@ if (isset($_GET['admin'])) {
         $files = glob(__DIR__.'/apnescan_events/events-*.jsonl') ?: array();
         rsort($files);                        // nayi date wali file pehle
         $files = array_slice($files, 0, 90);  // pichhle 90 din tak
-        $total = 0; $out = array(); $skip = $off;
+        $total = 0; $out = array(); $skip = $off; $days = array();
         foreach ($files as $fp) {
+            $fdt2 = substr(basename($fp), 7, 10);   // events-YYYY-MM-DD.jsonl
             $lines = @file($fp, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) ?: array();
             $lines = array_reverse($lines);   // din ke andar bhi naya pehle
             foreach ($lines as $ln) {
@@ -593,12 +594,13 @@ if (isset($_GET['admin'])) {
                 if ($fq !== '' && strpos(strtolower((isset($j['e'])?$j['e']:'').' '
                         .(isset($j['u'])?$j['u']:'')), $fq) === false) continue;
                 $total++;
+                $days[$fdt2] = (isset($days[$fdt2])?$days[$fdt2]:0) + 1;  // us din ke kul
                 if ($skip > 0) { $skip--; continue; }
-                if (count($out) < $lim) $out[] = $j;
+                if (count($out) < $lim) { $j['d'] = $fdt2; $out[] = $j; }
             }
         }
         echo json_encode(array('ok'=>true,'total'=>$total,'off'=>$off,
-            'lim'=>$lim,'events'=>$out), JSON_UNESCAPED_UNICODE);
+            'lim'=>$lim,'events'=>$out,'days'=>$days), JSON_UNESCAPED_UNICODE);
         exit;
     }
     $t0=microtime(true);
@@ -3172,10 +3174,12 @@ function tlGo(p){ if(p<0)p=0; _tl.page=p;
   .then(function(r){return r.json();}).then(function(j){
     if(!j||!j.ok)return; _tl.total=j.total||0;
     var el=document.getElementById('tlList'); if(!el)return;
-    var out=[],lastD='';
+    var out=[],lastD='',days=j.days||{};
     (j.events||[]).forEach(function(e){
-      var d=new Date((e.t||0)*1000), ds=d.toLocaleDateString();
-      if(ds!==lastD){ out.push('<div style="color:var(--accent2);font-size:10px;margin:8px 0 4px;border-top:1px dashed rgba(148,163,184,.3);padding-top:6px">🗓 '+esc(ds)+'</div>'); lastD=ds; }
+      var d=new Date((e.t||0)*1000), ds=e.d||d.toLocaleDateString();
+      if(ds!==lastD){ var dn=days[e.d]||0;
+        out.push('<div style="color:var(--accent2);font-size:10px;margin:8px 0 4px;border-top:1px dashed rgba(148,163,184,.3);padding-top:6px">🗓 '+esc(ds)
+          +(dn?' <b style="color:var(--ink,#e2e8f0)">— '+dn+' events</b>':'')+'</div>'); lastD=ds; }
       out.push('<div class="aii"><span>'+(e.e==='app:start'?'🟢':(e.e==='app:close'?'🔴':'•'))+'</span><div>'
         +'<b>'+esc(e.u||e.c||'user')+'</b> — '+esc(dfLbl(e.e))
         +'<div style="color:var(--mut);font-size:9px">'+d.toLocaleTimeString()+'</div></div></div>');
