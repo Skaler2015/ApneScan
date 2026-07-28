@@ -3026,6 +3026,8 @@ function sgRender(){ var el=document.getElementById('sgGrid'); if(!el)return;
         +'🖨 Scanner: <b>'+esc(x.sm||'—')+'</b> &nbsp;·&nbsp; 🗂 Profile: <b>'+esc(x.prof||'—')+'</b>'
         +' &nbsp;·&nbsp; 📐 Page size: <b>'+esc(x.sz||'—')+'</b> &nbsp;·&nbsp; 🔢 App: <b>'+(x.v?'v'+esc(x.v):'—')+'</b>'
         +' &nbsp;·&nbsp; ⏱ Samay: <b>'+(x.dur?x.dur+' sec':'—')+'</b> &nbsp;·&nbsp; 🌍 '+flag(x.cc)+' '+esc(x.cc||'—')
+        +(x.rot?' &nbsp;·&nbsp; 🔁 Rotate: <b>'+esc(x.rot)+'</b>':'')
+        +(x.tess===0?' &nbsp;·&nbsp; <b style="color:var(--warn)">⚠ Tesseract nahi</b>':'')
         +'</td></tr>'; }
     }); }
   else body='<tr><td colspan="8" style="color:var(--mut);text-align:center;padding:20px">— koi scan nahi mila —</td></tr>';
@@ -3384,6 +3386,8 @@ if ($action === 'scan') {
             'dur'=>max(0,min(3600,intval(isset($_REQUEST['dur'])?$_REQUEST['dur']:0))),
             'src'=>substr(isset($_REQUEST['src'])?$_REQUEST['src']:'',0,8),
             'prof'=>substr(isset($_REQUEST['prof'])?$_REQUEST['prof']:'',0,24),
+            'rot'=>substr(isset($_REQUEST['rot'])?$_REQUEST['rot']:'',0,8),
+            'tess'=>(isset($_REQUEST['tess'])?intval($_REQUEST['tess']):-1),
             'v'=>substr(isset($_REQUEST['v'])?$_REQUEST['v']:'',0,8));
         $d['recentScans'] = array_slice($d['recentScans'], -1000);   // cap (spec #8)
         update_peak($d, $now, $today);

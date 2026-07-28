@@ -303,6 +303,7 @@ def auto_orient(img, mode="accurate", ocr_based=True, layout_based=True,
             pass
         res = detect_orientation(orig, use_ocr=ocr_based, use_text=text_based,
                                  use_layout=layout_based, threshold=int(threshold))
+        auto_orient.last = dict(res)      # (v204) caller ko aakhri faisla dikhe
         out = orig
         if res["decision"] == "rotate" and res["angle"] in (90, 180, 270):
             out = orig.rotate(-res["angle"], expand=True)   # lossless quarter-turn

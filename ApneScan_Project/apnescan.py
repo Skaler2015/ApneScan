@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "203"
+VERSION = "204"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2206,6 +2206,15 @@ class ScanWorker(QtCore.QThread):
                             text_based=bool(self.opts.get("auto_orient_cv", True)),
                             layout_based=bool(self.opts.get("auto_orient_layout", True)),
                             page_label="page %d" % (self.kept + 1))
+                        # (v204) ginti: is scan me kitne pages ghumaye gaye —
+                        # scan ke baad user ko status me dikhta hai
+                        try:
+                            _lr = getattr(auto_orient, "last", None) or {}
+                            self.orient_tot = getattr(self, "orient_tot", 0) + 1
+                            if _lr.get("decision") == "rotate":
+                                self.orient_rot = getattr(self, "orient_rot", 0) + 1
+                        except Exception:
+                            pass
                     # F15 Smart Scan: one toggle turns on the recommended cleanup set
                     _smart = bool(self.opts.get("smart_scan"))
                     if self.opts.get("clean_edges") or _smart:
@@ -7841,6 +7850,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 m["src"] = si["src"]
             if si.get("prof"):
                 m["prof"] = si["prof"]
+        except Exception:
+            pass
+        # (v204) auto-rotate ka nateeja bhi: rot="ghumaye/kul", tess=0/1
+        try:
+            lo = getattr(self, "_last_orient", None)
+            if lo:
+                m["rot"] = "%d/%d" % (lo[0], lo[1])
+                m["tess"] = 1 if lo[2] else 0
         except Exception:
             pass
         return m
@@ -14203,6 +14220,44 @@ if the toggle is ticked).</p>
         msg = '%d page(s) scanned.' % kept
         if skipped:
             msg += " (%d blank hataye)" % skipped
+        # (v204) AUTO-ROTATE ki saaf jaankari — chhupi khamoshi khatam:
+        # Tesseract na ho to EK baar bata do (install link ke saath);
+        # ho to status me dikhao kitne pages seedhe kiye
+        try:
+            _w = self._worker
+            _ot = int(getattr(_w, "orient_tot", 0) or 0)
+            _orr = int(getattr(_w, "orient_rot", 0) or 0)
+            self._last_orient = (_orr, _ot, tesseract_available())
+            if self._opts.get("auto_orient", True) and kept:
+                if not tesseract_available():
+                    msg += self.L("  ·  ⚠ Auto-rotate band (Tesseract nahi)",
+                                  "  ·  ⚠ Auto-rotate off (no Tesseract)")
+                    self._ev_push("orient:no-tesseract")
+                    if not self._config.get("tess_rotate_warned"):
+                        self._config["tess_rotate_warned"] = True
+                        try:
+                            save_config(self._config)
+                        except Exception:
+                            pass
+                        QtWidgets.QMessageBox.information(
+                            self, "Auto-rotate",
+                            self.L("Page apne aap seedha karne (auto-rotate) ke liye is PC par\n"
+                                   "Tesseract OCR chahiye — abhi INSTALLED NAHI hai.\n\n"
+                                   "Free install (2 minute):\n"
+                                   "https://github.com/UB-Mannheim/tesseract/wiki\n"
+                                   "se 32-bit ya 64-bit setup chala dein — bas. Uske baad\n"
+                                   "ulta/tirchha page khud seedha hone lagega.",
+                                   "Auto-rotate needs Tesseract OCR on this PC —\n"
+                                   "it is NOT installed right now.\n\n"
+                                   "Free install (2 minutes):\n"
+                                   "https://github.com/UB-Mannheim/tesseract/wiki\n"
+                                   "Run the setup — after that, upside-down/sideways\n"
+                                   "pages will straighten automatically."))
+                elif _ot:
+                    msg += self.L("  ·  🔁 %d/%d page seedhe kiye",
+                                  "  ·  🔁 straightened %d/%d") % (_orr, _ot)
+        except Exception:
+            pass
         self.status.showMessage(msg, 5000)
         if kept and self._opts.get("sound_on_done"):
             try:
