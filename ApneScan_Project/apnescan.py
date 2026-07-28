@@ -46,7 +46,7 @@ from apnescan_lib.imaging import (
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
     ai_auto_enhance, ai_color_restore, ai_denoise, ai_smart_crop, ai_deskew,
-    ai_auto_all, ai_inpaint_region,
+    ai_auto_all, ai_inpaint_region, ai_extract_signature,
 )
 # Smart Orientation engine. auto_orient is the only entry point the pipeline
 # calls; the app's cached tesseract_available() is injected into the module a
@@ -243,7 +243,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "209"
+VERSION = "210"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3675,6 +3675,11 @@ class ImageEditor(QtWidgets.QDialog):
               L("Khaali pages dhoondh kar hatao (sabhi pages me)", "Find & remove blank pages (all pages)"))
         sgbtn(1, 1, "⚖", L("Quality", "Quality"), self._quality_check,
               L("Page ki quality jaancho + turant sudhaar", "Check page quality + one-click fix"))
+        sgbtn(2, 0, "✍", L("Sign nikaalo", "Extract sign"), self._start_sign_extract,
+              L("Page par sign/mohar ke upar box kheencho — background khud "
+                "transparent hoga aur Sign tool me save kar sakoge",
+                "Drag a box over a signature/stamp — background turns "
+                "transparent; save it into the Sign tool"))
         sv.addLayout(sg)
 
         # ---- PRIVACY ----
@@ -3958,7 +3963,7 @@ class ImageEditor(QtWidgets.QDialog):
         if t == "pan":
             self._panning = True; self._pan_ref = pos
             self.canvas.setCursor(QtCore.Qt.ClosedHandCursor)
-        elif t in ("crop", "arrow", "line", "box", "redact", "rect", "circle", "blur", "heal"):
+        elif t in ("crop", "arrow", "line", "box", "redact", "rect", "circle", "blur", "heal", "signext"):
             self._start = pos; self._cur = pos
         elif t == "erase":
             self._bake(); self._erasing = True; self._erase_at(pos)
@@ -4012,6 +4017,8 @@ class ImageEditor(QtWidgets.QDialog):
                 self._apply_blur(self._start, pos)
             elif t == "heal":
                 self._apply_heal(self._start, pos)
+            elif t == "signext":
+                self._apply_sign_extract(self._start, pos)
         if self._panning:
             self.canvas.setCursor(QtCore.Qt.OpenHandCursor)
         self._start = self._cur = None
@@ -4151,6 +4158,81 @@ class ImageEditor(QtWidgets.QDialog):
         finally:
             self.unsetCursor()
         self._render()
+
+    def _start_sign_extract(self):
+        # (v210 charan 3) SMART button → signext tool chalu + chhoti hint
+        self._set_tool("signext")
+        try:
+            self.lbl_status.setText("✍ " + self.L(
+                "Sign/mohar ke upar box kheencho — background khud transparent hoga",
+                "Drag a box over the signature/stamp — background turns transparent"))
+        except Exception:
+            pass
+
+    def _apply_sign_extract(self, a, b):
+        x0, y0 = self._d2i(a); x1, y1 = self._d2i(b)
+        x0, x1 = sorted((x0, x1)); y0, y1 = sorted((y0, y1))
+        if x1 - x0 < 12 or y1 - y0 < 12:
+            return
+        try:
+            self.win._ev_push("edit:ai-signext")
+        except Exception:
+            pass
+        self.setCursor(QtCore.Qt.WaitCursor)
+        try:
+            sig = ai_extract_signature(self.base.crop((x0, y0, x1, y1)))
+        finally:
+            self.unsetCursor()
+        if sig is None:
+            QtWidgets.QMessageBox.information(self, APP_NAME, self.L(
+                "Is hisse me sign/mohar nahi mili — thoda bada/saaf area chuno.",
+                "No signature/stamp found here — try a larger/cleaner area."))
+            return
+        # preview: checkerboard ke upar (transparent dikhane ke liye)
+        chk = Image.new("RGB", sig.size, (255, 255, 255))
+        dch = ImageDraw.Draw(chk)
+        for cy in range(0, sig.height, 12):
+            for cx in range(0, sig.width, 12):
+                if (cx // 12 + cy // 12) % 2:
+                    dch.rectangle((cx, cy, cx + 11, cy + 11), fill=(226, 228, 236))
+        chk = chk.convert("RGBA"); chk.alpha_composite(sig)
+        dlg = QtWidgets.QDialog(self); dlg.setWindowTitle(self.L("✍ Sign nikla", "✍ Signature extracted"))
+        dlg.setStyleSheet(self._QSS)
+        v = QtWidgets.QVBoxLayout(dlg)
+        pv = QtWidgets.QLabel(); pv.setAlignment(QtCore.Qt.AlignCenter)
+        show = chk.convert("RGB").copy(); show.thumbnail((520, 340))
+        pv.setPixmap(self._pil_to_qpix(show)); v.addWidget(pv)
+        note = QtWidgets.QLabel(self.L(
+            "Background transparent ho gaya hai. Save karne par ye Sign tool (✍) me\n"
+            "hamesha ke liye mil jayega — kisi bhi page par ek click me lagao.",
+            "Background is transparent. Saving stores it in the Sign tool (✍)\n"
+            "so you can place it on any page with one click."))
+        note.setStyleSheet("font-size:11px;color:#475569;"); v.addWidget(note)
+        row = QtWidgets.QHBoxLayout(); row.addStretch(1)
+        bc = QtWidgets.QPushButton(self.L("Radd", "Cancel")); bc.setObjectName("ghost")
+        bc.clicked.connect(dlg.reject)
+        bs = QtWidgets.QPushButton("💾 " + self.L("Sign tool me save", "Save to Sign tool"))
+        bs.setObjectName("primary"); bs.clicked.connect(dlg.accept)
+        row.addWidget(bc); row.addWidget(bs); v.addLayout(row)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        try:
+            sp = os.path.join(os.path.dirname(CONFIG_PATH) or os.path.expanduser("~"),
+                              "apnescan_sign.png")
+            sig.save(sp, "PNG")
+            self.win._opts["sign_image"] = sp
+            self.win._save_opts()
+        except Exception:
+            QtWidgets.QMessageBox.warning(self, APP_NAME, self.L(
+                "Sign save nahi ho paya.", "Could not save the signature."))
+            return
+        self._set_tool("sign")
+        try:
+            self.lbl_status.setText("✅ " + self.L(
+                "Sign save ho gaya — ab kahin bhi click karke lagao (✍ Sign tool)",
+                "Signature saved — click anywhere to place it (✍ Sign tool)"))
+        except Exception:
+            pass
 
     def _place_text(self, pos):
         txt, ok = QtWidgets.QInputDialog.getText(self, self.L("Text", "Add text"),

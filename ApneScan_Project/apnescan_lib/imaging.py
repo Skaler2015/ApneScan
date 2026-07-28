@@ -52,6 +52,7 @@ __all__ = [
     "ai_deskew",
     "ai_auto_all",
     "ai_inpaint_region",
+    "ai_extract_signature",
     "save_image_keep_ext",
     "apply_watermark",
     "enhance_image",
@@ -1122,6 +1123,45 @@ def ai_inpaint_region(img, box):
         return out
     except Exception:
         return img
+
+
+def ai_extract_signature(img):
+    """(v210 charan 3) Sign/mohar nikaalo: kagaz ka rang naap kar background
+    poori tarah TRANSPARENT — sirf syahi (sign/mohar) bachti hai, asli rang
+    aur naram kinaron (anti-aliased alpha) ke saath. RGBA lautata hai;
+    kuch na mile to None."""
+    try:
+        rgb = img.convert("RGB")
+        if not HAS_NUMPY:
+            return None
+        a = np.asarray(rgb, dtype=np.float32)
+        lum = a.mean(axis=2)
+        # kagaz ka rang = chamakdaar 40% pixels ka median (sign chhota hota
+        # hai, zyada hissa kagaz hi hota hai)
+        thr = float(np.percentile(lum, 60.0))
+        paper_px = a[lum >= thr]
+        if paper_px.size == 0:
+            return None
+        paper = np.median(paper_px.reshape(-1, 3), axis=0)
+        dist = np.sqrt(((a - paper) ** 2).sum(axis=2))       # 0 = kagaz
+        # naram alpha-ramp: 18 tak kagaz (0), 55+ pakki syahi (255)
+        alpha = np.clip((dist - 18.0) * (255.0 / (55.0 - 18.0)), 0.0, 255.0)
+        alpha_im = Image.fromarray(alpha.astype(np.uint8), "L")
+        alpha_im = alpha_im.filter(ImageFilter.MedianFilter(3))   # akela daana ud jaye
+        alpha = np.asarray(alpha_im, dtype=np.uint8)
+        if float((alpha > 128).mean()) < 0.0015:              # kuch mila hi nahi
+            return None
+        out = np.dstack([a.astype(np.uint8), alpha])
+        res = Image.fromarray(out, "RGBA")
+        # content par trim (6px hashiya)
+        bbox = alpha_im.point(lambda v: 255 if v > 24 else 0).getbbox()
+        if bbox:
+            l, t, r, b = bbox
+            res = res.crop((max(0, l - 6), max(0, t - 6),
+                            min(res.width, r + 6), min(res.height, b + 6)))
+        return res
+    except Exception:
+        return None
 
 
 def ai_auto_all(img):
