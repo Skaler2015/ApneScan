@@ -1767,38 +1767,51 @@ if (isset($_GET['admin'])) {
   <div class="page" data-p="useract">
   <div class="sec"><span class="em">📜</span> User Activity — kaun, kya, kab (poori kahani)</div>
 
-  <!-- ======= BHAAG 1: POORI TIMELINE — sab din, naya sabse upar ======= -->
-  <div class="card" style="margin-bottom:16px">
+  <!-- ==== DO BHAAG BARAABAR ME: beech ki patti kheench kar chhota-bada ==== -->
+  <div id="uaSplit" style="display:flex;align-items:stretch;gap:0">
+
+  <!-- BHAAG 1 (LEFT): POORI TIMELINE — sab din, naya sabse upar -->
+  <div id="uaLeft" style="flex:0 0 52%;min-width:260px;overflow:hidden">
+  <div class="card" style="height:100%">
     <h3><span class="em">🕒</span> Poori timeline (sab din) <span id="tlInfo" style="color:var(--mut);font-weight:500;font-size:11px"></span></h3>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-      <input id="tlQ" placeholder="🔍 user ya kaam se dhoondo… (poore itihaas me)" style="flex:1;min-width:170px">
-      <button class="btn" onclick="tlGo(0)">🔄 Load</button>
+      <input id="tlQ" placeholder="🔍 user ya kaam se dhoondo… (poore itihaas me)" style="flex:1;min-width:140px">
+      <button class="btn" onclick="tlGo(0)">🔄</button>
       <button class="btn gray" id="tlPrev" onclick="tlGo(_tl.page-1)">◀ Naye</button>
       <span id="tlPage" style="font-size:11px;color:var(--mut)">Page 1</span>
       <button class="btn gray" id="tlNext" onclick="tlGo(_tl.page+1)">Purane ▶</button>
     </div>
-    <div style="color:var(--mut);font-size:10px;margin-bottom:6px">💡 Sabse naya event sabse upar · 100 events per page · pichhle 90 din tak</div>
-    <div id="tlList" style="max-height:520px;overflow:auto"></div>
+    <div style="color:var(--mut);font-size:10px;margin-bottom:6px">💡 Sabse naya sabse upar · 100/page · 90 din tak · beech ki patti kheench kar chaudai badlo</div>
+    <div id="tlList" style="max-height:640px;overflow:auto"></div>
+  </div>
   </div>
 
-  <!-- ======= BHAAG 2: BAAKI SUMMARY — din chun kar ======= -->
-  <div class="sec" style="font-size:13px"><span class="em">📊</span> Din ka saraansh</div>
+  <!-- beech ki kheenchne wali patti -->
+  <div id="uaGut" title="Kheench kar dono taraf chhota-bada karo"
+       style="flex:0 0 12px;cursor:col-resize;display:flex;align-items:center;justify-content:center;user-select:none">
+    <div style="width:4px;height:64px;border-radius:3px;background:rgba(148,163,184,.35)"></div>
+  </div>
+
+  <!-- BHAAG 2 (RIGHT): DIN KA SARAANSH -->
+  <div id="uaRight" style="flex:1;min-width:260px;overflow:hidden">
+  <div class="sec" style="font-size:13px;margin-top:2px"><span class="em">📊</span> Din ka saraansh</div>
   <div class="kpis" id="uaKpis" style="margin-bottom:13px"></div>
   <div class="card" style="margin-bottom:13px">
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <select id="uaDate"></select>
       <select id="uaUser"><option value="">👥 Sab users</option></select>
       <select id="uaType"><option value="">🧩 Sab kaam</option><option value="feat">⚙️ Features (scan/save/print…)</option><option value="btn">🔘 Toolbar buttons</option><option value="menu">📋 Menu</option><option value="nav">🧭 Sidebar/Dashboard</option><option value="app">🟢 App khuli/band</option></select>
-      <input id="uaQ" placeholder="🔍 kaam ya user se dhoondo…" style="flex:1;min-width:150px">
-      <button class="btn" onclick="uaLoad()">🔄 Load</button>
+      <input id="uaQ" placeholder="🔍 dhoondo…" style="flex:1;min-width:110px">
+      <button class="btn" onclick="uaLoad()">🔄</button>
       <button class="btn gray" onclick="uaCSV()">⬇ CSV</button>
     </div>
   </div>
-  <div class="grid" style="margin-bottom:13px">
-    <div class="card"><h3><span class="em">👥</span> Har user ka saraansh <span style="color:var(--mut);font-weight:500;font-size:11px">— naam par click = us par filter</span></h3><div id="uaUsers" style="max-height:300px;overflow:auto"></div></div>
-    <div class="card"><h3><span class="em">🔥</span> Sabse zyada hue kaam</h3><div id="uaTop"></div></div>
-    <div class="card"><h3><span class="em">🕐</span> Kis ghante kitna kaam</h3><div id="uaHours"></div></div>
+  <div class="card" style="margin-bottom:13px"><h3><span class="em">👥</span> Har user ka saraansh <span style="color:var(--mut);font-weight:500;font-size:11px">— naam par click = us par filter</span></h3><div id="uaUsers" style="max-height:260px;overflow:auto"></div></div>
+  <div class="card" style="margin-bottom:13px"><h3><span class="em">🔥</span> Sabse zyada hue kaam</h3><div id="uaTop"></div></div>
+  <div class="card"><h3><span class="em">🕐</span> Kis ghante kitna kaam</h3><div id="uaHours"></div></div>
   </div>
+
+  </div><!-- /uaSplit -->
   </div><!-- /useract -->
 
   <div class="page" data-p="system">
@@ -3254,6 +3267,28 @@ function uaCSV(){ var rows=_uaRows().slice().sort(function(a,b){return (a.t||0)-
   var e2=document.getElementById('uaQ'); if(e2)e2.addEventListener('input',uaRender);
   var e3=document.getElementById('uaDate'); if(e3)e3.addEventListener('change',uaLoad);
   var e5=document.getElementById('tlQ'); if(e5)e5.addEventListener('keydown',function(ev){ if(ev.key==='Enter')tlGo(0); });
+  // ---- (v3.3) SPLITTER: beech ki patti kheencho — ek side chhoti, doosri
+  // apne aap badi (chaudai yaad bhi rehti hai) ----
+  (function(){ var sp=document.getElementById('uaSplit'),gt=document.getElementById('uaGut'),
+      lf=document.getElementById('uaLeft'); if(!sp||!gt||!lf)return;
+    function narrow(){ return window.innerWidth<900; }
+    function applyMode(){ if(narrow()){ sp.style.flexDirection='column'; gt.style.display='none';
+        lf.style.flex='0 0 auto'; } else { sp.style.flexDirection='row'; gt.style.display='flex';
+        lf.style.flex='0 0 '+(localStorage.getItem('uaSplitPct')||'52')+'%'; } }
+    applyMode(); window.addEventListener('resize',applyMode);
+    var drag=false;
+    function move(x){ var r=sp.getBoundingClientRect();
+      var pct=Math.min(75,Math.max(25,(x-r.left)/r.width*100));
+      lf.style.flex='0 0 '+pct.toFixed(1)+'%';
+      try{localStorage.setItem('uaSplitPct',pct.toFixed(1));}catch(e){} }
+    gt.addEventListener('mousedown',function(e){ if(narrow())return; drag=true;
+      document.body.style.cursor='col-resize'; e.preventDefault(); });
+    window.addEventListener('mousemove',function(e){ if(drag)move(e.clientX); });
+    window.addEventListener('mouseup',function(){ drag=false; document.body.style.cursor=''; });
+    gt.addEventListener('touchstart',function(e){ if(!narrow())drag=true; },{passive:true});
+    window.addEventListener('touchmove',function(e){ if(drag&&e.touches[0])move(e.touches[0].clientX); },{passive:true});
+    window.addEventListener('touchend',function(){ drag=false; });
+  })();
   if(document.getElementById('uaKpis')){ uaLoad(); tlGo(0); } })();
 // ---- SYSTEM HEALTH ----
 (function(){ var el=document.getElementById('healthKpis'); if(!el)return;
