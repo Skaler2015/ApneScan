@@ -571,6 +571,36 @@ if (isset($_GET['admin'])) {
             'dates'=>array_slice($fds,0,60)), JSON_UNESCAPED_UNICODE);
         exit;
     }
+
+    // ---- (v3.3) TIMELINE API: SAB dino ke events ek saath — naya sabse
+    // pehle, page-wise. GET ?admin=1&api=tl&off=0&lim=100[&u=USER][&q=TEXT]
+    if (isset($_GET['api']) && $_GET['api'] === 'tl') {
+        header('Content-Type: application/json; charset=utf-8');
+        $off = max(0, (int)(isset($_GET['off'])?$_GET['off']:0));
+        $lim = min(500, max(1, (int)(isset($_GET['lim'])?$_GET['lim']:100)));
+        $fu  = isset($_GET['u']) ? trim($_GET['u']) : '';
+        $fq  = isset($_GET['q']) ? strtolower(trim($_GET['q'])) : '';
+        $files = glob(__DIR__.'/apnescan_events/events-*.jsonl') ?: array();
+        rsort($files);                        // nayi date wali file pehle
+        $files = array_slice($files, 0, 90);  // pichhle 90 din tak
+        $total = 0; $out = array(); $skip = $off;
+        foreach ($files as $fp) {
+            $lines = @file($fp, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) ?: array();
+            $lines = array_reverse($lines);   // din ke andar bhi naya pehle
+            foreach ($lines as $ln) {
+                $j = json_decode($ln, true); if (!is_array($j)) continue;
+                if ($fu !== '' && (isset($j['u'])?$j['u']:'') !== $fu) continue;
+                if ($fq !== '' && strpos(strtolower((isset($j['e'])?$j['e']:'').' '
+                        .(isset($j['u'])?$j['u']:'')), $fq) === false) continue;
+                $total++;
+                if ($skip > 0) { $skip--; continue; }
+                if (count($out) < $lim) $out[] = $j;
+            }
+        }
+        echo json_encode(array('ok'=>true,'total'=>$total,'off'=>$off,
+            'lim'=>$lim,'events'=>$out), JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     $t0=microtime(true);
     $d=load_data($DATA_FILE);
 
@@ -1736,6 +1766,23 @@ if (isset($_GET['admin'])) {
 
   <div class="page" data-p="useract">
   <div class="sec"><span class="em">📜</span> User Activity — kaun, kya, kab (poori kahani)</div>
+
+  <!-- ======= BHAAG 1: POORI TIMELINE — sab din, naya sabse upar ======= -->
+  <div class="card" style="margin-bottom:16px">
+    <h3><span class="em">🕒</span> Poori timeline (sab din) <span id="tlInfo" style="color:var(--mut);font-weight:500;font-size:11px"></span></h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+      <input id="tlQ" placeholder="🔍 user ya kaam se dhoondo… (poore itihaas me)" style="flex:1;min-width:170px">
+      <button class="btn" onclick="tlGo(0)">🔄 Load</button>
+      <button class="btn gray" id="tlPrev" onclick="tlGo(_tl.page-1)">◀ Naye</button>
+      <span id="tlPage" style="font-size:11px;color:var(--mut)">Page 1</span>
+      <button class="btn gray" id="tlNext" onclick="tlGo(_tl.page+1)">Purane ▶</button>
+    </div>
+    <div style="color:var(--mut);font-size:10px;margin-bottom:6px">💡 Sabse naya event sabse upar · 100 events per page · pichhle 90 din tak</div>
+    <div id="tlList" style="max-height:520px;overflow:auto"></div>
+  </div>
+
+  <!-- ======= BHAAG 2: BAAKI SUMMARY — din chun kar ======= -->
+  <div class="sec" style="font-size:13px"><span class="em">📊</span> Din ka saraansh</div>
   <div class="kpis" id="uaKpis" style="margin-bottom:13px"></div>
   <div class="card" style="margin-bottom:13px">
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -1748,13 +1795,9 @@ if (isset($_GET['admin'])) {
     </div>
   </div>
   <div class="grid" style="margin-bottom:13px">
-    <div class="card"><h3><span class="em">👥</span> Har user ka saraansh <span style="color:var(--mut);font-weight:500;font-size:11px">— naam par click = uski timeline</span></h3><div id="uaUsers" style="max-height:300px;overflow:auto"></div></div>
+    <div class="card"><h3><span class="em">👥</span> Har user ka saraansh <span style="color:var(--mut);font-weight:500;font-size:11px">— naam par click = us par filter</span></h3><div id="uaUsers" style="max-height:300px;overflow:auto"></div></div>
     <div class="card"><h3><span class="em">🔥</span> Sabse zyada hue kaam</h3><div id="uaTop"></div></div>
     <div class="card"><h3><span class="em">🕐</span> Kis ghante kitna kaam</h3><div id="uaHours"></div></div>
-  </div>
-  <div class="card"><h3><span class="em">📜</span> Poori timeline <span id="uaInfo" style="color:var(--mut);font-weight:500;font-size:11px"></span></h3>
-    <div style="color:var(--mut);font-size:10px;margin-bottom:6px">💡 Ek user chuno to uski din-bhar ki kahani sessions me bant kar (subah → raat); 30 min ka gap = nayi session</div>
-    <div id="uaList" style="max-height:460px;overflow:auto"></div>
   </div>
   </div><!-- /useract -->
 
@@ -3104,6 +3147,31 @@ function uaCat(e){ var n=String(e||'');
   if(n.indexOf('menu:')===0)return 'menu';
   if(n.indexOf('nav:')===0||n.indexOf('card:')===0)return 'nav';
   return 'feat'; }
+// ---- (v3.3) BHAAG 1: Poori timeline — sab din, naya pehle, 100/page ----
+var _tl={page:0,total:0};
+function tlGo(p){ if(p<0)p=0; _tl.page=p;
+  var q=((document.getElementById('tlQ')||{}).value||'').trim();
+  fetch('?admin=1&api=tl&off='+(p*100)+'&lim=100'+(q?'&q='+encodeURIComponent(q):''),{credentials:'same-origin'})
+  .then(function(r){return r.json();}).then(function(j){
+    if(!j||!j.ok)return; _tl.total=j.total||0;
+    var el=document.getElementById('tlList'); if(!el)return;
+    var out=[],lastD='';
+    (j.events||[]).forEach(function(e){
+      var d=new Date((e.t||0)*1000), ds=d.toLocaleDateString();
+      if(ds!==lastD){ out.push('<div style="color:var(--accent2);font-size:10px;margin:8px 0 4px;border-top:1px dashed rgba(148,163,184,.3);padding-top:6px">🗓 '+esc(ds)+'</div>'); lastD=ds; }
+      out.push('<div class="aii"><span>'+(e.e==='app:start'?'🟢':(e.e==='app:close'?'🔴':'•'))+'</span><div>'
+        +'<b>'+esc(e.u||e.c||'user')+'</b> — '+esc(dfLbl(e.e))
+        +'<div style="color:var(--mut);font-size:9px">'+d.toLocaleTimeString()+'</div></div></div>');
+    });
+    el.innerHTML=out.length?out.join(''):'<div style="color:var(--mut)">— kuch nahi mila —</div>';
+    var pages=Math.max(1,Math.ceil(_tl.total/100));
+    var pg=document.getElementById('tlPage'); if(pg)pg.textContent='Page '+(p+1)+' / '+pages;
+    var inf=document.getElementById('tlInfo'); if(inf)inf.textContent='— kul '+fmt(_tl.total)+' events'+(q?' · "'+q+'"':'');
+    var pv=document.getElementById('tlPrev'); if(pv)pv.disabled=(p<=0);
+    var nx=document.getElementById('tlNext'); if(nx)nx.disabled=(p>=pages-1);
+    el.scrollTop=0;
+  }).catch(function(){});
+}
 function uaLoad(){ var dt=(document.getElementById('uaDate')||{}).value||'';
   fetch('?admin=1&api=feed'+(dt?'&date='+dt:''),{credentials:'same-origin'})
    .then(function(r){return r.json();}).then(function(j){
@@ -3124,7 +3192,7 @@ function _uaRows(){ var fu=(document.getElementById('uaUser')||{}).value||'';
     if(ft&&uaCat(e.e)!==ft)return false;
     if(q&&(String(e.e)+' '+(e.u||'')).toLowerCase().indexOf(q)<0)return false; return true;});
 }
-function uaRender(){ if(!document.getElementById('uaList'))return;
+function uaRender(){ if(!document.getElementById('uaKpis'))return;
   var rows=_uaRows().slice().sort(function(a,b){return (a.t||0)-(b.t||0);});
   var fu=(document.getElementById('uaUser')||{}).value||'';
   // ---- KPI summary ----
@@ -3175,19 +3243,6 @@ function uaRender(){ if(!document.getElementById('uaList'))return;
         +'<span style="width:56px">'+(h%12||12)+(h<12?' AM':' PM')+'</span>'
         +'<span class="bar" style="flex:0 0 '+Math.max(5,Math.round(hours[h]*60/hm))+'%;height:9px"></span><b>'+hours[h]+'</b></div>'; }
     he.innerHTML=hh||'<div style="color:var(--mut)">—</div>'; }
-  // ---- timeline ----
-  var out=[],last=0;
-  rows.forEach(function(e){
-    if(fu&&out.length&&((e.t-last>1800)||e.e==='app:start'))
-      out.push('<div style="color:var(--accent2);font-size:10px;margin:8px 0 4px;border-top:1px dashed rgba(148,163,184,.3);padding-top:6px">— nayi session shuru —</div>');
-    last=e.t;
-    out.push('<div class="aii"><span>'+(e.e==='app:start'?'🟢':(e.e==='app:close'?'🔴':'•'))+'</span><div>'
-      +(fu?'':'<b>'+esc(e.u||e.c||'user')+'</b> — ')+esc(dfLbl(e.e))
-      +'<div style="color:var(--mut);font-size:9px">'+new Date((e.t||0)*1000).toLocaleTimeString()+'</div></div></div>');
-  });
-  var inf=document.getElementById('uaInfo');
-  if(inf)inf.textContent='— '+rows.length+' events'+(fu?' · '+fu:'');
-  document.getElementById('uaList').innerHTML=out.length?out.join(''):'<div style="color:var(--mut)">— kuch nahi mila (users ke paas app v183+ hone par aayega) —</div>';
 }
 function uaCSV(){ var rows=_uaRows().slice().sort(function(a,b){return (a.t||0)-(b.t||0);});
   var csv='date,time,user,action\n'+rows.map(function(e){ var d=new Date((e.t||0)*1000);
@@ -3198,7 +3253,8 @@ function uaCSV(){ var rows=_uaRows().slice().sort(function(a,b){return (a.t||0)-
   var e4=document.getElementById('uaType'); if(e4)e4.addEventListener('change',uaRender);
   var e2=document.getElementById('uaQ'); if(e2)e2.addEventListener('input',uaRender);
   var e3=document.getElementById('uaDate'); if(e3)e3.addEventListener('change',uaLoad);
-  if(document.getElementById('uaList')) uaLoad(); })();
+  var e5=document.getElementById('tlQ'); if(e5)e5.addEventListener('keydown',function(ev){ if(ev.key==='Enter')tlGo(0); });
+  if(document.getElementById('uaKpis')){ uaLoad(); tlGo(0); } })();
 // ---- SYSTEM HEALTH ----
 (function(){ var el=document.getElementById('healthKpis'); if(!el)return;
   var H=D.health||{}, SY=D.sys||{};
