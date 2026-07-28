@@ -1767,12 +1767,28 @@ if (isset($_GET['admin'])) {
   <div class="page" data-p="useract">
   <div class="sec"><span class="em">📜</span> User Activity — kaun, kya, kab (poori kahani)</div>
 
+  <!-- ==== DIN KA SARAANSH: POORI CHAUDAI me (KPI + filter) ==== -->
+  <div class="sec" style="font-size:13px;margin-top:2px"><span class="em">📊</span> Din ka saraansh</div>
+  <div class="kpis" id="uaKpis" style="margin-bottom:13px"></div>
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <select id="uaDate"></select>
+      <select id="uaUser"><option value="">👥 Sab users</option></select>
+      <select id="uaType"><option value="">🧩 Sab kaam</option><option value="feat">⚙️ Features (scan/save/print…)</option><option value="btn">🔘 Toolbar buttons</option><option value="menu">📋 Menu</option><option value="nav">🧭 Sidebar/Dashboard</option><option value="app">🟢 App khuli/band</option></select>
+      <input id="uaQ" placeholder="🔍 dhoondo…" style="flex:1;min-width:110px">
+      <button class="btn" onclick="uaLoad()">🔄</button>
+      <button class="btn gray" onclick="uaCSV()">⬇ CSV</button>
+    </div>
+  </div>
+
   <!-- ==== DO BHAAG BARAABAR ME: beech ki patti kheench kar chhota-bada ==== -->
   <div id="uaSplit" style="display:flex;align-items:stretch;gap:0">
 
   <!-- BHAAG 1 (LEFT): POORI TIMELINE — sab din, naya sabse upar -->
-  <div id="uaLeft" style="flex:0 0 52%;min-width:260px;overflow:hidden">
-  <div class="card" style="height:100%;display:flex;flex-direction:column;box-sizing:border-box">
+  <div id="uaLeft" style="flex:0 0 52%;min-width:260px;overflow:hidden;position:relative">
+  <!-- card ABSOLUTE: iski lambai container tay nahi karti — right side jitni
+       height, utni hi timeline (baaki andar scroll) -->
+  <div id="uaLCard" class="card" style="position:absolute;left:0;right:0;top:0;bottom:0;display:flex;flex-direction:column;box-sizing:border-box">
     <h3><span class="em">🕒</span> Poori timeline (sab din) <span id="tlInfo" style="color:var(--mut);font-weight:500;font-size:11px"></span></h3>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
       <input id="tlQ" placeholder="🔍 user ya kaam se dhoondo… (poore itihaas me)" style="flex:1;min-width:140px">
@@ -1792,20 +1808,8 @@ if (isset($_GET['admin'])) {
     <div style="width:4px;height:64px;border-radius:3px;background:rgba(148,163,184,.35)"></div>
   </div>
 
-  <!-- BHAAG 2 (RIGHT): DIN KA SARAANSH -->
+  <!-- BHAAG 2 (RIGHT): summary cards -->
   <div id="uaRight" style="flex:1;min-width:260px;overflow:hidden">
-  <div class="sec" style="font-size:13px;margin-top:2px"><span class="em">📊</span> Din ka saraansh</div>
-  <div class="kpis" id="uaKpis" style="margin-bottom:13px"></div>
-  <div class="card" style="margin-bottom:13px">
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <select id="uaDate"></select>
-      <select id="uaUser"><option value="">👥 Sab users</option></select>
-      <select id="uaType"><option value="">🧩 Sab kaam</option><option value="feat">⚙️ Features (scan/save/print…)</option><option value="btn">🔘 Toolbar buttons</option><option value="menu">📋 Menu</option><option value="nav">🧭 Sidebar/Dashboard</option><option value="app">🟢 App khuli/band</option></select>
-      <input id="uaQ" placeholder="🔍 dhoondo…" style="flex:1;min-width:110px">
-      <button class="btn" onclick="uaLoad()">🔄</button>
-      <button class="btn gray" onclick="uaCSV()">⬇ CSV</button>
-    </div>
-  </div>
   <div class="card" style="margin-bottom:13px"><h3><span class="em">👥</span> Har user ka saraansh <span style="color:var(--mut);font-weight:500;font-size:11px">— naam par click = us par filter</span></h3><div id="uaUsers" style="max-height:260px;overflow:auto"></div></div>
   <div class="card" style="margin-bottom:13px"><h3><span class="em">🕐</span> Kis ghante kitna kaam</h3><div id="uaHours"></div></div>
   <div class="card"><h3><span class="em">🔥</span> Sabse zyada hue kaam</h3><div id="uaTop"></div></div>
@@ -3275,9 +3279,14 @@ function uaCSV(){ var rows=_uaRows().slice().sort(function(a,b){return (a.t||0)-
   (function(){ var sp=document.getElementById('uaSplit'),gt=document.getElementById('uaGut'),
       lf=document.getElementById('uaLeft'); if(!sp||!gt||!lf)return;
     function narrow(){ return window.innerWidth<900; }
-    function applyMode(){ if(narrow()){ sp.style.flexDirection='column'; gt.style.display='none';
-        lf.style.flex='0 0 auto'; } else { sp.style.flexDirection='row'; gt.style.display='flex';
-        lf.style.flex='0 0 '+(localStorage.getItem('uaSplitPct')||'52')+'%'; } }
+    function applyMode(){ var lc=document.getElementById('uaLCard'),
+        tl=document.getElementById('tlList');
+      if(narrow()){ sp.style.flexDirection='column'; gt.style.display='none';
+        lf.style.flex='0 0 auto';
+        if(lc){lc.style.position='static';} if(tl){tl.style.maxHeight='480px';}
+      } else { sp.style.flexDirection='row'; gt.style.display='flex';
+        lf.style.flex='0 0 '+(localStorage.getItem('uaSplitPct')||'52')+'%';
+        if(lc){lc.style.position='absolute';} if(tl){tl.style.maxHeight='';} } }
     applyMode(); window.addEventListener('resize',applyMode);
     var drag=false;
     function move(x){ var r=sp.getBoundingClientRect();
