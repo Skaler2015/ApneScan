@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "198"
+VERSION = "199"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6958,8 +6958,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if dlg.exec_() == QtWidgets.QDialog.Accepted:
             self._profiles = dlg.profiles; self._save_profiles(); self._refresh_profile_combo()
 
-    def open_options(self):
+    def open_options(self, _checked=False, tab=None):
         dlg = OptionsDialog(self, self._opts)
+        # (v199) tab="shortcuts" → seedha ⌨ Shortcuts tab khula mile
+        if tab == "shortcuts":
+            try:
+                dlg.tabs.setCurrentIndex(dlg.tabs.count() - 1)
+            except Exception:
+                pass
         if dlg.exec_() == QtWidgets.QDialog.Accepted:
             self._opts = dlg.get_opts(); self._save_opts(); self._update_status()
             self._apply_style(); self._refresh_page_numbers()
@@ -13324,6 +13330,11 @@ if the toggle is ticked).</p>
             elif kind == "book":
                 p.drawRoundedRect(QtCore.QRectF(8, 7, 20, 22), 2, 2)
                 p.drawLine(QtCore.QPointF(18, 7), QtCore.QPointF(18, 29))
+            elif kind == "kbd":
+                p.drawRoundedRect(QtCore.QRectF(6, 11, 24, 15), 2.5, 2.5)
+                for _kx in (10.5, 15.5, 20.5, 25.5):
+                    p.drawLine(QtCore.QPointF(_kx, 15.5), QtCore.QPointF(_kx, 15.5))
+                p.drawLine(QtCore.QPointF(12, 21.5), QtCore.QPointF(24, 21.5))
             elif kind == "star":
                 pts = []
                 for _i in range(10):
@@ -13371,6 +13382,8 @@ if the toggle is ticked).</p>
         self._nav_mk_icon = _nav_icon      # refresh me star-icon banane ke liye
         _nbtn("camera", self.L("History", "Scan History"), self.show_history)
         _nbtn("chart", "Analytics", self.show_analytics)
+        # (v199) Shortcuts seedha WORKSPACE se — Settings ke ⌨ tab par khulta hai
+        _nbtn("kbd", "Shortcuts", lambda: self.open_options(tab="shortcuts"))
         _ncap("LIBRARY")
         _nbtn("folder", "Profiles", self.open_profiles)
         _nbtn("phone", self.L("Phone se Scan", "Phone to PC"), self.phone_scan)
