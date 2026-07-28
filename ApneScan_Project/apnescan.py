@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "186"
+VERSION = "187"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -12632,6 +12632,11 @@ if the toggle is ticked).</p>
         self.fav_bar.addWidget(self.btn_panel_back)
         self.fav_bar.addWidget(self.fav_combo, 1)
         self.fav_bar.addWidget(self.fav_star)
+        # (v187) Favourites ab SIDEBAR me folder ban kar dikhte hain — yahan
+        # ka dropdown + ⭐ button chhupa diya (sirf ⬅ Back aur ⇅ Sort rahe);
+        # favourite banana/hatana: folder par RIGHT-CLICK → ⭐
+        self.fav_combo.hide()
+        self.fav_star.hide()
         self.fav_bar.addWidget(self.btn_panel_sort)
         fp.addLayout(self.fav_bar)
         # ---- Filter · Recent · Grid (quick controls) ----
@@ -13059,7 +13064,14 @@ if the toggle is ticked).</p>
         self._nav_docs_badge = _badge
         QtCore.QTimer.singleShot(2500, self._nav_count_docs)
         _nbtn("clock", "Recent Files", self._show_recent_files)
-        _nbtn("star", "Favourites", self._nav_show_favs)
+        # (v187) "Favourites" item ki JAGAH ab favourite FOLDER khud yahan
+        # dikhte hain — click karte hi My Files me wahi folder khul jaata hai
+        self._nav_fav_box = QtWidgets.QWidget()
+        self._nav_fav_lay = QtWidgets.QVBoxLayout(self._nav_fav_box)
+        self._nav_fav_lay.setContentsMargins(0, 0, 0, 0)
+        self._nav_fav_lay.setSpacing(2)
+        nv.addWidget(self._nav_fav_box)
+        self._nav_mk_icon = _nav_icon      # refresh me star-icon banane ke liye
         _nbtn("camera", self.L("History", "Scan History"), self.show_history)
         _nbtn("chart", "Analytics", self.show_analytics)
         _ncap("LIBRARY")
@@ -13120,6 +13132,7 @@ if the toggle is ticked).</p>
         QtWidgets.QShortcut(QtGui.QKeySequence("Alt+M"), self,
                             lambda: self.menuBar().setVisible(not self.menuBar().isVisible()))
         # nav sabse LEFT me poori height par (toolbar bhi iske right me)
+        self._nav_refresh_favs()      # (v187) favourite folders sidebar me
         self._root_h.insertWidget(0, nav)
         outer.addWidget(spl, 1)
         # ANALYTICS card: PREVIEW ke JUST NEECHE (user ki request); preview
@@ -15477,6 +15490,11 @@ if the toggle is ticked).</p>
 
     def _rebuild_fav_bar(self):
         """Favourites ko dropdown me bharo (galat/hata diye gaye folder chhod do)."""
+        # (v187) sidebar ki favourite-folder list bhi saath me taaza karo
+        try:
+            self._nav_refresh_favs()
+        except Exception:
+            pass
         if not hasattr(self, "fav_combo"):
             return
         self.fav_combo.blockSignals(True)
@@ -16571,6 +16589,42 @@ if the toggle is ticked).</p>
                     spl.setSizes(sizes)
             except Exception:
                 pass
+
+    def _nav_refresh_favs(self):
+        """(v187) Sidebar me favourite FOLDERS ke seedhe buttons — jab bhi
+        favourites badlein, list yahan bhi taaza ho jaati hai."""
+        lay = getattr(self, "_nav_fav_lay", None)
+        if lay is None:
+            return
+        while lay.count():
+            it = lay.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.deleteLater()
+        favs = [p for p in (self._opts.get("fav_folders") or []) if os.path.isdir(p)]
+        mk = getattr(self, "_nav_mk_icon", None)
+
+        def _go(pp):
+            if not self.files_panel.isVisible():
+                self.toggle_files_panel()
+            self._jump_to_folder(pp)
+        for p in favs[:6]:
+            nm = os.path.basename(p) or p
+            if len(nm) > 20:
+                nm = nm[:19] + "…"
+            b = QtWidgets.QPushButton(" " + nm.replace("&", "&&"))
+            if mk is not None:
+                b.setIcon(mk("star", "#F59E0B"))
+                b.setIconSize(QtCore.QSize(18, 18))
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setToolTip(p)
+            b.clicked.connect(lambda _c=False, pp=p: _go(pp))
+            lay.addWidget(b)
+        if len(favs) > 6:
+            b = QtWidgets.QPushButton(self.L("      … aur %d favourites", "      … %d more") % (len(favs) - 6))
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.clicked.connect(self._nav_show_favs)
+            lay.addWidget(b)
 
     def _nav_show_favs(self):
         """(v184) Sidebar ke 'Favourites' par click — favourite folders ki
