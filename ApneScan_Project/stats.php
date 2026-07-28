@@ -1771,7 +1771,7 @@ if (isset($_GET['admin'])) {
 
   <!-- ==== DIN KA SARAANSH: POORI CHAUDAI me (KPI + filter) ==== -->
   <div class="sec" style="font-size:13px;margin-top:2px"><span class="em">📊</span> Din ka saraansh</div>
-  <div class="kpis" id="uaKpis" style="margin-bottom:13px"></div>
+  <div class="kpis" id="uaKpis" style="margin-bottom:13px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))"></div>
   <div class="card" style="margin-bottom:16px">
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <select id="uaDate"></select>
