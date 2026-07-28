@@ -53,6 +53,8 @@ __all__ = [
     "ai_auto_all",
     "ai_inpaint_region",
     "ai_extract_signature",
+    "ai_scan_quality",
+    "ai_photo_to_scan",
     "save_image_keep_ext",
     "apply_watermark",
     "enhance_image",
@@ -1123,6 +1125,55 @@ def ai_inpaint_region(img, box):
         return out
     except Exception:
         return img
+
+
+def ai_scan_quality(img):
+    """(v211) Scan-guard chowkidaar: page ki turant jaanch. Kharabi-codes ki
+    list lautata hai: 'dark' (bahut gehra/kaala), 'faint' (bahut feeka),
+    'blur' (dhundhla). Khaali list = sab theek. Thresholds conservative —
+    jhoothi chetavni se achha hai kabhi-kabhi chup rehna."""
+    issues = []
+    try:
+        g = img.convert("L")
+        small = g.resize((max(1, min(420, g.width)), max(1, min(420, g.height))))
+        if not HAS_NUMPY:
+            return issues
+        a = np.asarray(small, dtype=np.float32)
+        mean = float(a.mean())
+        dyn0 = float(np.percentile(a, 97) - np.percentile(a, 3))
+        if mean < 85:
+            issues.append("dark")
+        elif mean > 232 and 6.0 < dyn0 < 80.0:
+            # feeka CONTENT (khaali/blank page nahi — wo alag filter ka kaam)
+            issues.append("faint")
+        # dhundhlapan: sabse tez kinare (p99.9 gradient) bhi kamzor hain PAR
+        # page par content zaroor hai (dyn) — saaf text par p99.9 ~100+,
+        # dhundhle par ~10-30. Mean-gradient sparse text par dhokha deta tha.
+        dx = np.abs(np.diff(a, axis=1))
+        p999 = float(np.percentile(dx, 99.9))
+        dyn = float(np.percentile(a, 97) - np.percentile(a, 3))
+        if p999 < 30.0 and dyn > 60.0:
+            issues.append("blur")
+    except Exception:
+        pass
+    return issues
+
+
+def ai_photo_to_scan(img):
+    """(v211) Photo → scan jaisa, EK click/apne aap: EXIF seedha + size cap +
+    4-kone perspective + shadow flatten (clean_photo) + rang wapsi +
+    AI enhance + kinara-bachau denoise."""
+    try:
+        im = clean_photo(img)
+        im = ai_color_restore(im)
+        im = ai_auto_enhance(im)
+        im = ai_denoise(im)
+        return im.convert("RGB")
+    except Exception:
+        try:
+            return img.convert("RGB")
+        except Exception:
+            return img
 
 
 def ai_extract_signature(img):

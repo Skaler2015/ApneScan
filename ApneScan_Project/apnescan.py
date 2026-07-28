@@ -46,7 +46,8 @@ from apnescan_lib.imaging import (
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
     ai_auto_enhance, ai_color_restore, ai_denoise, ai_smart_crop, ai_deskew,
-    ai_auto_all, ai_inpaint_region, ai_extract_signature,
+    ai_auto_all, ai_inpaint_region, ai_extract_signature, ai_scan_quality,
+    ai_photo_to_scan,
 )
 # Smart Orientation engine. auto_orient is the only entry point the pipeline
 # calls; the app's cached tesseract_available() is injected into the module a
@@ -243,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "210"
+VERSION = "211"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -477,6 +478,10 @@ DEFAULT_OPTIONS = {
     "clean_edges": False,        # scan ki kaali border / kinare ke chhed saaf karo
     "split_two_page": False,     # ek glass par do page → apne aap alag karo
     "searchable_pdf": False,     # har save par PDF ke andar OCR text (Ctrl+F se dhoondo)
+    "quality_watch": True,       # (v211) scan hote hi kamzor page ki chetavni
+    "photo_auto_clean": True,    # (v211) phone-photo aate hi scan-jaisi saaf
+    "ai_dup_warn": True,         # (v211) duplicate document par save se pehle poochho
+    "ai_name_extras": True,      # (v211) naye naam me doc-number + date bhi jodo
     "compress": False,
     "jpeg_quality": 60,
     "pdf_quality_mode": "best",  # best (quality-first) / balanced / compact
@@ -2139,8 +2144,10 @@ class ImportWorker(QtCore.QThread):
                 break
             try:
                 if self.mode == "photo":
+                    # (v211) photo → scan-jaisa: perspective + shadow + rang
+                    # wapsi + enhance + denoise — sab ek saath
                     with Image.open(f) as im:
-                        img = clean_photo(im)
+                        img = ai_photo_to_scan(im)
                     fd, out = tempfile.mkstemp(suffix=".jpg", dir=self.tmpdir)
                     os.close(fd)
                     img.save(out, "JPEG", quality=90)
@@ -2248,6 +2255,17 @@ class ScanWorker(QtCore.QThread):
                         img = apply_enhance_mode(img, _mode)
                     if self.opts.get("noise_removal") or _smart:   # F8 denoise
                         img = denoise(img)
+                    # (v211) QUALITY CHOWKIDAAR: kamzor page turant pakdo —
+                    # scan khatam hote hi user ko page-number ke saath chetavni
+                    if self.opts.get("quality_watch", True):
+                        try:
+                            _qi = ai_scan_quality(img)
+                            if _qi:
+                                if not hasattr(self, "q_warns"):
+                                    self.q_warns = []
+                                self.q_warns.append((self.kept + 1, _qi))
+                        except Exception:
+                            pass
                     # Rang-heen page ko gray bana do (chhoti file) — sirf colour
                     # scan me, aur sirf jab option ON ho.
                     if (self.opts.get("auto_colour") and self.pixel_type == "color"
@@ -2697,6 +2715,12 @@ class OptionsDialog(QtWidgets.QDialog):
         self.chk_autocolour = QtWidgets.QCheckBox("Auto colour-detect (colourless pages to gray)")
         self.chk_autocolour.setChecked(bool(self.opts.get("auto_colour")))
         form.addRow(chkrow(self.chk_autocolour, 'हिन्दी: चालू करने पर (सिर्फ़ Colour स्कैन में): जिस पेज पर रंग नहीं है वह अपने-आप ग्रे में सेव होगा — छोटी फ़ाइल, साफ़ प्रिंट।\nEnglish: ON (colour scans only): pages with no real colour are saved as grayscale — smaller files.'))
+        self.chk_qwatch = QtWidgets.QCheckBox("⚠ Scan-quality chowkidaar (kamzor page ki turant chetavni)")
+        self.chk_qwatch.setChecked(bool(self.opts.get("quality_watch", True)))
+        form.addRow(chkrow(self.chk_qwatch, 'हिन्दी: स्कैन ख़त्म होते ही AI हर पेज जाँचता है — धुँधला/बहुत गहरा/बहुत फीका पेज मिले तो पेज-नंबर के साथ तुरंत चेतावनी, ताकि उसी समय दोबारा स्कैन कर सकें।\nEnglish: Right after a scan the AI checks every page — if one looks blurry/too dark/too faint you get an instant warning with the page number, so you can re-scan immediately.'))
+        self.chk_photoclean = QtWidgets.QCheckBox("📱 Phone-photo aate hi scan-jaisi saaf (auto)")
+        self.chk_photoclean.setChecked(bool(self.opts.get("photo_auto_clean", True)))
+        form.addRow(chkrow(self.chk_photoclean, 'हिन्दी: फ़ोन से आई photo (QR/upload) आते ही अपने आप सुधरती है — 4 कोनों से सीधी, छाया हटती है, रंग वापस, साफ़ — बिलकुल स्कैन जैसी।\nEnglish: Photos received from the phone are auto-fixed on arrival — perspective-straightened, de-shadowed, colour-restored — just like a scan.'))
         self.spin_custlen = QtWidgets.QSpinBox(); self.spin_custlen.setRange(100, 3000)
         self.spin_custlen.setValue(int(self.opts.get("custom_page_mm", 600) or 600))
         self.spin_custlen.setSuffix(" mm")
@@ -2871,6 +2895,8 @@ class OptionsDialog(QtWidgets.QDialog):
         o["smart_scan"] = self.chk_smart.isChecked()
         o["enhance_mode"] = ["original", "white", "enhanced", "high_contrast"][self.cmb_enhmode.currentIndex()]
         o["noise_removal"] = self.chk_denoise.isChecked()
+        o["quality_watch"] = self.chk_qwatch.isChecked()
+        o["photo_auto_clean"] = self.chk_photoclean.isChecked()
         o["auto_colour"] = self.chk_autocolour.isChecked()
         o["custom_page_mm"] = int(self.spin_custlen.value())
         o["compress"] = self.chk_compress.isChecked()
@@ -8330,7 +8356,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     for pg in (pdf_to_images(path, self._tmpdir) or []):
                         self._add_item_for_path(pg); added += 1
                 else:
-                    self._add_item_for_path(path); added = 1
+                    # (v211) photo aate hi scan-jaisi saaf (auto)
+                    self._add_item_for_path(self._clean_incoming_photo(path)); added = 1
             except Exception:
                 status_lbl.setText(L("⚠ '%s' import nahi hui (format support nahi)",
                                      "⚠ Could not import '%s' (unsupported format)") % (name or "file"))
@@ -8435,7 +8462,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
         def on_photo(path):
             try:
-                self._add_item_for_path(path)
+                # (v211) photo aate hi scan-jaisi saaf (auto)
+                self._add_item_for_path(self._clean_incoming_photo(path))
             except Exception:
                 return
             self._phone_n += 1
@@ -14582,6 +14610,30 @@ if the toggle is ticked).</p>
                                   "  ·  🔁 straightened %d/%d") % (_orr, _ot)
         except Exception:
             pass
+        # (v211) QUALITY CHOWKIDAAR: kamzor pages ki turant chetavni —
+        # baad me pata chalne se pehle hi dobara-scan ka mauka
+        try:
+            _qw = list(getattr(self._worker, "q_warns", []) or [])
+            if kept and _qw and self._opts.get("quality_watch", True):
+                msg += self.L("  ·  ⚠ %d page kamzor", "  ·  ⚠ %d weak page(s)") % len(_qw)
+                self._ev_push("scan:quality-warn")
+                _nm = {"dark": self.L("bahut gehra/kaala", "too dark"),
+                       "faint": self.L("bahut feeka", "too faint"),
+                       "blur": self.L("dhundhla", "blurry")}
+                lines = ["  •  Page %d: %s" % (p, ", ".join(_nm.get(c, c) for c in cs))
+                         for p, cs in _qw[:8]]
+                if len(_qw) > 8:
+                    lines.append("  •  … aur %d page" % (len(_qw) - 8))
+                QtWidgets.QMessageBox.warning(
+                    self, self.L("⚠ Scan quality", "⚠ Scan quality"),
+                    self.L("In pages ki quality kamzor lag rahi hai:\n\n%s\n\n"
+                           "Sujhaav: page ko dobara scan karein, ya Editor me\n"
+                           "kholkar ✨ Auto-Fix / 🤖 AI Auto laga dein.",
+                           "These pages look weak:\n\n%s\n\n"
+                           "Tip: re-scan the page, or open the Editor and\n"
+                           "apply ✨ Auto-Fix / 🤖 AI Auto.") % "\n".join(lines))
+        except Exception:
+            pass
         self.status.showMessage(msg, 5000)
         if kept and self._opts.get("sound_on_done"):
             try:
@@ -14722,6 +14774,25 @@ if the toggle is ticked).</p>
             self.status.showMessage("Added %d page(s) from the camera." % len(dlg.captured), 4000)
             if tesseract_available():
                 self.auto_name_pages()
+
+    def _clean_incoming_photo(self, path):
+        """(v211) Phone se aayi photo import hote hi scan-jaisi saaf (option:
+        photo_auto_clean). Naya temp file lautata hai; PDF/fail par wahi path."""
+        if not self._opts.get("photo_auto_clean", True):
+            return path
+        try:
+            if os.path.splitext(path)[1].lower() not in (
+                    ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"):
+                return path
+            with Image.open(path) as im:
+                out_im = ai_photo_to_scan(im)
+            fd, out = tempfile.mkstemp(suffix=".jpg", dir=self._tmpdir)
+            os.close(fd)
+            out_im.save(out, "JPEG", quality=92)
+            self._ev_push("phone:auto-clean")
+            return out
+        except Exception:
+            return path
 
     def import_photos(self):
         """Phone se kheenchi photos ko saaf karke pages banao (shadow hatana,
@@ -20171,6 +20242,33 @@ if the toggle is ticked).</p>
             best = (m.get("similar") or [None])[0] if m else None
             name = (best.get("name") if best else "") or ""
             folder = (best.get("folder") if best else "") or ""
+            # (v211) DUPLICATE CHETAVNI: bilkul yehi document pehle se saved
+            # dikh raha hai (fingerprint-match bahut ooncha + wahi file disk
+            # par maujood) → save se PEHLE ek baar poochh lo.
+            if (best and name and conf >= 90
+                    and self._opts.get("ai_dup_warn", True)):
+                try:
+                    _dp = os.path.join(folder or "", underscore_name(name) + ".pdf")
+                    if folder and os.path.exists(_dp):
+                        self._ev_push("save:dup-warn")
+                        try:
+                            _when = datetime.datetime.fromtimestamp(
+                                os.path.getmtime(_dp)).strftime("%d %b %Y")
+                        except Exception:
+                            _when = ""
+                        if QtWidgets.QMessageBox.question(
+                                self, APP_NAME,
+                                self.L("⚠ Yeh document pehle se save lagta hai (%d%% match):\n\n"
+                                       "%s%s\n\nPhir bhi DOBARA save karein?",
+                                       "⚠ This document appears to be saved already (%d%% match):\n\n"
+                                       "%s%s\n\nSave it AGAIN anyway?")
+                                % (conf, _dp, ("\n(" + _when + ")") if _when else ""),
+                                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+                            res["cancel"] = True
+                            return res
+                except Exception:
+                    pass
             # Never seen this exact document (no confident match) -> try applying a
             # learned NAMING PATTERN for this document type (the "new AI" feature).
             if (not best) or conf < 70 or not name:
@@ -20244,6 +20342,21 @@ if the toggle is ticked).</p>
                 gen, _lbl, _tc = _ni_generate(txt, style, corr)
                 sug = gen
             self._doc_ai_subject = _ni_extract_person(txt) or ""   # for correction learning
+            # (v211) PAKKA naam: naam ke saath document-number + date bhi —
+            # "SITA_DEVI_Referral_324025_28Jul2026" jaisa (option: ai_name_extras)
+            if sug and self._opts.get("ai_name_extras", True):
+                try:
+                    num = extract_doc_number(txt) or ""
+                    if num and num.lower() not in sug.lower():
+                        sug = "%s_%s" % (sug, num)
+                except Exception:
+                    pass
+                try:
+                    _dstr = datetime.datetime.now().strftime("%d%b%Y")
+                    if _dstr.lower() not in sug.lower():
+                        sug = "%s_%s" % (sug, _dstr)
+                except Exception:
+                    pass
             if sug:
                 res["default"] = os.path.join(self._target_folder(), underscore_name(sug) + ".pdf")
                 try:
@@ -20524,6 +20637,16 @@ if the toggle is ticked).</p>
         chk_as.setChecked(bool(self._opts.get("ai_auto_save", False)))
         v.addWidget(chk_as)
 
+        chk_dw = QtWidgets.QCheckBox(self.L("Duplicate chetavni: wahi document dobara save ho to poochho",
+                                            "Duplicate warning: ask before re-saving the same document"))
+        chk_dw.setChecked(bool(self._opts.get("ai_dup_warn", True)))
+        v.addWidget(chk_dw)
+
+        chk_ne = QtWidgets.QCheckBox(self.L("Naye naam me document-number + date bhi jodo",
+                                            "Add document number + date to new names"))
+        chk_ne.setChecked(bool(self._opts.get("ai_name_extras", True)))
+        v.addWidget(chk_ne)
+
         hr = QtWidgets.QHBoxLayout()
         hr.addWidget(QtWidgets.QLabel(self.L("Match bharosa (threshold): ", "Match confidence (threshold): ")))
         sld = QtWidgets.QSlider(QtCore.Qt.Horizontal)
@@ -20622,6 +20745,8 @@ if the toggle is ticked).</p>
             self._opts["ai_folder_suggest"] = chk_fd.isChecked()
             self._opts["ai_learning"] = chk_ln.isChecked()
             self._opts["ai_auto_save"] = chk_as.isChecked()
+            self._opts["ai_dup_warn"] = chk_dw.isChecked()
+            self._opts["ai_name_extras"] = chk_ne.isChecked()
             self._opts["ai_threshold"] = int(sld.value())
             try:
                 self._save_opts()
@@ -21430,6 +21555,9 @@ if the toggle is ticked).</p>
         # AI Document Memory: recognise this document -> suggest latest name/folder,
         # optionally auto-save, or offer Similar Documents.
         _ai = self._ai_prepare_save(paths, default)
+        if _ai.get("cancel"):
+            self.status.showMessage(self.L("Save radd (duplicate)", "Save cancelled (duplicate)"), 4000)
+            return
         if _ai.get("auto") and _ai.get("path"):
             out = _ai["path"]
         else:
