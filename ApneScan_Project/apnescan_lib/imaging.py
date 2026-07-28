@@ -45,6 +45,12 @@ __all__ = [
     "detect_content_boxes",
     "colorfulness",
     "restore_photo",
+    "ai_auto_enhance",
+    "ai_color_restore",
+    "ai_denoise",
+    "ai_smart_crop",
+    "ai_deskew",
+    "ai_auto_all",
     "save_image_keep_ext",
     "apply_watermark",
     "enhance_image",
@@ -868,6 +874,186 @@ def restore_photo(img):
         rgb = ImageEnhance.Color(rgb).enhance(1.25)
         rgb = ImageEnhance.Sharpness(rgb).enhance(1.3)
         return rgb
+    except Exception:
+        return img
+
+
+# ---------------------------------------------------------------------------
+# (v207) AI TOOLS — charan 1: sab offline, PIL+numpy, koi internet/limit nahi.
+# Har function PIL image leta/deta hai; galti par original wapas (no-crash).
+# ---------------------------------------------------------------------------
+
+def ai_auto_enhance(img):
+    """AI Enhance: histogram padh-kar levels (percentile stretch) + adaptive
+    gamma (page ki roshni dekh kar) + halki dhaar. auto_enhance se zyada
+    samajhdaar — feeke page zyada sudhrenge, achhe page par halka haath."""
+    try:
+        rgb = img.convert("RGB")
+        if not HAS_NUMPY:
+            return auto_enhance(rgb)
+        lum = np.asarray(rgb.convert("L"), dtype=np.float32)
+        lo = float(np.percentile(lum, 1.5))
+        hi = float(np.percentile(lum, 97.0))
+        if hi - lo < 10.0:
+            return auto_enhance(rgb)
+        arr = np.asarray(rgb, dtype=np.float32)
+        arr = (arr - lo) * (255.0 / max(1.0, hi - lo))
+        np.clip(arr, 0.0, 255.0, out=arr)
+        # adaptive gamma: document ka mean ~200 ki taraf, par halke se (clamp)
+        mean = float(arr.mean())
+        if 5.0 < mean < 250.0:
+            import math
+            g = math.log(200.0 / 255.0) / math.log(max(2.0, mean) / 255.0)
+            g = min(1.30, max(0.80, g))
+            if abs(g - 1.0) > 0.02:
+                arr = 255.0 * np.power(arr / 255.0, g)
+        out = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGB")
+        return ImageEnhance.Sharpness(out).enhance(1.25)
+    except Exception:
+        return img
+
+
+def ai_color_restore(img):
+    """Rang wapsi: peela/purana kagaz phir safed. Kagaz (sabse chamakdaar
+    hissa) ka asli rang naap kar har channel ko balance karta hai — text ke
+    rang (neeli syahi, laal mohar) waise ke waise rehte hain."""
+    try:
+        rgb = img.convert("RGB")
+        if not HAS_NUMPY:
+            return ImageOps.autocontrast(rgb, cutoff=1)
+        arr = np.asarray(rgb, dtype=np.float32)
+        lum = arr.mean(axis=2)
+        thr = max(120.0, float(np.percentile(lum, 80.0)))
+        mask = lum >= thr
+        if float(mask.mean()) < 0.02:
+            return ImageOps.autocontrast(rgb, cutoff=1)
+        paper = arr[mask].mean(axis=0)          # kagaz ka [R,G,B]
+        scale = np.clip(247.0 / np.maximum(1.0, paper), 0.75, 1.60)
+        out = np.clip(arr * scale, 0, 255).astype(np.uint8)
+        return Image.fromarray(out, "RGB")
+    except Exception:
+        return img
+
+
+def ai_denoise(img):
+    """AI De-noise (kinara-bachau): jahan text/rekha hai wahan tez rahe, jahan
+    khaali jagah hai wahan daane/dhabbe saaf. Edge-mask se original aur smooth
+    ka blend — plain median se behtar (akshar dhundhle nahi hote)."""
+    try:
+        rgb = img.convert("RGB")
+        if not HAS_NUMPY:
+            return rgb.filter(ImageFilter.MedianFilter(3))
+        smooth = rgb.filter(ImageFilter.MedianFilter(3)).filter(
+            ImageFilter.GaussianBlur(0.8))
+        edges = rgb.convert("L").filter(ImageFilter.FIND_EDGES).filter(
+            ImageFilter.GaussianBlur(2.5))
+        w = np.clip(np.asarray(edges, dtype=np.float32) / 255.0 * 4.0,
+                    0.0, 1.0)[..., None]        # 1 = kinara => original rakho
+        a = np.asarray(rgb, dtype=np.float32)
+        s = np.asarray(smooth, dtype=np.float32)
+        out = (a * w + s * (1.0 - w)).astype(np.uint8)
+        return Image.fromarray(out, "RGB")
+    except Exception:
+        return img
+
+
+def ai_smart_crop(img, margin_frac=0.01):
+    """Smart crop: content (text/rekha) khud dhoondh kar document ki seema par
+    crop — scanner lid ka kaala/safed faaltu kinara gayab. Kuch na mile ya
+    shak ho to purana autocrop fallback."""
+    try:
+        rgb = img.convert("RGB")
+        if not HAS_NUMPY:
+            return autocrop(rgb)
+        g = rgb.convert("L")
+        sc = max(1, max(g.size) // 700)
+        small = g.resize((max(1, g.width // sc), max(1, g.height // sc)))
+        a = np.asarray(small, dtype=np.float32)
+        border = np.concatenate([a[0, :], a[-1, :], a[:, 0], a[:, -1]])
+        bg = float(np.median(border))
+        diff = np.abs(a - bg)
+        grad = np.zeros_like(a)
+        grad[:-1, :] += np.abs(np.diff(a, axis=0))
+        grad[:, :-1] += np.abs(np.diff(a, axis=1))
+        m = (diff > 28.0) | (grad > 22.0)
+        rows = m.mean(axis=1); cols = m.mean(axis=0)
+        ri = np.where(rows > 0.015)[0]; ci = np.where(cols > 0.015)[0]
+        if ri.size == 0 or ci.size == 0:
+            return autocrop(rgb)
+        t, b = int(ri[0]), int(ri[-1]); l, r = int(ci[0]), int(ci[-1])
+        mg = int(margin_frac * max(small.size)) + 1
+        t = max(0, t - mg); l = max(0, l - mg)
+        b = min(small.height - 1, b + mg); r = min(small.width - 1, r + mg)
+        if (r - l) * (b - t) < 0.20 * small.width * small.height:
+            return autocrop(rgb)      # itna chhota? — galat pakad, safe raho
+        box = (l * sc, t * sc,
+               min(rgb.width, (r + 1) * sc), min(rgb.height, (b + 1) * sc))
+        if box[2] - box[0] < 50 or box[3] - box[1] < 50:
+            return autocrop(rgb)
+        return rgb.crop(box)
+    except Exception:
+        return img
+
+
+def ai_deskew(img):
+    """Deskew+: pehle contrast normalise (feeki chhapai par bhi lines dikhen),
+    phir projection-profile se 0.1° tak baareek khoj. Purane deskew se zyada
+    sateek — halki 0.3-0.5° tilt bhi pakdi jaati hai. Wahi photo-guards."""
+    try:
+        if not HAS_NUMPY:
+            return deskew(img)
+        g = ImageOps.autocontrast(img.convert("L"), cutoff=2)
+        if float((np.asarray(g, dtype=np.float32)[::4, ::4] > 150).mean()) < 0.55:
+            return img                # photo/X-ray jaisa — mat chhedo
+        small = g.resize((max(1, g.width // 4), max(1, g.height // 4)))
+
+        def _score(angle):
+            rot = small.rotate(angle, resample=Image.BILINEAR, fillcolor=255)
+            arr = np.asarray(rot, dtype=np.float32)
+            return float(np.var(np.diff(arr.sum(axis=1))))
+
+        score0 = _score(0.0)
+        best_c, best_cs = 0.0, score0
+        for i in range(-22, 23):
+            a = i * 2.0
+            if a == 0.0:
+                continue
+            s = _score(a)
+            if s > best_cs:
+                best_cs, best_c = s, a
+        center = best_c if (abs(best_c) > 5.0 and best_cs > 1.35 * score0) else 0.0
+        best_angle, best_score = center, _score(center)
+        for i in range(-10, 11):
+            a = center + i * 0.5
+            s = _score(a)
+            if s > best_score:
+                best_score, best_angle = s, a
+        c2 = best_angle
+        for i in range(-5, 6):
+            a = c2 + i * 0.1
+            if abs(a - best_angle) < 1e-6:
+                continue
+            s = _score(a)
+            if s > best_score:
+                best_score, best_angle = s, a
+        if abs(best_angle) < 0.15 or best_score < 1.12 * score0:
+            return img
+        return img.rotate(best_angle, resample=Image.BICUBIC,
+                          fillcolor=(255, 255, 255), expand=True)
+    except Exception:
+        return img
+
+
+def ai_auto_all(img):
+    """AI Auto (sab ek saath): Deskew+ → Smart crop → Rang wapsi →
+    AI Enhance → AI De-noise. Ek click me poora page taiyaar."""
+    try:
+        im = ai_deskew(img)
+        im = ai_smart_crop(im)
+        im = ai_color_restore(im)
+        im = ai_auto_enhance(im)
+        im = ai_denoise(im)
+        return im.convert("RGB")
     except Exception:
         return img
 

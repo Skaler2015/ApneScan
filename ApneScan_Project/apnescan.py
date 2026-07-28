@@ -45,6 +45,8 @@ from apnescan_lib.imaging import (
     adaptive_bw, dewarp_page, smart_jpeg_quality, has_real_colour,
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
+    ai_auto_enhance, ai_color_restore, ai_denoise, ai_smart_crop, ai_deskew,
+    ai_auto_all,
 )
 # Smart Orientation engine. auto_orient is the only entry point the pipeline
 # calls; the app's cached tesseract_available() is injected into the module a
@@ -241,7 +243,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "206"
+VERSION = "207"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3346,6 +3348,9 @@ class ImageEditor(QtWidgets.QDialog):
     QToolButton.act { border:1px solid #e2e8f0; border-radius:9px; padding:5px 7px;
                       color:#334155; font-size:11px; background:#fff; }
     QToolButton.act:hover { border-color:#4F46E5; color:#4F46E5; background:#f0fdfa; }
+    QToolButton.ai { border:1px solid #c7d2fe; border-radius:9px; padding:5px 7px;
+                     color:#4338CA; font-size:11px; font-weight:600; background:#eef2ff; }
+    QToolButton.ai:hover { border-color:#4F46E5; background:#e0e7ff; }
     QPushButton#primary { background:#4F46E5; color:#fff; border:none; border-radius:9px;
                           padding:8px 16px; font-weight:700; }
     QPushButton#primary:hover { background:#4338CA; }
@@ -3569,6 +3574,38 @@ class ImageEditor(QtWidgets.QDialog):
         cbtn(4, 0, "🟤", L("Purani", "Sepia"), lambda: self._op(self._sepia_fn))
         cbtn(4, 1, "❄", L("Denoise", "Denoise"), lambda: self._op(lambda im: im.filter(ImageFilter.MedianFilter(5))))
         sv.addLayout(cg)
+
+        # ---- 🤖 AI TOOLS (v207 charan 1 — sab offline, free, bina limit) ----
+        grp(L("🤖 AI TOOLS", "🤖 AI TOOLS"))
+        ag = QtWidgets.QGridLayout(); ag.setSpacing(4)
+
+        def aibtn(r, c, icon, name, key, fn, tip="", span=1):
+            b = QtWidgets.QToolButton(); b.setText(icon + " " + name)
+            b.setProperty("class", "ai"); b.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+            if tip:
+                b.setToolTip(tip)
+            b.clicked.connect(lambda _c, k=key, f=fn: self._ai_op(k, f))
+            ag.addWidget(b, r, c, 1, span)
+        aibtn(0, 0, "🤖", L("AI Auto (sab ek saath)", "AI Auto (everything)"), "auto", ai_auto_all,
+              L("Ek click: seedha + crop + rang wapsi + enhance + de-noise",
+                "One click: deskew + crop + colour restore + enhance + de-noise"), span=2)
+        aibtn(1, 0, "✨", L("AI Enhance", "AI Enhance"), "enhance", ai_auto_enhance,
+              L("Page padh-kar roshni/contrast khud set (levels + gamma)",
+                "Reads the page and sets levels/gamma automatically"))
+        aibtn(1, 1, "🎨", L("Rang wapsi", "Colour restore"), "color", ai_color_restore,
+              L("Peela/purana kagaz phir safed — syahi ke rang surakshit",
+                "Yellowed paper back to white — ink colours preserved"))
+        aibtn(2, 0, "❄", L("AI De-noise", "AI De-noise"), "denoise", ai_denoise,
+              L("Daane/dhabbe saaf, par akshar tez ke tez (edge-preserving)",
+                "Removes grain/specks but keeps text sharp (edge-preserving)"))
+        aibtn(2, 1, "🔲", L("Smart crop", "Smart crop"), "crop", ai_smart_crop,
+              L("Content khud dhoondh kar faaltu kinara kaato",
+                "Finds the content and trims the excess border"))
+        aibtn(3, 0, "📐", L("Deskew+", "Deskew+"), "deskew", ai_deskew,
+              L("0.1° tak baareek tirchhapan sudhaar (feeki chhapai par bhi)",
+                "Fine deskew down to 0.1° (works on faint prints too)"), span=2)
+        sv.addLayout(ag)
 
         # ---- SMART (ek click) ----
         grp(L("SMART", "SMART"))
@@ -4175,6 +4212,19 @@ class ImageEditor(QtWidgets.QDialog):
             pass
         self._dirty_any = False
         self._load_current(); self._build_film()
+
+    def _ai_op(self, key, fn):
+        # (v207) AI TOOLS ka common raasta: busy-cursor + telemetry + _op
+        # (scope/undo/redo sab _op se apne aap milte hain)
+        try:
+            self.win._ev_push("edit:ai-%s" % key)
+        except Exception:
+            pass
+        self.setCursor(QtCore.Qt.WaitCursor)
+        try:
+            self._op(lambda im: fn(im).convert("RGB"))
+        finally:
+            self.unsetCursor()
 
     def _auto_fix(self):
         def fn(im):
