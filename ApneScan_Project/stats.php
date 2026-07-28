@@ -3243,10 +3243,13 @@ function uaRender(){ if(!document.getElementById('uaKpis'))return;
   var ta2=Object.keys(acts).map(function(k){return [k,acts[k]];}).sort(function(a,b){return b[1]-a[1];});
   var mx=ta2.length?ta2[0][1]:1;
   var te=document.getElementById('uaTop');
-  if(te)te.innerHTML=ta2.length?_tbl(ta2.map(function(r){
-      return '<tr><td style="white-space:normal;word-break:break-word;font-size:11px">'+esc(r[0])+'</td>'
-        +'<td style="width:52px;text-align:right"><b>'+r[1]+'</b></td></tr>'; }),
-      ['Kaam (poora naam)',''])
+  // (v3.3.4) _tbl nahi — usme 420px scroll-limit hai; poori list bina
+  // scroll ke dikhni chahiye
+  if(te)te.innerHTML=ta2.length?('<table><thead><tr><th>Kaam (poora naam)</th><th></th></tr></thead><tbody>'
+      +ta2.map(function(r){
+        return '<tr><td style="white-space:normal;word-break:break-word;font-size:11px">'+esc(r[0])+'</td>'
+          +'<td style="width:52px;text-align:right"><b>'+r[1]+'</b></td></tr>'; }).join('')
+      +'</tbody></table>')
     :'<div style="color:var(--mut)">—</div>';
   // ---- hour bars ----
   var he=document.getElementById('uaHours');
