@@ -229,7 +229,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "188"
+VERSION = "189"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -510,7 +510,7 @@ DEFAULT_OPTIONS = {
     "name_append_number": False, # auto-naam me document number bhi jodo
     "name_append_date": False,   # auto-naam me date bhi jodo
     "ui_dashboard": True,        # khaali screen par bade action-cards
-    "ui_header": True,           # toolbar ke neeche status-patti
+    "ui_header": False,          # toolbar ke neeche status-patti (v189: default band)
     "ui_graph": True,            # sidebar me 7-din ka graph
     "ui_preview": False,         # daayan preview panel
     "ui_jobs": False,            # job-chips patti
@@ -6385,6 +6385,17 @@ class ScannerWindow(QtWidgets.QMainWindow):
             _lo = self._config.get("options")
             if isinstance(_lo, dict):
                 _lo["show_files_panel"] = False
+            try:
+                save_config(self._config)
+            except Exception:
+                pass
+        # v189: toolbar ke neeche wali "Scanner FREE (ready)" patti ek baar
+        # sabke liye band (user request) — Settings se wapas on ho sakti hai
+        if not self._config.get("layout_v189"):
+            self._config["layout_v189"] = True
+            _lo = self._config.get("options")
+            if isinstance(_lo, dict):
+                _lo["ui_header"] = False
             try:
                 save_config(self._config)
             except Exception:
