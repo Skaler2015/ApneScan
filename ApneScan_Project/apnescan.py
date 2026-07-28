@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "211"
+VERSION = "212"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2561,13 +2561,22 @@ class OptionsDialog(QtWidgets.QDialog):
     def __init__(self, parent, opts):
         super().__init__(parent)
         self.setWindowTitle("Options / Settings")
-        self.setMinimumWidth(560)
+        # (v212) itna chauda ki SAARE tabs ek saath dikhein (scroll-arrow nahi)
+        self.setMinimumWidth(920)
         self.opts = dict(DEFAULT_OPTIONS); self.opts.update(opts or {})
 
         outer = QtWidgets.QVBoxLayout(self)
         # (v198) Settings ab CATEGORY-WISE TABS me — har section apna tab,
         # sab kuch ek saath, dhoondhna aasaan (user request)
         self.tabs = QtWidgets.QTabWidget()
+        # (v212) sab tabs hamesha ek saath: compact padding + no scroll-buttons
+        self.tabs.setUsesScrollButtons(False)
+        try:
+            self.tabs.tabBar().setElideMode(QtCore.Qt.ElideNone)
+        except Exception:
+            pass
+        self.tabs.setStyleSheet(
+            "QTabBar::tab{padding:6px 9px;font-size:12px;}")
         outer.addWidget(self.tabs, 1)
         form = None
         _TICON = {"Interface": "🎨", "Save": "💾", "Image cleanup": "🪄",
