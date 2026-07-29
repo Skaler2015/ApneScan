@@ -3128,6 +3128,19 @@ function dfLoad(){ var dt=(document.getElementById('dfDate')||{}).value||'';
     dfRender(); }).catch(function(){});
 }
 function dfLbl(e){ var n=String(e||'');
+  // (v216) asli kaam ke saaf naam
+  var FEAT={'feat:scan':'🖨 Scan kiya','feat:save-pdf':'💾 PDF save ki',
+    'feat:print':'🖨️ Print kiya','feat:import':'📥 Import kiya',
+    'feat:editor':'🎨 Editor khola','edit:ai-auto':'🤖 AI Auto (editor)',
+    'edit:ai-enhance':'✨ AI Enhance','edit:ai-color':'🎨 Colour restore',
+    'edit:ai-denoise':'❄ De-noise','edit:ai-crop':'🔲 Smart crop',
+    'edit:ai-deskew':'📐 Deskew+','edit:ai-heal':'🩹 Daag mitaya',
+    'edit:ai-signext':'✍ Sign nikala','phone:auto-clean':'📱 Phone-photo saaf',
+    'save:dup-warn':'🔁 Duplicate chetavni','scan:quality-warn':'⚠ Quality chetavni',
+    'orient:no-tesseract':'⚠ Tesseract nahi','orient:tess-autoinstalled':'✅ Tesseract install'};
+  if(FEAT[n])return FEAT[n];
+  if(n.indexOf('feat:')===0)return '⚙️ '+n.slice(5);
+  if(n.indexOf('edit:')===0)return '🎨 '+n.slice(5)+' (editor)';
   if(n.indexOf('btn:')===0)return '🔘 '+n.slice(4)+' (toolbar)';
   if(n.indexOf('menu:')===0)return '📋 '+n.slice(5)+' (menu)';
   if(n.indexOf('nav:')===0)return '🧭 '+n.slice(4)+' (sidebar)';

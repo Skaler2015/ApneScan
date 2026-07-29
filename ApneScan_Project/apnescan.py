@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "215"
+VERSION = "216"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -15075,6 +15075,10 @@ if the toggle is ticked).</p>
     def _on_scan_done(self, kept, skipped):
         self._scan_place = None          # rescan/insert mode khatam
         if kept:
+            # (v216) asli KAAM bhi Activity-Feed me — pehle sirf button/menu
+            # click event bante the, isliye scan/save/print counter me nahi
+            # aate the. Ab har scan-batch ka event bhi jaata hai.
+            self._ev_push("feat:scan")
             # scan hote hi LOCAL pages bhi turant badhein (pehle sirf PDF save
             # par badhte the — isliye "self stats change nahi ho rahe" lagta tha)
             self._pstats_bump(pages=kept, scan_ok=1)
@@ -15287,6 +15291,7 @@ if the toggle is ticked).</p>
     def _on_import_done(self, count):
         if count:
             self.status.showMessage("Imported %d page(s)." % count, 4000)
+            self._ev_push("feat:import")          # (v216) asli import event
             self._pstats_bump(imports=count)     # personal
             self._an_report("event", imp=count, feat="import")  # worldwide + refresh
             self._an_update_box()
@@ -18656,6 +18661,7 @@ if the toggle is ticked).</p>
             return
         path = item.data(QtCore.Qt.UserRole)
         self._pv_backup([path])
+        self._ev_push("feat:editor")              # (v216) editor khola
 
         def _saved():
             try:
@@ -21873,6 +21879,7 @@ if the toggle is ticked).</p>
         # pages ab SCAN par gine jaate hain (upar), isliye yahan sirf PDF ki
         # ginti — warna double count ho jaata.
         self._pstats_bump(pdfs=1, doc_type=dt)
+        self._ev_push("feat:save-pdf")            # (v216) asli PDF-save event
         # worldwide analytics: PDF-save feature ki ginti (naam/content nahi
         # jaata) + (v183) bani PDF ki size KB me — admin Scans detail ke liye
         try:
@@ -22478,6 +22485,7 @@ if the toggle is ticked).</p>
         printer = QPrinter(QPrinter.HighResolution)
         if QPrintDialog(printer, self).exec_() != QtWidgets.QDialog.Accepted:
             return
+        self._ev_push("feat:print")               # (v216) asli print event
         painter = QtGui.QPainter()
         if not painter.begin(printer):
             self._warn("Printer did not start."); return
