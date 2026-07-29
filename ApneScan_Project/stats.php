@@ -549,6 +549,38 @@ if (isset($_GET['admin'])) {
     // ---- login ho gaya ----
     $_SESSION['seen']=time();
 
+    // ---- (v3.5) LIVE-CHANNEL events: scan-report (recentScans) + feature
+    // (recentEvents) bhi User-Activity me laao — ye alag pipeline (_an_report)
+    // se aate hain, isliye pehle sirf 'Live Activity' me dikhte the. Dedup:
+    // jab jsonl me wahi kaam (feat:scan/feat:*) us user+second par ho to skip
+    // (v216+ app dono jagah bhejta hai). Har event {t,u,e,d}.
+    if (!function_exists('ua_live_events')) {
+        function ua_live_events($DATA_FILE, $jsonl_keys) {
+            $out = array();
+            $d = @json_decode(@file_get_contents($DATA_FILE), true);
+            if (!is_array($d)) return $out;
+            foreach ((isset($d['recentScans'])?$d['recentScans']:array()) as $r) {
+                $t = intval(isset($r['t'])?$r['t']:0); $u = isset($r['name'])?$r['name']:'';
+                if (!$t || $u === '') continue;
+                $dup = false;
+                for ($k=-2;$k<=2;$k++){ if(isset($jsonl_keys[$u.'|feat:scan|'.($t+$k)])){$dup=true;break;} }
+                if ($dup) continue;
+                $out[] = array('t'=>$t,'u'=>$u,'e'=>'feat:scan','n'=>intval(isset($r['n'])?$r['n']:0),
+                    'd'=>date('Y-m-d',$t));
+            }
+            foreach ((isset($d['recentEvents'])?$d['recentEvents']:array()) as $r) {
+                $t = intval(isset($r['t'])?$r['t']:0); $u = isset($r['u'])?$r['u']:'';
+                $ft = isset($r['feat'])?$r['feat']:''; if (!$t || $ft === '') continue;
+                $ev = (strpos($ft,'feat:')===0||strpos($ft,'edit:')===0)?$ft:('feat:'.$ft);
+                $dup = false;
+                for ($k=-2;$k<=2;$k++){ if(isset($jsonl_keys[$u.'|'.$ev.'|'.($t+$k)])){$dup=true;break;} }
+                if ($dup) continue;
+                $out[] = array('t'=>$t,'u'=>$u,'e'=>$ev,'d'=>date('Y-m-d',$t));
+            }
+            return $out;
+        }
+    }
+
     // ---- (v3) ACTIVITY FEED API: kisi bhi din ki poori event-file (JSON) ----
     // GET ?admin=1&api=feed&date=YYYY-MM-DD  → us din ke saare events + dates
     if (isset($_GET['api']) && $_GET['api'] === 'feed') {
@@ -580,13 +612,16 @@ if (isset($_GET['admin'])) {
         $files = glob(__DIR__.'/apnescan_events/events-*.jsonl') ?: array();
         sort($files);                          // puraane pehle (chronological)
         $files = array_slice($files, -90);
-        $out = array(); $cap = 40000;
+        $out = array(); $cap = 40000; $jk = array();
         foreach ($files as $fp) {
             foreach (@file($fp, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) ?: array() as $ln) {
-                $j = json_decode($ln, true); if (is_array($j)) $out[] = $j;
+                $j = json_decode($ln, true); if (!is_array($j)) continue;
+                $out[] = $j;
+                $jk[(isset($j['u'])?$j['u']:'').'|'.(isset($j['e'])?$j['e']:'').'|'.intval(isset($j['t'])?$j['t']:0)] = 1;
                 if (count($out) >= $cap) break 2;
             }
         }
+        foreach (ua_live_events($DATA_FILE, $jk) as $le) $out[] = $le;   // scan/feature bhi
         echo json_encode(array('ok'=>true,'date'=>'','events'=>$out,
             'total'=>count($out)), JSON_UNESCAPED_UNICODE);
         exit;
@@ -603,21 +638,30 @@ if (isset($_GET['admin'])) {
         $files = glob(__DIR__.'/apnescan_events/events-*.jsonl') ?: array();
         rsort($files);                        // nayi date wali file pehle
         $files = array_slice($files, 0, 90);  // pichhle 90 din tak
-        $total = 0; $out = array(); $skip = $off; $days = array();
+        // (v3.5) pehle SAARE events ek list me (jsonl + live scan/feature),
+        // phir t se sort (naya pehle), filter, phir page-wise
+        $all = array(); $jk = array();
         foreach ($files as $fp) {
-            $fdt2 = substr(basename($fp), 7, 10);   // events-YYYY-MM-DD.jsonl
-            $lines = @file($fp, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) ?: array();
-            $lines = array_reverse($lines);   // din ke andar bhi naya pehle
-            foreach ($lines as $ln) {
+            $fdt2 = substr(basename($fp), 7, 10);
+            foreach (@file($fp, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) ?: array() as $ln) {
                 $j = json_decode($ln, true); if (!is_array($j)) continue;
-                if ($fu !== '' && (isset($j['u'])?$j['u']:'') !== $fu) continue;
-                if ($fq !== '' && strpos(strtolower((isset($j['e'])?$j['e']:'').' '
-                        .(isset($j['u'])?$j['u']:'')), $fq) === false) continue;
-                $total++;
-                $days[$fdt2] = (isset($days[$fdt2])?$days[$fdt2]:0) + 1;  // us din ke kul
-                if ($skip > 0) { $skip--; continue; }
-                if (count($out) < $lim) { $j['d'] = $fdt2; $out[] = $j; }
+                if (!isset($j['d'])) $j['d'] = $fdt2;
+                $all[] = $j;
+                $jk[(isset($j['u'])?$j['u']:'').'|'.(isset($j['e'])?$j['e']:'').'|'.intval(isset($j['t'])?$j['t']:0)] = 1;
             }
+        }
+        foreach (ua_live_events($DATA_FILE, $jk) as $le) $all[] = $le;   // scan/feature bhi
+        usort($all, function($a,$b){ return intval(isset($b['t'])?$b['t']:0) - intval(isset($a['t'])?$a['t']:0); });
+        $total = 0; $out = array(); $skip = $off; $days = array();
+        foreach ($all as $j) {
+            if ($fu !== '' && (isset($j['u'])?$j['u']:'') !== $fu) continue;
+            if ($fq !== '' && strpos(strtolower((isset($j['e'])?$j['e']:'').' '
+                    .(isset($j['u'])?$j['u']:'')), $fq) === false) continue;
+            $total++;
+            $dd = isset($j['d'])?$j['d']:date('Y-m-d',intval(isset($j['t'])?$j['t']:0));
+            $days[$dd] = (isset($days[$dd])?$days[$dd]:0) + 1;
+            if ($skip > 0) { $skip--; continue; }
+            if (count($out) < $lim) $out[] = $j;
         }
         echo json_encode(array('ok'=>true,'total'=>$total,'off'=>$off,
             'lim'=>$lim,'events'=>$out,'days'=>$days), JSON_UNESCAPED_UNICODE);
@@ -3230,8 +3274,9 @@ function tlGo(p){ if(p<0)p=0; _tl.page=p;
       if(ds!==lastD){ var dn=days[e.d]||0;
         out.push('<div style="color:var(--accent2);font-size:10px;margin:8px 0 4px;border-top:1px dashed rgba(148,163,184,.3);padding-top:6px">🗓 '+esc(ds)
           +(dn?' <b style="color:var(--ink,#e2e8f0)">— '+dn+' events</b>':'')+'</div>'); lastD=ds; }
+      var lbl=(e.e==='feat:scan'&&e.n)?('🖨 '+e.n+' page scan kiye'):dfLbl(e.e);
       out.push('<div class="aii"><span>'+(e.e==='app:start'?'🟢':(e.e==='app:close'?'🔴':'•'))+'</span><div>'
-        +'<b>'+esc(e.u||e.c||'user')+'</b> — '+esc(dfLbl(e.e))
+        +'<b>'+esc(e.u||e.c||'user')+'</b> — '+esc(lbl)
         +'<div style="color:var(--mut);font-size:9px">'+d.toLocaleTimeString()+'</div></div></div>');
     });
     el.innerHTML=out.length?out.join(''):'<div style="color:var(--mut)">— kuch nahi mila —</div>';
