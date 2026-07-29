@@ -572,6 +572,26 @@ if (isset($_GET['admin'])) {
         exit;
     }
 
+    // ---- (v3.4) SUMMARY-ALL API: SAB dino ke saare events (aggregate ke
+    // liye) — 'Din ka saraansh' default me TOTAL dikhata hai. GET
+    // ?admin=1&api=feedall  → last 90 din ke events (cap 40000).
+    if (isset($_GET['api']) && $_GET['api'] === 'feedall') {
+        header('Content-Type: application/json; charset=utf-8');
+        $files = glob(__DIR__.'/apnescan_events/events-*.jsonl') ?: array();
+        sort($files);                          // puraane pehle (chronological)
+        $files = array_slice($files, -90);
+        $out = array(); $cap = 40000;
+        foreach ($files as $fp) {
+            foreach (@file($fp, FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES) ?: array() as $ln) {
+                $j = json_decode($ln, true); if (is_array($j)) $out[] = $j;
+                if (count($out) >= $cap) break 2;
+            }
+        }
+        echo json_encode(array('ok'=>true,'date'=>'','events'=>$out,
+            'total'=>count($out)), JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     // ---- (v3.3) TIMELINE API: SAB dino ke events ek saath — naya sabse
     // pehle, page-wise. GET ?admin=1&api=tl&off=0&lim=100[&u=USER][&q=TEXT]
     if (isset($_GET['api']) && $_GET['api'] === 'tl') {
@@ -3206,13 +3226,24 @@ function tlGo(p){ if(p<0)p=0; _tl.page=p;
     el.scrollTop=0;
   }).catch(function(){});
 }
-function uaLoad(){ var dt=(document.getElementById('uaDate')||{}).value||'';
-  fetch('?admin=1&api=feed'+(dt?'&date='+dt:''),{credentials:'same-origin'})
+function uaLoad(){ var dt=(document.getElementById('uaDate')||{}).value;
+  if(dt===undefined)dt='';
+  // (v3.4) default 'Sab din (total)' = feedall; ek din chuna ho to feed
+  var url = dt ? ('?admin=1&api=feed&date='+dt) : '?admin=1&api=feedall';
+  fetch(url,{credentials:'same-origin'})
    .then(function(r){return r.json();}).then(function(j){
-    if(!j||!j.ok)return; _ua.rows=j.events||[]; _ua.date=j.date;
+    if(!j||!j.ok)return; _ua.rows=j.events||[]; _ua.date=j.date||'';
     var sel=document.getElementById('uaDate');
-    if(sel&&!sel.options.length){ (j.dates&&j.dates.length?j.dates:[j.date]).forEach(function(dd){
-      var o=document.createElement('option'); o.value=dd; o.textContent='🗓 '+dd; sel.appendChild(o); }); sel.value=j.date; }
+    if(sel&&!sel.options.length){
+      // pehla option = SAB DIN (total); phir har date
+      var oa=document.createElement('option'); oa.value=''; oa.textContent='🗓 Sab din (total)'; sel.appendChild(oa);
+      (j.dates&&j.dates.length?j.dates:[]).forEach(function(dd){
+        var o=document.createElement('option'); o.value=dd; o.textContent='🗓 '+dd; sel.appendChild(o); });
+      sel.value=dt||''; }
+    // dates list feedall me nahi aati — pehli baar feed se bhar do
+    if(sel&&sel.options.length<=1){ fetch('?admin=1&api=feed',{credentials:'same-origin'})
+      .then(function(r){return r.json();}).then(function(f){ if(f&&f.dates){ f.dates.forEach(function(dd){
+        var o=document.createElement('option'); o.value=dd; o.textContent='🗓 '+dd; sel.appendChild(o); }); } }).catch(function(){}); }
     var us={}; _ua.rows.forEach(function(e){ if(e.u)us[e.u]=1; });
     var su=document.getElementById('uaUser');
     if(su){ var cur=su.value; su.innerHTML='<option value="">👥 Sab users</option>';
@@ -3243,7 +3274,7 @@ function uaRender(){ if(!document.getElementById('uaKpis'))return;
   Object.keys(acts).forEach(function(k){ if(acts[k]>topn){topn=acts[k];top=k;} });
   var busy='—',busyn=0; ulist.forEach(function(u){ if(users[u].n>busyn){busyn=users[u].n;busy=u;} });
   var kp=document.getElementById('uaKpis');
-  if(kp)kp.innerHTML=_kpi('','📜',fmt(rows.length),'Events ('+esc(_ua.date||'')+')')
+  if(kp)kp.innerHTML=_kpi('','📜',fmt(rows.length),'Events ('+esc(_ua.date||'sab din — total')+')')
     +_kpi('g','👥',ulist.length,'Active users')
     +_kpi('p','🏆',esc(busy),'Sabse busy ('+busyn+')')
     +_kpi('y','🔥',esc(top),'Sabse zyada kaam ('+topn+')')
