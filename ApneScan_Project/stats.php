@@ -1540,7 +1540,7 @@ if (isset($_GET['admin'])) {
 <header>
   <button class="iconbtn no-print" id="burger" onclick="sbToggle()" aria-label="Menu">☰</button>
   <div class="ttl">Dashboard</div>
-  <div class="live no-print"><span class="dot"></span> Live · <span id="tm"></span> · <span id="rt" style="opacity:.75"></span></div>
+  <div class="live no-print"><span class="dot"></span> Live · <span id="tm"></span> · <span id="rt" style="opacity:.75"></span> · <span id="refClock" style="opacity:.9" title="Page har 30 sec me apne aap refresh hoti hai">🔄 <b id="refNext">30</b>s me refresh · <span id="refAgo">0</span>s pehle hua</span></div>
   <div class="gsrch no-print"><input id="gsearch" placeholder="Search users, country, scanner… (Ctrl+K)" aria-label="Global search"></div>
   <div class="toolbar no-print">
     <button class="iconbtn" id="bellBtn" onclick="bellToggle()" title="Notifications" aria-label="Notifications">🔔<span class="nbadge" id="nbadge" style="display:none">0</span>
@@ -3041,6 +3041,23 @@ function lvAlertsRender(sev){
     _lf=b.getAttribute('data-lf'); lvRender(); }; }); } })();
 // refresh countdown (page 30s par khud reload hoti hai)
 (function(){ var n=30,el=document.getElementById('lvCount'); if(el) setInterval(function(){ n--; if(n<0)n=0; el.textContent=n; },1000); })();
+// (v3.4) TOP-BAR refresh clock — HAR page par: agla refresh kitne sec me +
+// pichhla kitne sec pehle hua. (Page ~30s me apne aap reload hoti hai; agar
+// aap kisi box me type kar rahe ho to reload ruk jaata hai — tab 'ruka' dikhta)
+(function(){ var RF=30, t0=Date.now();
+  var nx=document.getElementById('refNext'), ag=document.getElementById('refAgo'),
+      rc=document.getElementById('refClock');
+  if(!nx||!ag)return;
+  setInterval(function(){
+    var el=Math.floor((Date.now()-t0)/1000);
+    ag.textContent=el;
+    var rem=RF-el;
+    var typing=document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+    var modal=(document.getElementById('umodal')||{}).style&&document.getElementById('umodal').style.display==='flex';
+    if(rem<=0){ nx.textContent=(typing||modal)?'ruka':'0'; if(rc)rc.style.color=(typing||modal)?'var(--warn,#f59e0b)':''; }
+    else { nx.textContent=rem; if(rc)rc.style.color=''; }
+  },1000);
+})();
 try{ lvRender(); }catch(e){ if(window.jsonLog){} }
 // ---- DEVICES (scanner-wise) ----
 (function(){ var U=D.userList||[]; var g={};
