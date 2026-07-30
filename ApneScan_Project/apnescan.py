@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "218"
+VERSION = "219"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -10138,7 +10138,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
             os.close(fd)
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "ApneScan/%s" % VERSION})
-                with urllib.request.urlopen(req, timeout=300) as r, open(tmp, "wb") as f:
+                # (v219) _urlopen_safe: frozen .exe ko CA-cert na mile to
+                # bina-verify dobara try — warna Tesseract download SSL par
+                # chup-chaap fail hota tha aur auto-rotate kabhi taiyaar nahi hota
+                with _urlopen_safe(req, timeout=300) as r, open(tmp, "wb") as f:
                     shutil.copyfileobj(r, f)
                 os.makedirs(dest, exist_ok=True)
                 with zipfile.ZipFile(tmp) as z:
