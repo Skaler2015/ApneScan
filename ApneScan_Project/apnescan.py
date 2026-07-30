@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "233"
+VERSION = "234"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2758,18 +2758,20 @@ class ScanWorker(QtCore.QThread):
                     # sakta hai (auto_flatten).
                     if self.opts.get("auto_flatten", False):
                         img = flatten_background(img)
-                    # (v233) NAPS2-MATCH: eSCL ka feeka/kaccha scan -> background
-                    # WHITE + contrast + halki saturation (NAPS2 ke HP-WIA-driver
-                    # jaisa saaf/chatak). Sirf colour/gray par; B&W apna adaptive
-                    # threshold khud lagata hai. Agar user ne khud koi enhance
-                    # (quality_enhance / enhance_mode / Smart Scan / flatten) chuna
-                    # ho to DOUBLE-process se bachne ke liye chhod do.
+                    # (v233) NAPS2-MATCH: SIRF eSCL ke KACCHE/feeke scan par ->
+                    # background WHITE + contrast + halki saturation (NAPS2 ke
+                    # HP-WIA-driver jaisa saaf/chatak). WIA/TWAIN/NAPS2-engine me
+                    # scanner-DRIVER khud enhance karta hai (bilkul NAPS2 jaisa),
+                    # isliye wahan naps2_clean SKIP — warna DOUBLE-process ho jaye.
+                    # Sirf colour/gray par (B&W apna adaptive threshold lagata hai),
+                    # aur tab nahi jab user ne khud koi enhance chuna ho.
                     _manual_enh = (self.opts.get("auto_flatten", False)
                                    or self.opts.get("quality_enhance")
                                    or self.opts.get("smart_scan")
                                    or (self.opts.get("enhance_mode", "original")
                                        not in ("original", "", None)))
                     if (self.opts.get("auto_vivid", True)
+                            and self.opts.get("scanner_method", "twain") == "escl"
                             and self.pixel_type != "bw" and not _manual_enh):
                         img = naps2_clean(img)
                     # ---- Smart Orientation = FIRST processing stage (spec) ----
@@ -14671,6 +14673,9 @@ if the toggle is ticked).</p>
         self._state_timer.start()
         QtCore.QTimer.singleShot(800, self._tick_scanner_state)
         QtCore.QTimer.singleShot(1400, self._detect_device_name)   # Device me naam dikhao
+        # (v234) HP ScanJet jaise scanner par eSCL se WIA par le aao (ek baar) —
+        # WIA driver ka output NAPS2 jaisa saaf/chatak (white-balance+contrast).
+        QtCore.QTimer.singleShot(3600, self._prefer_wia_once)
         # Ctrl+O = koi folder kholo (sidebar me) · Ctrl+V = clipboard se paste
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+O"), self, self.open_existing_folder)
         # (v195) Ctrl+Shift+N = naya folder (Explorer jaisa)
@@ -15591,10 +15596,13 @@ if the toggle is ticked).</p>
         usb = getattr(self, "_auto_usb", []) or []
         # combined choices banao — LAN (eSCL) + USB (WIA) + TWAIN
         choices = []   # (label, kind, value)
-        for ip, model in (net or []):
-            choices.append(("🌐 LAN: %s  (%s)" % (model, ip), "escl", ip))
+        # (v234) USB/WIA PEHLE — WIA driver ka output NAPS2 jaisa saaf/chatak
+        # (white-balance+contrast) hota hai; eSCL kaccha. Picker me bhi yahi
+        # default (index 0) chunega.
         for _id, name in usb:
             choices.append(("🔌 USB: %s" % name, "wia", _id))
+        for ip, model in (net or []):
+            choices.append(("🌐 LAN: %s  (%s)" % (model, ip), "escl", ip))
         if HAS_TWAIN:
             try:
                 for nm in (list_sources(int(self.winId())) or []):
@@ -15689,6 +15697,94 @@ if the toggle is ticked).</p>
         dikhao aur chuna hua set kar do. on_done(name, kind, value) callback."""
         self._auto_detect_cb = on_done
         self.auto_detect_scanner()
+
+    def _prefer_wia_once(self):
+        """(v234) HP ScanJet jaise scanner par WIA driver ka output (jaisa NAPS2
+        me milta hai) eSCL ke KACCHE scan se behtar hota hai — driver khud
+        white-balance + contrast + rang theek karta hai. Isliye EK BAAR: agar
+        abhi 'escl' par hain aur WIA par WAHI scanner (naam se match) available
+        hai, to WIA par le aao. Network-only scanner (jiska WIA driver nahi) par
+        kuch nahi badalta — escl hi rehta hai. User Settings se kabhi bhi wapas
+        eSCL/TWAIN chun sakta hai."""
+        if self._opts.get("_prefer_wia_v234"):
+            return
+        # Sirf tab jab abhi eSCL par hon. (Pehle se WIA/TWAIN -> kuch mat karo.)
+        if self._opts.get("scanner_method") != "escl" or not HAS_W32:
+            self._opts["_prefer_wia_v234"] = True
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+            return
+
+        def work():
+            try:
+                _pythoncom.CoInitialize()
+            except Exception:
+                pass
+            try:
+                return list_wia_sources() or []
+            except Exception:
+                return []
+            finally:
+                try:
+                    _pythoncom.CoUninitialize()
+                except Exception:
+                    pass
+
+        def done(devs):
+            # Ek hi baar koshish — chahe switch ho ya na ho.
+            self._opts["_prefer_wia_v234"] = True
+            if not isinstance(devs, list) or not devs:
+                try: self._save_opts()
+                except Exception: pass
+                return
+            # Naam se match: abhi ke scanner ke model-shabd (ScanJet, N4000…)
+            # jis WIA device me sabse zyada milein wahi. (HP eSCL naam aur WIA
+            # naam dono me 'scanjet'/'n4000' aata hai.)
+            import re as _re
+            cur = (self._opts.get("scanner_name") or "").lower()
+            toks = [t for t in _re.findall(r"[a-z0-9]+", cur) if len(t) >= 3]
+            best, pick = 0, None
+            for _id, nm in devs:
+                nl = (nm or "").lower()
+                score = sum(1 for t in toks if t in nl)
+                if score > best:
+                    best, pick = score, (_id, nm)
+            # Naam match nahi hua: sirf tab switch karo jab EK HI WIA device ho
+            # (varna galat scanner chun sakte hain — escl hi rehne do).
+            if pick is None:
+                if len(devs) == 1:
+                    pick = devs[0]
+                else:
+                    try: self._save_opts()
+                    except Exception: pass
+                    return
+            _id, nm = pick
+            self._opts["scanner_method"] = "wia"
+            self._opts["wia_device_id"] = _id
+            if nm:
+                self._opts["scanner_name"] = nm
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+            try:
+                self._refresh_conn_and_method()
+            except Exception:
+                pass
+            try:
+                self.status.showMessage(self.L(
+                    "Scanner ab WIA driver par — NAPS2 jaisa saaf scan: %s" % (nm or _id),
+                    "Scanner now on WIA driver — NAPS2-like clean scan: %s" % (nm or _id)),
+                    9000)
+            except Exception:
+                pass
+
+        try:
+            self._run_bg_quiet(work, done)
+        except Exception:
+            pass
 
     def _detect_device_name(self):
         """Startup par abhi JUDA scanner ka naam dhoondh kar 'Device' me dikhao
