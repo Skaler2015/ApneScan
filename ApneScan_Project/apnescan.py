@@ -42,7 +42,7 @@ from apnescan_lib.search_engine import _folder_search_score
 from apnescan_lib.imaging import (
     is_blank_page, whiten_dark_background, autocrop, deskew, auto_enhance,
     denoise, apply_enhance_mode, clean_edges, split_two_pages, flatten_background,
-    naps2_clean,
+    naps2_clean, trim_dark_borders,
     adaptive_bw, dewarp_page, smart_jpeg_quality, has_real_colour,
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "237"
+VERSION = "238"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1012,6 +1012,10 @@ DEFAULT_OPTIONS = {
     #    kinare ki halki line bhi uda sakta hai; ab off (zaroorat par ON).
     "auto_vivid": False,
     "auto_whiten_backing": False,
+    # (v238) choti sheet ke side/niche dikhne wali dark ADF-backing ko CROP
+    # karke hatao (paper ke kinare tak). whiten se behtar — kinare ki halki
+    # line nahi udti. DEFAULT ON. Bhari/normal page par apne aap no-op.
+    "auto_trim_backing": True,
     "clean_edges": False,        # scan ki kaali border / kinare ke chhed saaf karo
     "split_two_page": False,     # ek glass par do page → apne aap alag karo
     "searchable_pdf": False,     # har save par PDF ke andar OCR text (Ctrl+F se dhoondo)
@@ -2752,12 +2756,16 @@ class ScanWorker(QtCore.QThread):
                         if is_blank_page(img, _thr):
                             self.skipped += 1
                             continue
-                    # (v237) NAPS2-FAITHFUL: NAPS2 backing-whiten NAHI karta.
-                    # whiten kabhi-kabhi page ke KINARE ki halki line (jaise niche
-                    # ki address-patti) ko bhi safed kar deta tha. Isliye ab DEFAULT
-                    # OFF — sirf tab jab user 'auto_whiten_backing' ON kare (narrow
-                    # sheet par kaali ADF-backing hataane ke liye).
-                    if self.opts.get("auto_whiten_backing", False):
+                    # (v238) ADF ki dark/gray backing (choti sheet ke SIDE/NECHE
+                    # dikhne wali patti) ko CROP karke hatao — paper ke asli kinare
+                    # tak. whiten se ALAG: ye backing ko WHITEN nahi karta balki
+                    # KAAT deta hai, isliye kinare ki halki line (address-patti)
+                    # nahi udti. Safe: sirf tab kaate jab sach me dark border ho
+                    # (poore-bed par bhari page / normal white page par no-op).
+                    # DEFAULT ON. (whiten wala purana tarika ab optional.)
+                    if self.opts.get("auto_trim_backing", True):
+                        img = trim_dark_borders(img)
+                    elif self.opts.get("auto_whiten_backing", False):
                         img = whiten_dark_background(img)
                     # Photocopy jaisi GRAY-maili background asli safed karo
                     # (streak/shading bhi) — text gehra, print/PDF ekdam saaf.
@@ -3253,7 +3261,10 @@ class OptionsDialog(QtWidgets.QDialog):
         self.chk_vivid = QtWidgets.QCheckBox("Vivid boost for faded eSCL scans (OFF = raw, exactly like NAPS2)")
         self.chk_vivid.setChecked(bool(self.opts.get("auto_vivid", False)))
         form.addRow(chkrow(self.chk_vivid, 'हिन्दी: DEFAULT बंद (NAPS2 जैसा faithful — scan ज्यों-का-त्यों)। सिर्फ़ तभी चालू करें जब eSCL का scan फीका लगे — तब background सफ़ेद + रंग चटख होते हैं। ⚠ चालू करने पर कभी-कभी बहुत हल्की line (जैसे नीचे की address-पट्टी) सफ़ेद हो सकती है। WIA पर ज़रूरत नहीं।\nEnglish: OFF by default (NAPS2-faithful — scan kept as-is). Turn ON only if an eSCL scan looks flat/faded — it whitens the background and makes colours pop. ⚠ When ON it can occasionally wash out a very faint line (e.g. the bottom address strip). Not needed on WIA.'))
-        self.chk_whiten = QtWidgets.QCheckBox("Whiten dark ADF backing around narrow sheets")
+        self.chk_trim = QtWidgets.QCheckBox("Trim dark scanner backing around the sheet (Recommended)")
+        self.chk_trim.setChecked(bool(self.opts.get("auto_trim_backing", True)))
+        form.addRow(chkrow(self.chk_trim, 'हिन्दी: DEFAULT चालू। छोटी/सँकरी sheet scan करने पर उसके side/नीचे दिखने वाली काली-gray ADF-backing को अपने-आप CROP करके हटाता है (page अपने असली किनारे तक)। whiten से बेहतर — किनारे की हल्की line नहीं उड़ती। भरे/normal page पर कुछ नहीं करता।\nEnglish: ON by default. Auto-crops the dark/gray scanner backing that shows on the side/bottom of a small/narrow sheet, down to the real paper edge. Better than whitening — faint edge lines are preserved. No-op on full/normal pages.'))
+        self.chk_whiten = QtWidgets.QCheckBox("Whiten dark ADF backing instead of cropping (old way)")
         self.chk_whiten.setChecked(bool(self.opts.get("auto_whiten_backing", False)))
         form.addRow(chkrow(self.chk_whiten, 'हिन्दी: DEFAULT बंद (NAPS2 भी नहीं करता)। चालू करने पर: छोटी पर्ची scan करने पर उसके चारों तरफ़ की काली/gray ADF-backing सफ़ेद हो जाती है। ⚠ कभी-कभी page के किनारे की हल्की line भी उड़ा सकता है।\nEnglish: OFF by default (NAPS2 does not do this either). ON: whitens the dark/gray ADF backing around a small/narrow sheet. ⚠ Can occasionally erase a faint line near the page edge.'))
         self.chk_flatten = QtWidgets.QCheckBox("Flatten photocopy background (pure text docs only — may fade colour headers)")
@@ -3475,6 +3486,7 @@ class OptionsDialog(QtWidgets.QDialog):
         o["quality_enhance"] = self.chk_enhance.isChecked()
         o["auto_flatten"] = self.chk_flatten.isChecked()
         o["auto_vivid"] = self.chk_vivid.isChecked()
+        o["auto_trim_backing"] = self.chk_trim.isChecked()
         o["auto_whiten_backing"] = self.chk_whiten.isChecked()
         o["clean_edges"] = self.chk_clean_edges.isChecked()
         o["split_two_page"] = self.chk_split2.isChecked()
@@ -7489,6 +7501,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._opts["auto_flatten"] = False
             self._opts["auto_vivid"] = False
             self._opts["auto_whiten_backing"] = False
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+        # (v238) side/niche ki dark backing-patti ko crop karke hatao (default ON)
+        if not self._opts.get("_trim_backing_v238"):
+            self._opts["_trim_backing_v238"] = True
+            self._opts["auto_trim_backing"] = True
             try:
                 self._save_opts()
             except Exception:
