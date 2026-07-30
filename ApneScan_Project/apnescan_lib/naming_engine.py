@@ -212,20 +212,20 @@ def _ni_default_style():
 
 
 def _ni_learn_style(filenames):
-    """Infer the user's separator + word order from their past filenames."""
+    """Infer the user's separator + word order from their past filenames.
+    (v224) UNDERSCORE ab kabhi separator nahi banta — user chahta hai naam me
+    SPACE ho, isliye purani underscore-wali files se '_' seekhna band. '_'
+    wali files ko space-jaisa gina jaata hai."""
     st = _ni_default_style()
-    seps = {" - ": 0, "-": 0, "_": 0, " ": 0}
+    seps = {" - ": 0, "-": 0, " ": 0}
     for fn in filenames:
         if not fn:
             continue
-        f = re.sub(r'[_]+', '_', fn)
         if " - " in fn:
             seps[" - "] += 1
-        elif "_" in f:
-            seps["_"] += 1
         elif "-" in fn:
             seps["-"] += 1
-        elif " " in fn.strip():
+        elif "_" in fn or " " in fn.strip():   # '_' ab space jaisa maana jaata
             seps[" "] += 1
     if any(seps.values()):
         st["sep"] = max(seps, key=seps.get)
@@ -237,6 +237,8 @@ def _ni_join(parts, style):
     if not parts:
         return ""
     sep = style.get("sep", " - ") if style else " - "
+    if "_" in sep:              # (v224) purana stored '_' style bhi -> space
+        sep = " "
     return sep.join(parts)
 
 
@@ -269,9 +271,7 @@ def _ni_generate(text, style=None, corrections=None):
         # no person/business -> use the type (+ number) alone
         name = _ni_join([label, docnum], style) if docnum else label
     name = re.sub(r'\s+', ' ', name).strip(" -_")
-    # if the user's style uses underscores, normalise spaces to underscores too
-    if style.get("sep") == "_":
-        name = re.sub(r'\s+', '_', name)
+    # (v224) underscore ko kabhi space se replace nahi karte — naam me space rehta
     return (name, label, tconf)
 
 

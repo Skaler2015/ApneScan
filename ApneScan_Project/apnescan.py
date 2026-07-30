@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "223"
+VERSION = "224"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -7057,7 +7057,9 @@ class DocMemory(object):
                 # don't repeat a subject that's already inside the fixed part
                 if subj.lower() in (pre + suf).lower():
                     return ""
-                return re.sub(r'\s+', ' ', (pre + subj + suf).strip())
+                # (v224) purane pattern ke underscore ab SPACE — naam me space rehta
+                out = (pre + subj + suf).replace("_", " ")
+                return re.sub(r'\s+', ' ', out).strip()
             except Exception:
                 return ""
 
