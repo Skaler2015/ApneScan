@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "236"
+VERSION = "237"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1004,10 +1004,14 @@ DEFAULT_OPTIONS = {
     # Uski jagah auto_vivid (neeche) NAPS2-WIA jaisa saaf+chatak look deta hai
     # bina rang bigade. flatten sirf pure text-photocopy ke liye optional raha.
     "auto_flatten": False,
-    # (v233) NAPS2-MATCH: eSCL ka kaccha/feeka scan -> background WHITE +
-    # contrast + halki saturation (naps2_clean). DEFAULT ON — yahi NAPS2 (HP WIA
-    # driver) jaisa chatak/saaf look deta hai. Kaccha/raw chahiye to OFF karo.
-    "auto_vivid": True,
+    # (v237) NAPS2-FAITHFUL: NAPS2 image par KUCH nahi karta (source-verified) —
+    # koi contrast/white-balance/whiten nahi. Isliye ye dono ab DEFAULT OFF:
+    #  - auto_vivid (naps2_clean): faint text (address-patti) ko safed kar deta
+    #    tha; ab off. Feeke eSCL ko chatak karna ho to Settings se ON.
+    #  - auto_whiten_backing: narrow sheet par kaali ADF-backing hataata hai, par
+    #    kinare ki halki line bhi uda sakta hai; ab off (zaroorat par ON).
+    "auto_vivid": False,
+    "auto_whiten_backing": False,
     "clean_edges": False,        # scan ki kaali border / kinare ke chhed saaf karo
     "split_two_page": False,     # ek glass par do page → apne aap alag karo
     "searchable_pdf": False,     # har save par PDF ke andar OCR text (Ctrl+F se dhoondo)
@@ -2748,10 +2752,13 @@ class ScanWorker(QtCore.QThread):
                         if is_blank_page(img, _thr):
                             self.skipped += 1
                             continue
-                    # Backing (kala/navy/gray) HAMESHA white karo — kisi bhi page
-                    # size me sheet chhoti ho to backing dikhti hai; print me
-                    # kala bilkul nahi aana chahiye.
-                    img = whiten_dark_background(img)
+                    # (v237) NAPS2-FAITHFUL: NAPS2 backing-whiten NAHI karta.
+                    # whiten kabhi-kabhi page ke KINARE ki halki line (jaise niche
+                    # ki address-patti) ko bhi safed kar deta tha. Isliye ab DEFAULT
+                    # OFF — sirf tab jab user 'auto_whiten_backing' ON kare (narrow
+                    # sheet par kaali ADF-backing hataane ke liye).
+                    if self.opts.get("auto_whiten_backing", False):
+                        img = whiten_dark_background(img)
                     # Photocopy jaisi GRAY-maili background asli safed karo
                     # (streak/shading bhi) — text gehra, print/PDF ekdam saaf.
                     # Photo/X-ray par apne aap no-op. Settings se band ho
@@ -2770,7 +2777,7 @@ class ScanWorker(QtCore.QThread):
                                    or self.opts.get("smart_scan")
                                    or (self.opts.get("enhance_mode", "original")
                                        not in ("original", "", None)))
-                    if (self.opts.get("auto_vivid", True)
+                    if (self.opts.get("auto_vivid", False)
                             and self.opts.get("scanner_method", "twain") == "escl"
                             and self.pixel_type != "bw" and not _manual_enh):
                         img = naps2_clean(img)
@@ -2896,14 +2903,13 @@ class ScanWorker(QtCore.QThread):
                 fd, out = tempfile.mkstemp(suffix=".jpg", dir=self.tmpdir)
                 os.close(fd)
                 try:
+                    # (v237) NAPS2 jaisa: master q90 (NAPS2 q75 se behtar, par
+                    # v232 wale q95+4:4:4 se KAAFI chhota — file bahut badi ho
+                    # rahi thi). Normal subsampling (NAPS2 bhi wahi).
                     if im.mode == "L":
-                        im.save(out, "JPEG", quality=95, dpi=_dpi)
+                        im.save(out, "JPEG", quality=90, dpi=_dpi)
                     else:
-                        # (v232) subsampling=0 (4:4:4): master page ki PEHLI
-                        # generation me rang ki dhaar na tootey — NAPS2 jaisi
-                        # crisp. (Master temp hai; size ki chinta nahi.)
-                        im.convert("RGB").save(out, "JPEG", quality=95,
-                                               dpi=_dpi, subsampling=0)
+                        im.convert("RGB").save(out, "JPEG", quality=90, dpi=_dpi)
                 except Exception:
                     im.convert("RGB").save(out, "JPEG", quality=90)
             self.kept += 1
@@ -3244,9 +3250,12 @@ class OptionsDialog(QtWidgets.QDialog):
         form.addRow(chkrow(self.chk_deskew, 'हिन्दी: चालू करने पर: टेढ़ा स्कैन हुआ पेज अपने-आप सीधा हो जाएगा।\nEnglish: ON: straightens a tilted/skewed page automatically.'))
         self.chk_enhance = QtWidgets.QCheckBox("Auto quality improvement (clean faded documents)")
         self.chk_enhance.setChecked(self.opts["quality_enhance"]); form.addRow(chkrow(self.chk_enhance, 'हिन्दी: चालू करने पर: फीके/हल्के document साफ़ और गहरे दिखेंगे।\nEnglish: ON: brightens & sharpens faded documents.'))
-        self.chk_vivid = QtWidgets.QCheckBox("Clean & vivid like NAPS2 — auto white background + colour boost (Recommended)")
-        self.chk_vivid.setChecked(bool(self.opts.get("auto_vivid", True)))
-        form.addRow(chkrow(self.chk_vivid, 'हिन्दी: चालू रहने पर: eSCL/स्कैनर का फीका-कच्चा scan अपने-आप NAPS2 जैसा साफ़ और चटख — background सफ़ेद, रंग (गुलाबी/लाल header, मोहर) vivid, text crisp। रंगीन letterhead धुलता नहीं। Photo/X-ray पर हल्का। बंद = बिलकुल कच्चा scan।\nEnglish: ON: turns a flat/faded eSCL scan into a clean, vivid NAPS2-like page — white background, vivid colours (pink/red headers, stamps), crisp text. Coloured letterheads are NOT washed out. Gentle on photos/X-rays. OFF = raw scan.'))
+        self.chk_vivid = QtWidgets.QCheckBox("Vivid boost for faded eSCL scans (OFF = raw, exactly like NAPS2)")
+        self.chk_vivid.setChecked(bool(self.opts.get("auto_vivid", False)))
+        form.addRow(chkrow(self.chk_vivid, 'हिन्दी: DEFAULT बंद (NAPS2 जैसा faithful — scan ज्यों-का-त्यों)। सिर्फ़ तभी चालू करें जब eSCL का scan फीका लगे — तब background सफ़ेद + रंग चटख होते हैं। ⚠ चालू करने पर कभी-कभी बहुत हल्की line (जैसे नीचे की address-पट्टी) सफ़ेद हो सकती है। WIA पर ज़रूरत नहीं।\nEnglish: OFF by default (NAPS2-faithful — scan kept as-is). Turn ON only if an eSCL scan looks flat/faded — it whitens the background and makes colours pop. ⚠ When ON it can occasionally wash out a very faint line (e.g. the bottom address strip). Not needed on WIA.'))
+        self.chk_whiten = QtWidgets.QCheckBox("Whiten dark ADF backing around narrow sheets")
+        self.chk_whiten.setChecked(bool(self.opts.get("auto_whiten_backing", False)))
+        form.addRow(chkrow(self.chk_whiten, 'हिन्दी: DEFAULT बंद (NAPS2 भी नहीं करता)। चालू करने पर: छोटी पर्ची scan करने पर उसके चारों तरफ़ की काली/gray ADF-backing सफ़ेद हो जाती है। ⚠ कभी-कभी page के किनारे की हल्की line भी उड़ा सकता है।\nEnglish: OFF by default (NAPS2 does not do this either). ON: whitens the dark/gray ADF backing around a small/narrow sheet. ⚠ Can occasionally erase a faint line near the page edge.'))
         self.chk_flatten = QtWidgets.QCheckBox("Flatten photocopy background (pure text docs only — may fade colour headers)")
         self.chk_flatten.setChecked(bool(self.opts.get("auto_flatten", False)))
         form.addRow(chkrow(self.chk_flatten, 'हिन्दी: सिर्फ़ बिना-रंग वाली photocopy के लिए: gray/मैली background को background-division से सफ़ेद करता है (streak/shading भी)। ⚠ रंगीन header/letterhead को धुंधला/सफ़ेद कर सकता है — इसलिए default बंद। Photo/X-ray पर no-op।\nEnglish: For plain (no-colour) photocopies only: removes gray/shaded background via background-division. ⚠ Can wash out coloured headers/letterheads, so OFF by default. No-op on photos/X-rays.'))
@@ -3466,6 +3475,7 @@ class OptionsDialog(QtWidgets.QDialog):
         o["quality_enhance"] = self.chk_enhance.isChecked()
         o["auto_flatten"] = self.chk_flatten.isChecked()
         o["auto_vivid"] = self.chk_vivid.isChecked()
+        o["auto_whiten_backing"] = self.chk_whiten.isChecked()
         o["clean_edges"] = self.chk_clean_edges.isChecked()
         o["split_two_page"] = self.chk_split2.isChecked()
         o["twain_file_xfer"] = self.chk_filexfer.isChecked()
@@ -7470,10 +7480,15 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # tha (kam contrast, feeke rang, gray-maila bg). Ab auto_vivid (naps2_clean)
         # se saaf+chatak. Purana flatten_background rangeen header WASH-OUT kar deta
         # tha — use ek baar OFF karo (auto_vivid absent-key se apne aap ON hai).
-        if not self._opts.get("_scan_vivid_v233"):
-            self._opts["_scan_vivid_v233"] = True
+        # (v237) NAPS2-FAITHFUL: user ki maang par saara tonal-processing scan se
+        # HATA diya (NAPS2 bhi kuch nahi karta). auto_vivid faint address-line ko
+        # safed kar raha tha, whiten bhi kinare ki halki line uda deta tha — dono
+        # ek baar OFF. flatten pehle se off. (Zaroorat par Settings se ON.)
+        if not self._opts.get("_naps2_faithful_v237"):
+            self._opts["_naps2_faithful_v237"] = True
             self._opts["auto_flatten"] = False
-            self._opts["auto_vivid"] = True
+            self._opts["auto_vivid"] = False
+            self._opts["auto_whiten_backing"] = False
             try:
                 self._save_opts()
             except Exception:
@@ -22398,9 +22413,12 @@ if the toggle is ticked).</p>
             # PDF quality mode (Settings): best = quality-first (koi downscale
             # nahi, q95 — print/zoom/archive ke liye); balanced/compact chhoti
             # file ke liye.
+            # (v237) NAPS2 jaisa size/quality: NAPS2 default q75 use karta hai.
+            # Pehle 'best' q95 + 4:4:4 tha -> file 2-3x badi. Ab 'best' q85
+            # (NAPS2 se behtar par kaafi chhota), normal subsampling.
             _pm = str(self._opts.get("pdf_quality_mode", "best") or "best").lower()
-            q, _cap = {"balanced": (85, 4400),
-                       "compact": (75, 3300)}.get(_pm, (95, 0))
+            q, _cap = {"balanced": (78, 4400),
+                       "compact": (70, 3300)}.get(_pm, (85, 0))
         wm = self._opts.get("watermark")
         wt = self._opts.get("watermark_text", "")
         imgs, res = self._pdf_ready_pages(paths, max_side=_cap)
@@ -22439,12 +22457,8 @@ if the toggle is ticked).</p>
         if not any(im.mode == "1" for im in imgs):
             kw["quality"] = max(1, min(95, q))
             kw["optimize"] = True     # muft ~3-8% chhoti (huffman optimize)
-            # (v232) High-quality (best) mode me chroma-subsampling BAND
-            # (subsampling=0 = 4:4:4). Isse rang wale text/lines ki dhaar par
-            # colour-fringe/blur nahi aata — NAPS2 jaisi crisp file. (Halki
-            # badi hoti hai, par 'best' mode quality-first hai.)
-            if q >= 90:
-                kw["subsampling"] = 0
+            # (v237) NAPS2 normal chroma-subsampling (4:2:0) use karta hai —
+            # hum bhi wahi (chhoti file). Pehle 4:4:4 se file badi ho rahi thi.
         def _save_pdf(dst):
             # subsampling kuch purane Pillow me PDF-save par na chale to bina
             # uske dobara — save kabhi fail na ho.
