@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "227"
+VERSION = "228"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -17426,13 +17426,21 @@ if the toggle is ticked).</p>
                               fuzzy=False, require_name_hit=True)
             if m is not None:
                 file_hits.append((SE.rank_key(m[0], m[1], norm), name, full))
-            else:
+            elif len(misses) < 6000:        # (v228) misses ko bounded rakho — bade
                 misses.append((norm, comp, fn_norm, fn_comp, name, full))
             if len(dir_hits) + len(file_hits) >= limit:
                 break
-        # fuzzy pass — sirf tab jab seedhe match kam mile (typo ka ilaaj)
-        if terms and len(file_hits) < 25 and misses:
+        # fuzzy (typo) pass — MEHNGA (difflib). Sirf tab chalao jab seedhe match
+        # bahut kam ho (asli typo), aur tab bhi ek budget tak — warna bade folder
+        # (7000+ files) me har keystroke par hazaaron difflib calls se search
+        # slow ho jaata tha. Folder match mil gaya to fuzzy ki zaroorat nahi.
+        if (terms and not dir_hits and len(file_hits) < 6 and misses
+                and len("".join(terms)) >= 3):
+            _budget = 2500              # zyada se zyada itni files par typo-jaanch
             for norm, comp, fn_norm, fn_comp, name, full in misses:
+                _budget -= 1
+                if _budget < 0:
+                    break
                 m = SE.match_file(terms, norm, comp, norm.split(), fn_norm, fn_comp,
                                   fuzzy=True, require_name_hit=True)
                 if m is not None:
@@ -17560,7 +17568,10 @@ if the toggle is ticked).</p>
             self.files_results._hl_terms = None   # non-search view => no highlight
         self._last_files_res = res          # grid toggle par dobara render ke liye
         self._last_files_preserve = preserve_order
-        grid = bool(self._opts.get("files_grid"))
+        # (v228) SEARCH ke natije hamesha LIST me — user request; list zyada
+        # scannable hai (folder + uske documents saaf dikhe). Grid toggle sirf
+        # normal folder-browse par lagta hai.
+        grid = bool(self._opts.get("files_grid")) and not preserve_order
         self.files_results.clear()
         # FOLDER ke hisaab se group karo: upar folder ka naam (header),
         # neeche usi folder ke documents. preserve_order me folder RANK ke kram me
