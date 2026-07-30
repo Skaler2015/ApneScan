@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "228"
+VERSION = "229"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2401,7 +2401,12 @@ def scan_via_escl(ip, dpi, color, duplex, on_page=None, should_stop=None, page_s
         '<scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03"'
         ' xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm">\n'
         '<pwg:Version>2.6</pwg:Version>\n'
-        '<scan:Intent>Document</scan:Intent>\n'
+        # (v229) NAPS2-PARITY: NAPS2 eSCL par Intent="TextAndGraphic" bhejta hai
+        # (EsclClient.cs). Pehle hum "Document" bhejte the — HP N4000 is Intent par
+        # zyada aggressive text-processing (background hataana, extra contrast/
+        # sharpening) lagata hai, jisse scan NAPS2 se alag dikhta tha. Ab bilkul
+        # NAPS2 jaisa "TextAndGraphic" — scanner wahi (natural) image deta hai.
+        '<scan:Intent>TextAndGraphic</scan:Intent>\n'
         '<pwg:ScanRegions pwg:MustHonor="false"><pwg:ScanRegion>\n'
         '<pwg:Height>%d</pwg:Height><pwg:Width>%d</pwg:Width>\n'
         '<pwg:XOffset>0</pwg:XOffset><pwg:YOffset>0</pwg:YOffset>\n'
