@@ -115,6 +115,31 @@ def whiten_dark_background(img, bright_thresh=160):
         bot_run = _np.cumprod(no_bright_row[::-1]).astype(bool)[::-1]
         interior_dark_rows = no_bright_row & ~top_run & ~bot_run
         mask[interior_dark_rows, :] = False
+        # (v221) STREAKY backing band bhi poori white karo. Scanner backing me
+        # kabhi halki dhaariyan (vertical/horizontal streaks) hoti hain — tab
+        # upar wala first/last-logic band ke beech ka dark chhod deta tha
+        # (page ke NEECHE/upar gray patti reh jaati thi). Fix: har row ka
+        # 'paper-hona' (bright-fraction) SMOOTH karke asli paper ka upar/neeche
+        # kinara dhoondho; us kinare ke BAHAR ki har row poori white. Streak
+        # (patli bright line) smoothing me dab jaati hai, isliye galat 'paper'
+        # nahi banti; page ke andar ka content (frac ooncha) surakshit.
+        def _smooth(v, k=15):
+            if len(v) < k:
+                return v
+            ker = _np.ones(k, dtype=_np.float32) / k
+            return _np.convolve(v.astype(_np.float32), ker, mode="same")
+        rf = _smooth(bright.mean(axis=1))
+        paper_rows = _np.where(rf > 0.45)[0]
+        if paper_rows.size:
+            pt, pb = int(paper_rows[0]), int(paper_rows[-1])
+            mask[:pt, :] = True          # paper ke UPAR sab backing -> white
+            mask[pb + 1:, :] = True      # paper ke NEECHE sab backing -> white
+        cf = _smooth(bright.mean(axis=0))
+        paper_cols = _np.where(cf > 0.45)[0]
+        if paper_cols.size:
+            pl, pr = int(paper_cols[0]), int(paper_cols[-1])
+            mask[:, :pl] = True          # paper ke BAAYIN sab backing -> white
+            mask[:, pr + 1:] = True      # paper ke DAAYIN sab backing -> white
         # Top/Bottom: har column me bhi wahi — kinare se pehle bright pixel tak.
         any_col = bright.any(axis=0)
         firstc = _np.where(any_col, bright.argmax(axis=0), H).astype(_np.int64)[None, :]
