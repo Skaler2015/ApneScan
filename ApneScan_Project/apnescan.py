@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "224"
+VERSION = "225"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -10056,6 +10056,33 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # window dikhte hi (aur agle kuch second tak) koi stray box ho to hata do
         for _ms in (0, 300, 800, 1600, 2600):
             QtCore.QTimer.singleShot(_ms, self._kill_stray_windows)
+        # (v225) 'Run as administrator' se chal rahe ho to Windows UIPI normal
+        # Explorer se DRAG-DROP rok deta hai — in messages ko filter se allow
+        # karo taaki elevated app me bhi drag-drop chale. (Ek hi baar.)
+        if not getattr(self, "_dropfilt_done", False):
+            self._dropfilt_done = True
+            self._allow_drop_when_elevated()
+
+    def _allow_drop_when_elevated(self):
+        """(v225) Agar app admin (elevated) me chal raha hai to Windows UIPI
+        non-elevated Explorer se drag-drop block kar deta hai (isi wajah se
+        'kuch PC par drag-drop nahi ho raha' hota hai). ChangeWindowMessage
+        FilterEx se WM_DROPFILES / WM_COPYDATA / WM_COPYGLOBALDATA allow karo.
+        Windows ke alawa / puraane Windows par chup-chaap no-op."""
+        if not sys.platform.startswith("win"):
+            return
+        try:
+            import ctypes
+            hwnd = int(self.winId())
+            MSGFLT_ALLOW = 1
+            fn = ctypes.windll.user32.ChangeWindowMessageFilterEx
+            for _msg in (0x0233, 0x004A, 0x0049):   # DROPFILES, COPYDATA, COPYGLOBALDATA
+                try:
+                    fn(hwnd, _msg, MSGFLT_ALLOW, None)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _update_empty_state(self):
         empty = self.list.count() == 0
