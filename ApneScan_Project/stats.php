@@ -635,9 +635,19 @@ if (isset($_GET['admin'])) {
         $lim = min(500, max(1, (int)(isset($_GET['lim'])?$_GET['lim']:100)));
         $fu  = isset($_GET['u']) ? trim($_GET['u']) : '';
         $fq  = isset($_GET['q']) ? strtolower(trim($_GET['q'])) : '';
-        $files = glob(__DIR__.'/apnescan_events/events-*.jsonl') ?: array();
-        rsort($files);                        // nayi date wali file pehle
-        $files = array_slice($files, 0, 90);  // pichhle 90 din tak
+        // (v3.6) DEFAULT ab sirf AAJ ka data. ?all=1 -> sab din (90),
+        // ?date=YYYY-MM-DD -> sirf woh din.
+        $fdate = isset($_GET['date']) ? preg_replace('/[^0-9\-]/','', $_GET['date']) : '';
+        $fall  = isset($_GET['all']) && $_GET['all'] == '1';
+        if ($fdate === '' && !$fall) $fdate = date('Y-m-d');   // default: aaj
+        if ($fdate !== '') {
+            $one = __DIR__.'/apnescan_events/events-'.$fdate.'.jsonl';
+            $files = is_file($one) ? array($one) : array();
+        } else {
+            $files = glob(__DIR__.'/apnescan_events/events-*.jsonl') ?: array();
+            rsort($files);                        // nayi date wali file pehle
+            $files = array_slice($files, 0, 90);  // pichhle 90 din tak
+        }
         // (v3.5) pehle SAARE events ek list me (jsonl + live scan/feature),
         // phir t se sort (naya pehle), filter, phir page-wise
         $all = array(); $jk = array();
@@ -654,11 +664,12 @@ if (isset($_GET['admin'])) {
         usort($all, function($a,$b){ return intval(isset($b['t'])?$b['t']:0) - intval(isset($a['t'])?$a['t']:0); });
         $total = 0; $out = array(); $skip = $off; $days = array();
         foreach ($all as $j) {
+            $dd = isset($j['d'])?$j['d']:date('Y-m-d',intval(isset($j['t'])?$j['t']:0));
+            if ($fdate !== '' && $dd !== $fdate) continue;   // (v3.6) sirf chuna din
             if ($fu !== '' && (isset($j['u'])?$j['u']:'') !== $fu) continue;
             if ($fq !== '' && strpos(strtolower((isset($j['e'])?$j['e']:'').' '
                     .(isset($j['u'])?$j['u']:'')), $fq) === false) continue;
             $total++;
-            $dd = isset($j['d'])?$j['d']:date('Y-m-d',intval(isset($j['t'])?$j['t']:0));
             $days[$dd] = (isset($days[$dd])?$days[$dd]:0) + 1;
             if ($skip > 0) { $skip--; continue; }
             if (count($out) < $lim) $out[] = $j;
@@ -1855,7 +1866,7 @@ if (isset($_GET['admin'])) {
   <!-- card ABSOLUTE: iski lambai container tay nahi karti — right side jitni
        height, utni hi timeline (baaki andar scroll) -->
   <div id="uaLCard" class="card" style="position:absolute;left:0;right:0;top:0;bottom:0;display:flex;flex-direction:column;box-sizing:border-box">
-    <h3><span class="em">🕒</span> Poori timeline (sab din) <span id="tlInfo" style="color:var(--mut);font-weight:500;font-size:11px"></span></h3>
+    <h3><span class="em">🕒</span> Timeline (aaj) <span id="tlInfo" style="color:var(--mut);font-weight:500;font-size:11px"></span></h3>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
       <input id="tlQ" placeholder="🔍 user ya kaam se dhoondo… (poore itihaas me)" style="flex:1;min-width:140px">
       <button class="btn" onclick="tlGo(0)">🔄</button>
@@ -1863,7 +1874,7 @@ if (isset($_GET['admin'])) {
       <span id="tlPage" style="font-size:11px;color:var(--mut)">Page 1</span>
       <button class="btn gray" id="tlNext" onclick="tlGo(_tl.page+1)">Purane ▶</button>
     </div>
-    <div style="color:var(--mut);font-size:10px;margin-bottom:6px">💡 Sabse naya sabse upar · 50/page · 90 din tak · beech ki patti kheench kar chaudai badlo</div>
+    <div style="color:var(--mut);font-size:10px;margin-bottom:6px">💡 DEFAULT sirf aaj · upar dropdown se doosra din ya 'Sab din (total)' · naya sabse upar · 50/page</div>
     <div id="tlList" style="flex:1;min-height:200px;overflow:auto"></div>
   </div>
   </div>
@@ -3264,7 +3275,10 @@ function uaCat(e){ var n=String(e||'');
 var _tl={page:0,total:0};
 function tlGo(p){ if(p<0)p=0; _tl.page=p;
   var q=((document.getElementById('tlQ')||{}).value||'').trim();
-  fetch('?admin=1&api=tl&off='+(p*50)+'&lim=50'+(q?'&q='+encodeURIComponent(q):''),{credentials:'same-origin'})
+  // (v3.6) timeline bhi uaDate ko follow kare — DEFAULT sirf AAJ
+  var dt=(document.getElementById('uaDate')||{}).value||'';
+  var dp=(dt==='__ALL__')?'&all=1':(dt?('&date='+encodeURIComponent(dt)):'');
+  fetch('?admin=1&api=tl&off='+(p*50)+'&lim=50'+dp+(q?'&q='+encodeURIComponent(q):''),{credentials:'same-origin'})
   .then(function(r){return r.json();}).then(function(j){
     if(!j||!j.ok)return; _tl.total=j.total||0;
     var el=document.getElementById('tlList'); if(!el)return;
@@ -3290,16 +3304,19 @@ function tlGo(p){ if(p<0)p=0; _tl.page=p;
 }
 function uaLoad(){ var dt=(document.getElementById('uaDate')||{}).value;
   if(dt===undefined)dt='';
-  // (v3.4) default 'Sab din (total)' = feedall; ek din chuna ho to feed
-  var url = dt ? ('?admin=1&api=feed&date='+dt) : '?admin=1&api=feedall';
+  // (v3.6) DEFAULT ab sirf AAJ. ''=aaj (feed) · '__ALL__'=sab din · date=woh din
+  var url = (dt==='__ALL__') ? '?admin=1&api=feedall'
+          : (dt ? ('?admin=1&api=feed&date='+dt) : '?admin=1&api=feed');
   fetch(url,{credentials:'same-origin'})
    .then(function(r){return r.json();}).then(function(j){
     if(!j||!j.ok)return; _ua.rows=j.events||[]; _ua.date=j.date||'';
     var sel=document.getElementById('uaDate');
     if(sel&&!sel.options.length){
-      // pehla option = SAB DIN (total); phir har date
-      var oa=document.createElement('option'); oa.value=''; oa.textContent='🗓 Sab din (total)'; sel.appendChild(oa);
+      // (v3.6) pehla option = AAJ (default); phir 'Sab din (total)'; phir har date
+      var oa=document.createElement('option'); oa.value=''; oa.textContent='🗓 Aaj (today)'; sel.appendChild(oa);
+      var oall=document.createElement('option'); oall.value='__ALL__'; oall.textContent='🗓 Sab din (total)'; sel.appendChild(oall);
       (j.dates&&j.dates.length?j.dates:[]).forEach(function(dd){
+        if(dd===(j.date||''))return;   // aaj upar hi hai
         var o=document.createElement('option'); o.value=dd; o.textContent='🗓 '+dd; sel.appendChild(o); });
       sel.value=dt||''; }
     // dates list feedall me nahi aati — pehli baar feed se bhar do
@@ -3382,7 +3399,7 @@ function uaCSV(){ var rows=_uaRows().slice().sort(function(a,b){return (a.t||0)-
 (function(){ var e1=document.getElementById('uaUser'); if(e1)e1.addEventListener('change',uaRender);
   var e4=document.getElementById('uaType'); if(e4)e4.addEventListener('change',uaRender);
   var e2=document.getElementById('uaQ'); if(e2)e2.addEventListener('input',uaRender);
-  var e3=document.getElementById('uaDate'); if(e3)e3.addEventListener('change',uaLoad);
+  var e3=document.getElementById('uaDate'); if(e3)e3.addEventListener('change',function(){uaLoad();tlGo(0);});
   var e5=document.getElementById('tlQ'); if(e5)e5.addEventListener('keydown',function(ev){ if(ev.key==='Enter')tlGo(0); });
   // ---- (v3.3) SPLITTER: beech ki patti kheencho — ek side chhoti, doosri
   // apne aap badi (chaudai yaad bhi rehti hai) ----
