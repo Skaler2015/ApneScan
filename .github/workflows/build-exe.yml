@@ -38,17 +38,27 @@ jobs:
       # install nahi karna padta; auto-rotate/OCR/naam-padhna turant chalta
       # hai. (64-bit tesseract.exe alag subprocess me chalta hai — 32-bit
       # app ke saath koi dikkat nahi.) Hindi + OSD traineddata bhi saath.
-      - name: Bundle Tesseract OCR
-        continue-on-error: true
+      # Tesseract ko installer ke SAATH bundle karo — user ko alag install
+      # nahi karna. choco kabhi transient-fail hota hai isliye 3 baar retry;
+      # phir bhi na aaye to build FAIL (warna Tesseract-BINA installer ship
+      # ho jaata — auto-rotate/OCR band). Ye guarantee hai ki har installer
+      # me Tesseract ho.
+      - name: Bundle Tesseract OCR (required)
         shell: pwsh
         run: |
-          choco install tesseract -y --no-progress
-          $src = "C:\Program Files\Tesseract-OCR"
-          if (!(Test-Path $src)) { $src = "C:\Program Files (x86)\Tesseract-OCR" }
+          $src = ""
+          for ($i=1; $i -le 3; $i++) {
+            choco install tesseract -y --no-progress
+            if (Test-Path "C:\Program Files\Tesseract-OCR\tesseract.exe") { $src = "C:\Program Files\Tesseract-OCR"; break }
+            if (Test-Path "C:\Program Files (x86)\Tesseract-OCR\tesseract.exe") { $src = "C:\Program Files (x86)\Tesseract-OCR"; break }
+            Write-Host "Tesseract install try $i failed — retrying..."; Start-Sleep -Seconds 10
+          }
+          if ($src -eq "") { throw "Tesseract install FAILED after 3 tries — installer ko Tesseract-bina ship nahi karenge." }
           Copy-Item $src "ApneScan_Project\tesseract_dist" -Recurse
           $td = "ApneScan_Project\tesseract_dist\tessdata"
           if (!(Test-Path "$td\osd.traineddata")) { Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata/raw/main/osd.traineddata" -OutFile "$td\osd.traineddata" }
           if (!(Test-Path "$td\hin.traineddata")) { Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/hin.traineddata" -OutFile "$td\hin.traineddata" }
+          if (!(Test-Path "ApneScan_Project\tesseract_dist\tesseract.exe")) { throw "tesseract.exe missing in bundle" }
           New-Item -ItemType Directory -Force -Path "ApneScan_Project\Output" | Out-Null
           Compress-Archive -Path "ApneScan_Project\tesseract_dist\*" -DestinationPath "ApneScan_Project\Output\Tesseract-OCR.zip" -Force
           Get-ChildItem "ApneScan_Project\tesseract_dist"

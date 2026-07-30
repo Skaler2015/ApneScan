@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "219"
+VERSION = "220"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -10106,6 +10106,45 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
 
+    def _mirror_bundled_tesseract(self):
+        """(v219) Installer ke saath aaya Tesseract ({app}\\tesseract) ek baar
+        %LOCALAPPDATA%\\ApneScan\\Tesseract me copy kar do — taaki is PC par
+        KOI bhi ApneScan (installed / portable / auto-updated) use dhoondh le,
+        aur download ki zaroorat kabhi na pade. Background me, sirf ek baar."""
+        if not HAS_OCR_LIBS:
+            return
+        try:
+            _exed = (os.path.dirname(os.path.abspath(sys.executable))
+                     if getattr(sys, "frozen", False)
+                     else os.path.dirname(os.path.abspath(__file__)))
+            src = os.path.join(_exed, "tesseract")
+            src_exe = os.path.join(src, "tesseract.exe")
+            if not os.path.isfile(src_exe):
+                return                                  # bundled hai hi nahi
+            dest = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+                                "ApneScan", "Tesseract")
+            if os.path.isfile(os.path.join(dest, "tesseract.exe")):
+                return                                  # pehle se hai
+            if os.path.normcase(os.path.abspath(src)) == os.path.normcase(os.path.abspath(dest)):
+                return
+
+            def _job():
+                try:
+                    tmp = dest + ".tmp"
+                    if os.path.isdir(tmp):
+                        shutil.rmtree(tmp, ignore_errors=True)
+                    shutil.copytree(src, tmp)
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    if not os.path.isdir(dest):
+                        os.rename(tmp, dest)
+                    else:
+                        shutil.rmtree(tmp, ignore_errors=True)
+                except Exception:
+                    pass
+            threading.Thread(target=_job, daemon=True).start()
+        except Exception:
+            pass
+
     def _ensure_tesseract_bg(self):
         """(v205) Tesseract na ho to app use KHUD download+install kar leta
         hai — release ke saath bundled Tesseract-OCR.zip se, LocalAppData me
@@ -14543,6 +14582,9 @@ if the toggle is ticked).</p>
         QtCore.QTimer.singleShot(1500, self._an_refresh)
         # Pehli baar: user se naam pucho (analytics me naam ke saath dikhe)
         QtCore.QTimer.singleShot(2200, self._ensure_user_name)
+        # (v219) installer-bundled Tesseract ko LOCALAPPDATA me mirror karo —
+        # ek baar Setup chalane par har ApneScan use dhoondh le (download nahi)
+        QtCore.QTimer.singleShot(1500, self._mirror_bundled_tesseract)
         # (v205) Tesseract na ho to chupchaap khud download/install (ek baar)
         QtCore.QTimer.singleShot(6000, self._ensure_tesseract_bg)
         # ApneSoftware ke tools ki nayi list (agar ho) background me le aao
