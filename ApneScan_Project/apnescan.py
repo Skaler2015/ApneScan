@@ -42,7 +42,7 @@ from apnescan_lib.search_engine import _folder_search_score
 from apnescan_lib.imaging import (
     is_blank_page, whiten_dark_background, autocrop, deskew, auto_enhance,
     denoise, apply_enhance_mode, clean_edges, split_two_pages, flatten_background,
-    naps2_clean, trim_dark_borders,
+    naps2_clean, trim_dark_borders, trim_scanner_backing,
     adaptive_bw, dewarp_page, smart_jpeg_quality, has_real_colour,
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "238"
+VERSION = "239"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2764,7 +2764,10 @@ class ScanWorker(QtCore.QThread):
                     # (poore-bed par bhari page / normal white page par no-op).
                     # DEFAULT ON. (whiten wala purana tarika ab optional.)
                     if self.opts.get("auto_trim_backing", True):
-                        img = trim_dark_borders(img)
+                        # (v239) trim_scanner_backing: KAALI + HALKI-GRAY dono
+                        # backing crop karta hai (v238 wala trim_dark_borders sirf
+                        # dark pakadta tha — niche halki-gray patti reh jaati thi).
+                        img = trim_scanner_backing(img)
                     elif self.opts.get("auto_whiten_backing", False):
                         img = whiten_dark_background(img)
                     # Photocopy jaisi GRAY-maili background asli safed karo

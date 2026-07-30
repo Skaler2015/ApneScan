@@ -186,6 +186,51 @@ def trim_dark_borders(img, bright_thresh=120, min_paper_frac=0.04, pad=6):
         return img
 
 
+def trim_scanner_backing(img, pad=8):
+    """Scanner ki backing (KAALI YA HALKI-GRAY dono) jo choti/chhoti sheet ke
+    side/niche dikhti hai, use CROP karke asli PAPER tak lao.
+
+    trim_dark_borders se behtar: wo sirf DARK (<120) backing pakadta tha; halki
+    gray backing (~140-180) ko 'paper' maan kar chhod deta tha (niche gray patti
+    reh jaati thi). Yahan PAPER = bahut BRIGHT (white). Har row/col me kitne
+    'white' (>=paper_thresh) pixel hain — ADAPTIVE threshold se (paper aur
+    backing ke beech), taaki alag-alag scanner ki gray-shade par bhi chale.
+    Paper ke bounding-box tak crop (thoda pad). Kaata WHITEN nahi karta, isliye
+    kinare ki halki line (address-patti) surakshit. Bhari/normal page par no-op."""
+    try:
+        if not HAS_NUMPY:
+            return img
+        g = np.asarray(img.convert("L"), dtype=np.uint8)
+        H, W = g.shape
+        # Paper (safed) aur backing (gray/kaala) ko alag karne ke liye threshold:
+        # 200 se shuru; agar itna white kam mile to thoda niche (kuch scanner ki
+        # paper halki-cream hoti hai) — par 170 se niche mat jao (gray backing
+        # ko paper na maano).
+        thr = 200
+        while thr >= 170 and float((g >= thr).mean()) < 0.15:
+            thr -= 10
+        white = g >= thr
+        rf = white.mean(axis=1)
+        cf = white.mean(axis=0)
+        rows = np.where(rf >= 0.10)[0]     # row me >=10% asli-white -> paper
+        cols = np.where(cf >= 0.10)[0]
+        if rows.size < H * 0.15 or cols.size < W * 0.15:
+            return img                     # paper theek se nahi mila -> chhodo
+        t, b = int(rows[0]), int(rows[-1])
+        l, r = int(cols[0]), int(cols[-1])
+        t = max(0, t - pad); l = max(0, l - pad)
+        b = min(H - 1, b + pad); r = min(W - 1, r + pad)
+        # koi border hata hi nahi (poora page paper) -> no-op
+        if (r - l) >= W * 0.985 and (b - t) >= H * 0.985:
+            return img
+        # safety: 45% se zyada crop na ho (galti se aadha page na kate)
+        if (r - l) < W * 0.5 or (b - t) < H * 0.5:
+            return img
+        return img.crop((l, t, r + 1, b + 1))
+    except Exception:
+        return img
+
+
 def autocrop(img, border=20):
     try:
         rgb = img.convert("RGB")
