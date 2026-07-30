@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "234"
+VERSION = "235"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2919,6 +2919,10 @@ class ScanWorker(QtCore.QThread):
 
         err = None
         method = self.opts.get("scanner_method", "twain")
+        # (v235) SIRF scanner-acquire ka samay naapo (consumer parallel chalta
+        # hai, isliye ye WIA/eSCL/TWAIN ki asli raftaar hai — hamare OCR/process
+        # ka samay ismein nahi aata). Isi se 'WIA dheema?' faisla hota hai.
+        _t_acq0 = time.time()
         try:
             _ps = str(self.opts.get("page_size", "auto"))
             if _ps.startswith("custom"):
@@ -2957,6 +2961,10 @@ class ScanWorker(QtCore.QThread):
             err = str(exc)
         except Exception:
             err = "Scan error:\n%s" % traceback.format_exc()
+        try:
+            self.acquire_secs = max(0.0, time.time() - _t_acq0)
+        except Exception:
+            self.acquire_secs = 0.0
 
         pageq.put(None)            # tell the saver thread to finish
         consumer.join(timeout=60)  # wait until all pages are saved
@@ -15242,8 +15250,93 @@ if the toggle is ticked).</p>
                 self.claim_edit.setText(code)
                 self.status.showMessage("Claim number found from barcode: %s" % code, 5000)
 
+    def _maybe_fallback_wia_to_twain(self, kept):
+        """(v235) WIA driver ka scan aksar DHEEMA hota hai (COM, per-page). Agar
+        abhi WIA par hain aur is scan ki ACQUIRE raftaar dheemi thi (per-page
+        zyada samay — sirf scanner ka samay, hamare OCR/process ka nahi), to APNE
+        AAP TWAIN (sabse tez ADF, continuous file-transfer) par le aao — naam se
+        wahi scanner dhoondh kar. Ek baar (user manually WIA rakhe to bar-bar na
+        badle). TWAIN source na mile / ambiguous ho to WIA hi rehta hai."""
+        try:
+            if self._opts.get("scanner_method") != "wia":
+                return
+            if self._opts.get("_wia_slow_fallback_done"):
+                return
+            if not HAS_TWAIN or not kept:
+                return
+            secs = float(getattr(self._worker, "acquire_secs", 0.0) or 0.0)
+            if secs <= 0:
+                return
+            per_page = secs / max(1, int(kept))
+            # WIA "dheema": per-page ~8s se zyada (eSCL/TWAIN ADF ~1-3s/page).
+            # 1-page scan me warm-up hota hai -> thoda udaar (10s).
+            thresh = 10.0 if int(kept) <= 1 else 8.0
+            if per_page < thresh:
+                return
+            # TWAIN par WAHI scanner dhoondo (naam se match).
+            try:
+                srcs = list_sources(int(self.winId())) or []
+            except Exception:
+                srcs = []
+            if not srcs:
+                return
+            import re as _re
+            cur = (self._opts.get("scanner_name") or "").lower()
+            toks = [t for t in _re.findall(r"[a-z0-9]+", cur) if len(t) >= 3]
+            best, pick = 0, None
+            for nm in srcs:
+                nl = (nm or "").lower()
+                score = sum(1 for t in toks if t in nl)
+                if score > best:
+                    best, pick = score, nm
+            if pick is None:
+                if len(srcs) == 1:
+                    pick = srcs[0]
+                else:
+                    return                       # ambiguous -> WIA hi rehne do
+            # TWAIN + sabse tez ADF (continuous file-transfer) par switch (ek baar)
+            self._opts["_wia_slow_fallback_done"] = True
+            self._opts["scanner_method"] = "twain"
+            self._opts["twain_file_xfer"] = True
+            try:
+                prof = self._selected_profile()
+                if prof is not None:
+                    prof["source_name"] = pick
+                    self._config["profiles"] = self._profiles
+            except Exception:
+                pass
+            self._opts["scanner_name"] = pick
+            try:
+                self._save_opts(); save_config(self._config)
+            except Exception:
+                pass
+            try:
+                self._refresh_conn_and_method()
+            except Exception:
+                pass
+            try:
+                QtWidgets.QMessageBox.information(
+                    self, self.L("Tez scan par daal diya", "Switched to faster scanning"),
+                    self.L("WIA scan dheema tha (~%.0f sec/page). Isliye ab isi scanner ko\n"
+                           "TWAIN (sabse tez ADF) par daal diya — aage scan tez honge.\n\n"
+                           "Settings → Scan method se kabhi bhi wapas WIA/eSCL kar sakte hain."
+                           % per_page,
+                           "WIA scanning was slow (~%.0f sec/page), so this scanner is now on\n"
+                           "TWAIN (fastest ADF) — future scans will be quicker.\n\n"
+                           "You can switch back to WIA/eSCL any time in Settings → Scan method."
+                           % per_page))
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def _on_scan_done(self, kept, skipped):
         self._scan_place = None          # rescan/insert mode khatam
+        # (v235) WIA dheema tha to isi scanner ko TWAIN (sabse tez ADF) par le aao
+        try:
+            self._maybe_fallback_wia_to_twain(kept)
+        except Exception:
+            pass
         if kept:
             # (v216) asli KAAM bhi Activity-Feed me — pehle sirf button/menu
             # click event bante the, isliye scan/save/print counter me nahi
