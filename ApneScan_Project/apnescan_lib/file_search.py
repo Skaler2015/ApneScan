@@ -178,17 +178,27 @@ class SearchEngine(object):
 
     @classmethod
     def match_file(cls, terms, name_norm, name_compact, name_tokens,
-                   folder_norm="", folder_compact="", ocr_text="", fuzzy=True):
+                   folder_norm="", folder_compact="", ocr_text="", fuzzy=True,
+                   require_name_hit=False):
         """Match every term against filename first, then folder, then OCR.
 
         Returns (tier, strengths) or None. tier: 0 = all terms in the NAME,
         1 = needed the folder path, 2 = needed OCR text. strengths drive the
         fine ranking inside a tier.
+
+        require_name_hit: when True, a file matches only if at least one term
+        hit the FILENAME itself — a file must never match purely on its parent
+        folder's name. That keeps folder-name searches showing the FOLDER (as a
+        dir hit) instead of spilling every file inside it, while multi-term
+        'folder + file' queries still work because the file-name term anchors it.
         """
         tier = 0
         strengths = []
+        name_hits = 0
         for t in terms:
             c = cls.term_strength(t, name_norm, name_compact, name_tokens, fuzzy)
+            if c is not None:
+                name_hits += 1
             if c is None and folder_norm:
                 if t in folder_norm or t in folder_compact:
                     c = 4
@@ -200,6 +210,8 @@ class SearchEngine(object):
             if c is None:
                 return None
             strengths.append(c)
+        if require_name_hit and name_hits == 0:
+            return None
         return tier, strengths
 
     # ------------------------------------------------------------------

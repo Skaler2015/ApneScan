@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "225"
+VERSION = "226"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -16656,6 +16656,9 @@ if the toggle is ticked).</p>
                 menu.addAction("➕ New folder here…", lambda: self._new_folder_in(path))
                 menu.addAction("🧩 All PDFs in this folder → one PDF…",
                                lambda: self._merge_folder_pdfs(path))
+                menu.addAction(self.L("🔤 Purane naam theek karo (space wapas)…",
+                                      "🔤 Fix old names in this folder (restore spaces)…"),
+                               lambda: self._fix_old_names_in_folder(path))
                 menu.addAction(self.L("🗜 Is folder ki ZIP banao…",
                                       "🗜 Make a ZIP of this folder…"),
                                lambda: self._zip_folder(path))
@@ -16710,6 +16713,12 @@ if the toggle is ticked).</p>
             menu.addAction(self.L("📂 Koi folder kholo…", "📂 Open a folder…"), self.open_existing_folder)
             menu.addAction(self.L("🏠 Wapas save-folder", "🏠 Back to save folder"), self.reset_panel_folder)
             menu.addAction("➕ New folder", self.new_library_folder)
+            _curroot = (self._opts.get("files_panel_root")
+                        or self._opts.get("save_folder") or "")
+            if _curroot and os.path.isdir(_curroot):
+                menu.addAction(self.L("🔤 Is folder ke purane naam theek karo (space wapas)…",
+                                      "🔤 Fix old names in this folder (restore spaces)…"),
+                               lambda: self._fix_old_names_in_folder(_curroot))
         menu.addSeparator()
         menu.addAction(self.L("🔁 Nakli (duplicate) files dhoondo…",
                               "🔁 Find duplicate files…"), self._find_duplicates)
@@ -16862,6 +16871,84 @@ if the toggle is ticked).</p>
         self._invalidate_files_index()
         self.status.showMessage(self.L("✏ %d files rename ho gayi" % n,
                                        "✏ Renamed %d files" % n), 5000)
+
+    def _resplit_legacy_name(self, stem):
+        """Purane version ke bina-space/underscore naam me space wapas laao.
+        'Prem_Kanwar' -> 'Prem Kanwar'; '2391300SohanSingh' -> '2391300 Sohan Singh'.
+        Naye version pehle se theek naam banate hain — ye sirf purani files ke liye."""
+        s = re.sub(r"[_]+", " ", stem or "")
+        s = re.sub(r"(?<=\d)(?=[A-Za-z])", " ", s)         # 2391300Sohan -> 2391300 Sohan
+        s = re.sub(r"(?<=[A-Za-z])(?=\d)", " ", s)         # Sohan12 -> Sohan 12
+        s = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", s)         # SohanSingh -> Sohan Singh
+        s = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", s)    # ABCFoo -> ABC Foo
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    def _fix_old_names_in_folder(self, folder):
+        """Ek folder ki purani files ke naam theek karo — space wapas (underscore /
+        juda hua naam). Pehle preview + confirm, phir rename. Turant chalta hai."""
+        if not folder or not os.path.isdir(folder):
+            return
+        exts = (".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp")
+        plan = []
+        try:
+            for fn in sorted(os.listdir(folder)):
+                fp = os.path.join(folder, fn)
+                if not os.path.isfile(fp):
+                    continue
+                stem, ext = os.path.splitext(fn)
+                if ext.lower() not in exts:
+                    continue
+                fixed = underscore_name(self._resplit_legacy_name(stem))
+                if fixed and fixed != stem:
+                    plan.append((fp, stem, fixed, ext))
+        except Exception as exc:
+            self._warn(self.L("Folder padha nahi ja saka:\n%s" % exc,
+                              "Could not read folder:\n%s" % exc))
+            return
+        if not plan:
+            QtWidgets.QMessageBox.information(
+                self, self.L("Purane naam theek karo", "Fix old names"),
+                self.L("Is folder ke sabhi naam pehle se theek hain — kuch badalne "
+                       "ki zaroorat nahi.",
+                       "All names in this folder already look fine — nothing to change."))
+            return
+        lines = ["  %s%s   →   %s%s" % (old, ext, new, ext)
+                 for (_fp, old, new, ext) in plan[:12]]
+        more = ("" if len(plan) <= 12 else
+                self.L("\n  …aur %d aur" % (len(plan) - 12),
+                       "\n  …and %d more" % (len(plan) - 12)))
+        msg = self.L(
+            "%d files ke naam theek honge (space wapas):\n\n%s%s\n\nAage badhein?",
+            "%d files will be renamed (spaces restored):\n\n%s%s\n\nProceed?"
+        ) % (len(plan), "\n".join(lines), more)
+        if QtWidgets.QMessageBox.question(
+                self, self.L("Purane naam theek karo", "Fix old names"), msg,
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            return
+        done = 0
+        for fp, _old, new, ext in plan:
+            try:
+                newp = os.path.join(folder, new + ext)
+                if os.path.abspath(newp) == os.path.abspath(fp):
+                    continue
+                if os.path.exists(newp):                    # naam takra jaye to number lagao
+                    k = 2
+                    while os.path.exists(os.path.join(folder, "%s %d%s" % (new, k, ext))):
+                        k += 1
+                    newp = os.path.join(folder, "%s %d%s" % (new, k, ext))
+                os.rename(fp, newp)
+                done += 1
+            except Exception:
+                pass
+        self._invalidate_files_index()
+        try:
+            self._jump_to_folder(folder)
+        except Exception:
+            pass
+        self.status.showMessage(self.L("✓ %d naam theek kiye" % done,
+                                       "✓ Fixed %d names" % done), 6000)
 
     def _find_duplicates(self):
         """Ek jaisi (nakli) files dhoondo — pehle size, phir content (md5) se."""
@@ -17308,7 +17395,12 @@ if the toggle is ticked).</p>
                 file_hits.append(((3, 9, 9, len(norm), norm), name, full))
                 continue
             fn_norm, fn_comp = _folder_strs(e[3]) if len(e) > 3 else ("", "")
-            m = SE.match_file(terms, norm, comp, None, fn_norm, fn_comp, fuzzy=False)
+            # (v226) file ko sirf uske APNE naam se match karo — kewal parent-folder
+            # ke naam se nahi. Isse folder-naam search par woh FOLDER dikhta hai
+            # (uske andar ki saari files nahi). 'folder + file' jaise 2-term search
+            # phir bhi chalte hain kyunki file-naam wala term match karta hai.
+            m = SE.match_file(terms, norm, comp, None, fn_norm, fn_comp,
+                              fuzzy=False, require_name_hit=True)
             if m is not None:
                 file_hits.append((SE.rank_key(m[0], m[1], norm), name, full))
             else:
@@ -17318,7 +17410,8 @@ if the toggle is ticked).</p>
         # fuzzy pass — sirf tab jab seedhe match kam mile (typo ka ilaaj)
         if terms and len(file_hits) < 25 and misses:
             for norm, comp, fn_norm, fn_comp, name, full in misses:
-                m = SE.match_file(terms, norm, comp, norm.split(), fn_norm, fn_comp, fuzzy=True)
+                m = SE.match_file(terms, norm, comp, norm.split(), fn_norm, fn_comp,
+                                  fuzzy=True, require_name_hit=True)
                 if m is not None:
                     file_hits.append((SE.rank_key(m[0], m[1], norm), name, full))
                 if len(file_hits) >= limit:
