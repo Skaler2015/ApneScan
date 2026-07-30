@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "226"
+VERSION = "227"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -15762,10 +15762,10 @@ if the toggle is ticked).</p>
                 if self.list.item(r).data(QtCore.Qt.UserRole) == grp[0]:
                     it0 = self.list.item(r); break
             name = (it0.data(TITLE_ROLE) if it0 else "") or ("Document_%d" % i)
-            out = os.path.join(folder, sanitize(underscore_name(name)) + ".pdf")
+            out = os.path.join(folder, (underscore_name(name) or "scan") + ".pdf")
             n = 2
             while os.path.exists(out):
-                out = os.path.join(folder, "%s_%d.pdf" % (sanitize(underscore_name(name)), n)); n += 1
+                out = os.path.join(folder, "%s_%d.pdf" % ((underscore_name(name) or "scan"), n)); n += 1
             try:
                 self._pages_as_pdf(grp, out)
                 made.append(os.path.basename(out))
@@ -15833,7 +15833,7 @@ if the toggle is ticked).</p>
             emails = re.findall(r"[\w.+-]+@[\w-]+\.[\w.]+", text or "")
             phone = (phones[0].replace(" ", "").replace("-", "") if phones else "")
             email = emails[0] if emails else ""
-            vcf = os.path.join(folder, sanitize(underscore_name(name))[:40] + ".vcf")
+            vcf = os.path.join(folder, (underscore_name(name) or "contact")[:40] + ".vcf")
             try:
                 with open(vcf, "w", encoding="utf-8") as fh:
                     fh.write("BEGIN:VCARD\nVERSION:3.0\nFN:%s\n" % name)
@@ -16521,7 +16521,7 @@ if the toggle is ticked).</p>
             if not ok or not name.strip():
                 return
             default = name.strip()
-        base = sanitize(underscore_name(default))
+        base = underscore_name(default) or "scan"     # (v227) space rehta — sanitize nahi
         out = os.path.join(folder, base + ".pdf")
         # merge_same (drag-drop save): usi naam ki PDF ho to naye pages usi me
         # jod do (ek hi PDF). Warna duplicate par _2, _3… numbering.
@@ -16877,7 +16877,7 @@ if the toggle is ticked).</p>
                    "One base name (a number is appended automatically):"), "doc")
         if not ok or not base.strip():
             return
-        base = sanitize(underscore_name(base.strip())) or "doc"
+        base = underscore_name(base.strip()) or "doc"     # (v227) space rehta — sanitize nahi
         n = 0
         for i, p in enumerate(sorted(files, key=lambda x: os.path.basename(x).lower()), 1):
             try:
@@ -17617,6 +17617,18 @@ if the toggle is ticked).</p>
                                               "   (folder — double-click to open)"))
                 fh.setData(QtCore.Qt.UserRole, folder)
                 self.files_results.addItem(fh)
+            elif not groups[folder]:
+                # (v227) GRID mode me folder-header nahi banta tha; isliye jab
+                # folder KHUD match hota (uske andar koi file result me nahi) to
+                # kuch nahi dikhta tha (khaali). Ab folder ko ek TILE me dikhao —
+                # 2x click par khul jaata hai.
+                fh = QtWidgets.QListWidgetItem("📁\n" + (os.path.basename(folder) or folder))
+                fh.setTextAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop)
+                fh.setSizeHint(QtCore.QSize(108, 150))
+                fh.setToolTip(folder + self.L("   (folder — 2x click = kholo)",
+                                              "   (folder — double-click to open)"))
+                fh.setData(QtCore.Qt.UserRole, folder)
+                self.files_results.addItem(fh)
             for p in sorted(groups[folder], key=lambda x: os.path.basename(x).lower()):
                 ext = os.path.splitext(p)[1].lower()
                 pin = "📌 " if p in pinned else ""
@@ -17856,8 +17868,10 @@ if the toggle is ticked).</p>
         name, ok = self._ask_name("Rename", "New name:", stem)
         if not ok or not name.strip():
             return
+        # (v227) sanitize() space hata deta tha ('Sohan Singh' -> 'SohanSingh').
+        # underscore_name khud safe filename banata hai AUR space rakhta hai.
         new = os.path.join(os.path.dirname(path),
-                           sanitize(underscore_name(name.strip())) + ext)
+                           (underscore_name(name.strip()) or "scan") + ext)
         try:
             os.rename(path, new)
         except Exception as exc:
