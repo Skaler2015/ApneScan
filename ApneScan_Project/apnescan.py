@@ -10064,23 +10064,46 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self._allow_drop_when_elevated()
 
     def _allow_drop_when_elevated(self):
-        """(v225) Agar app admin (elevated) me chal raha hai to Windows UIPI
+        """(v225/v226) Agar app admin (elevated) me chal raha hai to Windows UIPI
         non-elevated Explorer se drag-drop block kar deta hai (isi wajah se
-        'kuch PC par drag-drop nahi ho raha' hota hai). ChangeWindowMessage
-        FilterEx se WM_DROPFILES / WM_COPYDATA / WM_COPYGLOBALDATA allow karo.
-        Windows ke alawa / puraane Windows par chup-chaap no-op."""
+        'kuch PC par drag-drop nahi ho raha' hota hai). WM_DROPFILES / WM_COPYDATA
+        / WM_COPYGLOBALDATA ko allow karo.
+
+        (v226) Sirf top-level window par filter kaafi nahi tha — Qt ka asli drop
+        target aksar ek CHILD native window (tree/list viewport) hota hai. Isliye
+        ab PROCESS-WIDE ChangeWindowMessageFilter (purana API) bhi lagate hain jo
+        is process ki HAR window (child handles समेत) ko cover karta hai; saath me
+        top-level par ChangeWindowMessageFilterEx bhi. Windows ke alawa / puraane
+        Windows par chup-chaap no-op."""
         if not sys.platform.startswith("win"):
             return
+        MSGS = (0x0233, 0x004A, 0x0049)   # WM_DROPFILES, WM_COPYDATA, WM_COPYGLOBALDATA
         try:
             import ctypes
-            hwnd = int(self.winId())
-            MSGFLT_ALLOW = 1
-            fn = ctypes.windll.user32.ChangeWindowMessageFilterEx
-            for _msg in (0x0233, 0x004A, 0x0049):   # DROPFILES, COPYDATA, COPYGLOBALDATA
-                try:
-                    fn(hwnd, _msg, MSGFLT_ALLOW, None)
-                except Exception:
-                    pass
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+            # 1) PROCESS-WIDE (asli fix) — sab windows, child native handles bhi.
+            try:
+                cwmf = user32.ChangeWindowMessageFilter        # Vista+; sab windows
+                cwmf.argtypes = [wintypes.UINT, wintypes.DWORD]
+                cwmf.restype = wintypes.BOOL
+                for _m in MSGS:
+                    try: cwmf(_m, 1)                            # MSGFLT_ADD
+                    except Exception: pass
+            except Exception:
+                pass
+            # 2) TOP-LEVEL window par bhi (belt-and-suspenders).
+            try:
+                cwmfx = user32.ChangeWindowMessageFilterEx      # Win7+
+                cwmfx.argtypes = [wintypes.HWND, wintypes.UINT,
+                                  wintypes.DWORD, ctypes.c_void_p]
+                cwmfx.restype = wintypes.BOOL
+                hwnd = int(self.winId())
+                for _m in MSGS:
+                    try: cwmfx(hwnd, _m, 1, None)               # MSGFLT_ALLOW
+                    except Exception: pass
+            except Exception:
+                pass
         except Exception:
             pass
 
