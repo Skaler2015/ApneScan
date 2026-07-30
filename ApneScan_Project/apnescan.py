@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "216"
+VERSION = "217"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8825,7 +8825,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
             except Exception:
                 sess = None
         if sess is None:
-            self._phone_scan_local()
+            # (v217) internet-relay fail — local par gir rahe hain PAR user ko
+            # bata do kyun (warna 'sirf local par chalta hai' lagta hai)
+            self._phone_scan_local(relay_failed=bool(base))
             return
 
         url = sess["url"]
@@ -8947,7 +8949,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if self._phone_n:
             self.status.showMessage(L("📱 %d file phone se aayi.", "📱 %d file(s) from phone.") % self._phone_n, 6000)
 
-    def _phone_scan_local(self):
+    def _phone_scan_local(self, relay_failed=False):
         """Purana LOCAL WiFi mode (internet/relay na ho to) — same-WiFi QR."""
         L = self.L
         srv = PhoneServer(self._tmpdir, self)
@@ -8963,9 +8965,22 @@ class ScannerWindow(QtWidgets.QMainWindow):
         url = "http://%s:%d/?t=%s" % (ip, port, srv.token)
 
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle(L("📱 Phone se scan", "📱 Scan from phone"))
+        dlg.setWindowTitle(L("📱 Phone se scan (same WiFi)", "📱 Scan from phone (same WiFi)"))
         dlg.setMinimumWidth(380)
         v = QtWidgets.QVBoxLayout(dlg)
+        # (v217) relay fail hua to saaf batao: abhi sirf same-WiFi kyun
+        if relay_failed:
+            _wn = QtWidgets.QLabel(L(
+                "⚠ <b>Internet-mode abhi uplabdh nahi</b> — isliye abhi sirf "
+                "same-WiFi. Internet se (kahin se bhi) chalane ke liye server "
+                "par <b>phone_relay.php</b> hona chahiye (ya internet check karo).",
+                "⚠ <b>Internet mode unavailable</b> — using same-WiFi for now. "
+                "For internet (from anywhere), the server needs "
+                "<b>phone_relay.php</b> (or check your internet)."))
+            _wn.setWordWrap(True)
+            _wn.setStyleSheet("background:#FEF3C7;color:#92400E;border:1px solid #FCD34D;"
+                              "border-radius:8px;padding:7px 9px;font-size:11px;")
+            v.addWidget(_wn)
         v.addWidget(QtWidgets.QLabel(L(
             "<b>1.</b> Phone aur PC ek hi WiFi par ho.<br>"
             "<b>2.</b> Phone ke camera se ye QR scan karo:",
