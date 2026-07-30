@@ -12,13 +12,30 @@ import json
 import os
 import re
 import secrets
+import ssl
 import string
 import tempfile
+import urllib.error
 import urllib.parse
 import urllib.request
 
 TIMEOUT = 12          # seconds — mobile-data wale uploads ke liye aaraam se
 UA = {"User-Agent": "ApneScan-Relay"}
+
+
+def _open(req, timeout=TIMEOUT):
+    """HTTPS open jo PyInstaller/frozen Windows .exe me bhi chale. Frozen exe
+    ko kai baar CA-certificate store nahi milta -> SSL verify fail -> pehle
+    'internet-mode' chup-chaap fail hoke same-WiFi par gir jaata tha. SSLError
+    par bina-verify dobara try karte hain (yahi app ke stats/update-check me
+    bhi hota hai) taaki phone-relay internet se hamesha chale."""
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.URLError as ex:
+        if isinstance(getattr(ex, "reason", None), ssl.SSLError):
+            return urllib.request.urlopen(
+                req, timeout=timeout, context=ssl._create_unverified_context())
+        raise
 
 
 def new_credentials():
@@ -31,14 +48,14 @@ def new_credentials():
 
 def _get(url):
     req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+    with _open(req) as r:
         return r.read()
 
 
 def _post(url, fields):
     data = urllib.parse.urlencode(fields).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=UA)
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+    with _open(req) as r:
         return r.read()
 
 
@@ -72,7 +89,7 @@ def take(base, token, key, file_id, name, dest_dir):
         ext = ".bin"
     fd, path = tempfile.mkstemp(prefix="phone_", suffix=ext, dir=dest_dir)
     try:
-        with urllib.request.urlopen(req, timeout=60) as r, os.fdopen(fd, "wb") as fh:
+        with _open(req, timeout=60) as r, os.fdopen(fd, "wb") as fh:
             while True:
                 chunk = r.read(65536)
                 if not chunk:
