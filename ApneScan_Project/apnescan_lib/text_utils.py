@@ -22,14 +22,15 @@ def sanitize(text, fallback="scan"):
 
 
 def underscore_name(s):
-    """Filename-friendly: spaces -> underscore, drop odd chars, collapse repeats.
-
-    Used for PDF / file names (which keep the underscore convention).
+    """Filename-friendly: KEEPS SPACES (v222 — user request; pehle spaces ko
+    '_' me badalta tha). Sirf Windows-ke-forbidden chars hatata hai aur kai
+    spaces ko ek karta hai. (Naam-matching name_key() par nirbhar hai jo space
+    aur '_' dono ko ignore karta hai, isliye pehle-se-yaad naam bhi chalte hain.)
     """
-    s = re.sub(r"[^\w\s.\-]", "", s or "")
-    s = re.sub(r"\s+", "_", s.strip())
-    s = re.sub(r"_+", "_", s)
-    return s.strip("_.")
+    s = re.sub(r'[\\/:*?"<>|]', "", s or "")     # sirf Windows-forbidden hatao
+    s = re.sub(r"[\r\n\t]+", " ", s)
+    s = re.sub(r"\s+", " ", s.strip())            # kai spaces -> ek (space rehta)
+    return s.strip(" .")
 
 
 def name_key(s):
