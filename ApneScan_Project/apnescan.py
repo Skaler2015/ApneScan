@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "230"
+VERSION = "231"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -16447,6 +16447,8 @@ if the toggle is ticked).</p>
         if not ok or not name.strip():
             return
         p = os.path.join(base, folder_safe_name(name))   # NEW folders: spaces, readable
+        # (v231) same naam ka folder pehle se ho to ' (1)', ' (2)'... apne aap
+        p = self._unique_fs_path(p, is_dir=True)
         try:
             os.makedirs(p, exist_ok=True)
         except Exception as exc:
@@ -16767,6 +16769,46 @@ if the toggle is ticked).</p>
         menu.addAction(self.L("🗑 Recycle Bin…", "🗑 Recycle Bin…"), self.show_recycle_bin)
         menu.exec_(self.files_tree.viewport().mapToGlobal(pos))
 
+    def _unique_fs_path(self, path, is_dir=False, exclude=None):
+        """Agar 'path' (file/folder) pehle se maujood hai to naam ke aage
+        ' (1)', ' (2)'... lagakar ek NAYA na-takraane wala path lauta do —
+        Windows Explorer jaisa. File me number extension SE PEHLE aata hai
+        ('Bill (1).pdf'), folder me naam ke aant me ('Reports (1)').
+        'exclude' path (jaise rename me khud source file) ko takraav nahi
+        maana jaata, taaki same-naam par bewajah number na lage."""
+        exclude_norm = None
+        if exclude:
+            try:
+                exclude_norm = os.path.normcase(os.path.abspath(exclude))
+            except Exception:
+                exclude_norm = None
+
+        def _taken(p):
+            if exclude_norm is not None:
+                try:
+                    if os.path.normcase(os.path.abspath(p)) == exclude_norm:
+                        return False
+                except Exception:
+                    pass
+            return os.path.exists(p)
+
+        if not _taken(path):
+            return path
+        d = os.path.dirname(path)
+        base = os.path.basename(path)
+        if is_dir:
+            stem, ext = base, ""
+        else:
+            stem, ext = os.path.splitext(base)
+        n = 1
+        while True:
+            cand = os.path.join(d, "%s (%d)%s" % (stem, n, ext))
+            if not _taken(cand):
+                return cand
+            n += 1
+            if n > 100000:          # safety — kabhi lagna nahi chahiye
+                return cand
+
     def _new_folder_in(self, base):
         name, ok = QtWidgets.QInputDialog.getText(
             self, "New folder",
@@ -16774,6 +16816,8 @@ if the toggle is ticked).</p>
         if not ok or not name.strip():
             return
         p = os.path.join(base, folder_safe_name(name))   # NEW folders: spaces, readable
+        # (v231) same naam ka folder pehle se ho to ' (1)', ' (2)'... apne aap
+        p = self._unique_fs_path(p, is_dir=True)
         try:
             os.makedirs(p, exist_ok=True)
         except Exception as exc:
@@ -17902,6 +17946,9 @@ if the toggle is ticked).</p>
         # underscore_name khud safe filename banata hai AUR space rakhta hai.
         new = os.path.join(os.path.dirname(path),
                            (underscore_name(name.strip()) or "scan") + ext)
+        # (v231) us naam ki file pehle se ho to ' (1)', ' (2)'... apne aap
+        # (khud is file ko chhodkar — same naam par bewajah number na lage)
+        new = self._unique_fs_path(new, is_dir=False, exclude=path)
         try:
             os.rename(path, new)
         except Exception as exc:
@@ -17978,6 +18025,9 @@ if the toggle is ticked).</p>
         if not ok or not name or name == old:
             return
         newp = os.path.join(os.path.dirname(path), folder_safe_name(name))
+        # (v231) same naam ka folder pehle se ho to ' (1)', ' (2)'... apne aap
+        # (khud is folder ko chhodkar)
+        newp = self._unique_fs_path(newp, is_dir=True, exclude=path)
         try:
             os.rename(path, newp)
             self._invalidate_files_index()
