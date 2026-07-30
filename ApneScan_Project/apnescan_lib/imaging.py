@@ -231,6 +231,52 @@ def trim_scanner_backing(img, pad=8):
         return img
 
 
+def whiten_outside_paper(img, pad=6):
+    """Paper ke BAHAR ki scanner-backing (gray/kaali) ko WHITE karo — page ka
+    size wahi rehta hai (crop nahi), sirf 'gray ki jagah white'.
+
+    Paper ka kinara bright-FRACTION se pehchana jaata hai (row/col me kaafi
+    asli-white ho to wahan paper hai). Isliye niche ki halki/rang-wali line
+    (jaise laal address-patti) — jiske aas-paas safed paper hai — PAPER maani
+    jaati hai aur white NAHI hoti. Sirf paper-box ke BAHAR (poori gray/dark
+    backing) white hoti hai. Bhari/normal page par no-op."""
+    try:
+        if not HAS_NUMPY:
+            return img
+        g = np.asarray(img.convert("L"), dtype=np.uint8)
+        H, W = g.shape
+        # paper (safed) vs backing (gray/kaali) alag karne ka adaptive threshold
+        thr = 200
+        while thr >= 170 and float((g >= thr).mean()) < 0.15:
+            thr -= 10
+        white = g >= thr
+        # smooth taaki patli streak/line se galat kinara na bane
+        def _sm(v, k=25):
+            if len(v) < k:
+                return v.astype(np.float32)
+            return np.convolve(v.astype(np.float32), np.ones(k, np.float32) / k, mode="same")
+        rf = _sm(white.mean(axis=1))
+        cf = _sm(white.mean(axis=0))
+        rows = np.where(rf >= 0.06)[0]
+        cols = np.where(cf >= 0.06)[0]
+        if rows.size < H * 0.15 or cols.size < W * 0.15:
+            return img
+        t, b = int(rows[0]), int(rows[-1])
+        l, r = int(cols[0]), int(cols[-1])
+        t = max(0, t - pad); l = max(0, l - pad)
+        b = min(H - 1, b + pad); r = min(W - 1, r + pad)
+        if t <= 1 and l <= 1 and b >= H - 2 and r >= W - 2:
+            return img                       # koi backing hi nahi -> no-op
+        arr = np.asarray(img.convert("RGB")).copy()
+        arr[:t, :] = 255
+        arr[b + 1:, :] = 255
+        arr[:, :l] = 255
+        arr[:, r + 1:] = 255
+        return Image.fromarray(arr)
+    except Exception:
+        return img
+
+
 def autocrop(img, border=20):
     try:
         rgb = img.convert("RGB")

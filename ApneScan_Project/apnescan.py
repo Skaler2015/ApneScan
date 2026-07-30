@@ -42,7 +42,7 @@ from apnescan_lib.search_engine import _folder_search_score
 from apnescan_lib.imaging import (
     is_blank_page, whiten_dark_background, autocrop, deskew, auto_enhance,
     denoise, apply_enhance_mode, clean_edges, split_two_pages, flatten_background,
-    naps2_clean, trim_dark_borders, trim_scanner_backing,
+    naps2_clean, trim_dark_borders, trim_scanner_backing, whiten_outside_paper,
     adaptive_bw, dewarp_page, smart_jpeg_quality, has_real_colour,
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "239"
+VERSION = "240"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1016,6 +1016,10 @@ DEFAULT_OPTIONS = {
     # karke hatao (paper ke kinare tak). whiten se behtar — kinare ki halki
     # line nahi udti. DEFAULT ON. Bhari/normal page par apne aap no-op.
     "auto_trim_backing": True,
+    # (v240) backing ko kaise theek karein: "white" = gray/kaali backing ko
+    # SAFED karo (page size same; DEFAULT — user ki maang), "crop" = paper tak
+    # kaat do, "off" = kuch mat karo.
+    "backing_mode": "white",
     "clean_edges": False,        # scan ki kaali border / kinare ke chhed saaf karo
     "split_two_page": False,     # ek glass par do page → apne aap alag karo
     "searchable_pdf": False,     # har save par PDF ke andar OCR text (Ctrl+F se dhoondo)
@@ -2756,18 +2760,20 @@ class ScanWorker(QtCore.QThread):
                         if is_blank_page(img, _thr):
                             self.skipped += 1
                             continue
-                    # (v238) ADF ki dark/gray backing (choti sheet ke SIDE/NECHE
-                    # dikhne wali patti) ko CROP karke hatao — paper ke asli kinare
-                    # tak. whiten se ALAG: ye backing ko WHITEN nahi karta balki
-                    # KAAT deta hai, isliye kinare ki halki line (address-patti)
-                    # nahi udti. Safe: sirf tab kaate jab sach me dark border ho
-                    # (poore-bed par bhari page / normal white page par no-op).
-                    # DEFAULT ON. (whiten wala purana tarika ab optional.)
-                    if self.opts.get("auto_trim_backing", True):
-                        # (v239) trim_scanner_backing: KAALI + HALKI-GRAY dono
-                        # backing crop karta hai (v238 wala trim_dark_borders sirf
-                        # dark pakadta tha — niche halki-gray patti reh jaati thi).
-                        img = trim_scanner_backing(img)
+                    # (v240) ADF ki dark/gray backing (choti sheet ke SIDE/NECHE
+                    # dikhne wali patti) ko GRAY ki jagah WHITE karo — user ki
+                    # maang. whiten_outside_paper: paper ka kinara bright-FRACTION
+                    # se pehchan kar sirf paper ke BAHAR ki backing white karta hai
+                    # (page ka size same). Isliye niche ki laal/halki address-line
+                    # (jo paper ke ANDAR hai) NAHI udti — purana pixel-whiten use
+                    # bhi uda deta tha. Bhari/normal page par no-op.
+                    #   backing_mode: "white" (default) / "crop" / "off"
+                    _bm = self.opts.get("backing_mode", "white")
+                    if self.opts.get("auto_trim_backing", True) and _bm != "off":
+                        if _bm == "crop":
+                            img = trim_scanner_backing(img)      # kaat kar hatao
+                        else:
+                            img = whiten_outside_paper(img)      # gray -> WHITE
                     elif self.opts.get("auto_whiten_backing", False):
                         img = whiten_dark_background(img)
                     # Photocopy jaisi GRAY-maili background asli safed karo
