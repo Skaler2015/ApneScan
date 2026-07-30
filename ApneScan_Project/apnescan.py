@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "231"
+VERSION = "232"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1011,6 +1011,11 @@ DEFAULT_OPTIONS = {
     "compress": False,
     "jpeg_quality": 60,
     "pdf_quality_mode": "best",  # best (quality-first) / balanced / compact
+    # (v232) NAPS2-PARITY: "best" mode ab HAR page q95 par (koi smart-downgrade
+    # nahi) — pehle q72 tak gir jaata tha jisse triple-JPEG (scanner->q95->q72)
+    # ho kar scan soft/blocky/maila dikhta tha. Chhoti file chahiye to ye ON
+    # karo (ya balanced/compact mode).
+    "smart_pdf_shrink": False,
     "watermark": False,
     "watermark_text": "Noble Care Hospital",
     "batch_mode": False,
@@ -2871,7 +2876,11 @@ class ScanWorker(QtCore.QThread):
                     if im.mode == "L":
                         im.save(out, "JPEG", quality=95, dpi=_dpi)
                     else:
-                        im.convert("RGB").save(out, "JPEG", quality=95, dpi=_dpi)
+                        # (v232) subsampling=0 (4:4:4): master page ki PEHLI
+                        # generation me rang ki dhaar na tootey — NAPS2 jaisi
+                        # crisp. (Master temp hai; size ki chinta nahi.)
+                        im.convert("RGB").save(out, "JPEG", quality=95,
+                                               dpi=_dpi, subsampling=0)
                 except Exception:
                     im.convert("RGB").save(out, "JPEG", quality=90)
             self.kept += 1
@@ -11957,7 +11966,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         combos = [(75, 1.0), (60, 1.0), (45, 1.0), (60, 0.8), (45, 0.8),
                   (35, 0.8), (45, 0.65), (35, 0.65), (30, 0.5), (25, 0.4)]
         if limit_bytes is None:
-            combos = [(60, 1.0)]
+            combos = [(92, 1.0)]      # (v232) koi size-limit nahi -> NAPS2 jaisi HD quality
         data = None
         for q, s in combos:
             buf = io.BytesIO()
@@ -22117,12 +22126,14 @@ if the toggle is ticked).</p>
         # "dikhne-layak kharabi se theek pehle" ruk jaata hai. PDF me ek hi
         # quality lag sakti hai, isliye sab pages me se SABSE UNCHI zaroorat
         # wali lagti hai (quality hamesha size se pehle).
-        if not compress and q == 95:
+        # (v232) NAPS2-PARITY: "best" mode ab poori q95 par rehta hai — koi
+        # smart-downgrade nahi. Pehle yahan quality 72 tak GIRTI thi (NAPS2 ke
+        # q75 ke chakkar me), jisse master-q95 ke UPAR DOBARA compress hokar
+        # scan soft/blocky/maila (chaaro shikayat) dikhta tha. Ab quality-first:
+        # ek hi (near-lossless) generation. Chhoti file chahiye to user
+        # 'smart_pdf_shrink' ON kare ya balanced/compact mode chune.
+        if self._opts.get("smart_pdf_shrink") and not compress and q == 95:
             try:
-                # NAPS2 fixed q75 use karta hai — hum wahan tak (72) jaate
-                # hain par HAR page ko edge-guard se jaanch kar: kinare
-                # TOOTNE lagen to quality khud upar ruk jaati hai. Kam-res
-                # (150dpi) par 68 tak — chhoti file user ki pasand hai.
                 _lad = ((95, 92, 88, 84, 80, 76, 72, 68) if res <= 160
                         else (95, 92, 88, 84, 80, 76, 72))
                 _needs = [smart_jpeg_quality(im, _lad)[0]
@@ -22145,9 +22156,23 @@ if the toggle is ticked).</p>
         if not any(im.mode == "1" for im in imgs):
             kw["quality"] = max(1, min(95, q))
             kw["optimize"] = True     # muft ~3-8% chhoti (huffman optimize)
+            # (v232) High-quality (best) mode me chroma-subsampling BAND
+            # (subsampling=0 = 4:4:4). Isse rang wale text/lines ki dhaar par
+            # colour-fringe/blur nahi aata — NAPS2 jaisi crisp file. (Halki
+            # badi hoti hai, par 'best' mode quality-first hai.)
+            if q >= 90:
+                kw["subsampling"] = 0
+        def _save_pdf(dst):
+            # subsampling kuch purane Pillow me PDF-save par na chale to bina
+            # uske dobara — save kabhi fail na ho.
+            try:
+                imgs[0].save(dst, "PDF", **kw)
+            except Exception:
+                kw.pop("subsampling", None)
+                imgs[0].save(dst, "PDF", **kw)
         if password:
             tmp = out + ".tmp.pdf"
-            imgs[0].save(tmp, "PDF", **kw)
+            _save_pdf(tmp)
             reader = PdfReader(tmp); writer = PdfWriter()
             for pg in reader.pages:
                 writer.add_page(pg)
@@ -22159,7 +22184,7 @@ if the toggle is ticked).</p>
             except Exception:
                 pass
         else:
-            imgs[0].save(out, "PDF", **kw)
+            _save_pdf(out)
         for im in imgs:
             try:
                 im.close()
