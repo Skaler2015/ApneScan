@@ -7,6 +7,7 @@ numpy
 pyzbar
 pyinstaller
 pywin32
+pytwain
 python-docx
 qrcode
 # behtar PDF import/render (sirf 64-bit — 32-bit ka wheel nahi milta)

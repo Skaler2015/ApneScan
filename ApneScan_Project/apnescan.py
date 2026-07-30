@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "235"
+VERSION = "236"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -14681,6 +14681,10 @@ if the toggle is ticked).</p>
         self._state_timer.start()
         QtCore.QTimer.singleShot(800, self._tick_scanner_state)
         QtCore.QTimer.singleShot(1400, self._detect_device_name)   # Device me naam dikhao
+        # (v236) startup par hi: agar chuni method is PC par kaam nahi karti
+        # (jaise TWAIN par pytwain nahi) to chalne-wali par le aao — user 'not
+        # installed' par kabhi na atke.
+        QtCore.QTimer.singleShot(1200, lambda: self._ensure_method_available(announce=True))
         # (v234) HP ScanJet jaise scanner par eSCL se WIA par le aao (ek baar) —
         # WIA driver ka output NAPS2 jaisa saaf/chatak (white-balance+contrast).
         QtCore.QTimer.singleShot(3600, self._prefer_wia_once)
@@ -15107,6 +15111,12 @@ if the toggle is ticked).</p>
         _place = getattr(self, "_pending_place", None)
         self._pending_place = None
         self._doc_folder_hint = None   # naya scan = folder-hint reset
+        # (v236) method is build/PC par na chale (jaise pytwain nahi) to pehle hi
+        # chalne-wali par le aao — 'not installed' par atakna band.
+        try:
+            self._ensure_method_available(announce=True)
+        except Exception:
+            pass
         method = self._opts.get("scanner_method", "twain")
         prof = self._selected_profile()
         if method == "escl":
@@ -15790,6 +15800,65 @@ if the toggle is ticked).</p>
         dikhao aur chuna hua set kar do. on_done(name, kind, value) callback."""
         self._auto_detect_cb = on_done
         self.auto_detect_scanner()
+
+    def _ensure_method_available(self, announce=False):
+        """(v236) Scanner-method agar is build/PC par kaam hi NAHI kar sakti
+        (jaise TWAIN par pytwain nahi, ya WIA par pywin32 nahi) to APNE AAP kisi
+        CHALNE-WALI method par le aao — warna user 'not installed' par atak jaata
+        hai aur scan hi nahi hota (v235 me yahi hua tha). Pasand-kram: WIA (agar
+        device pata) -> eSCL (agar IP pata) -> WIA -> TWAIN -> NAPS2. Return True
+        agar method badli."""
+        m = self._opts.get("scanner_method", "twain")
+        usable = True
+        if m == "twain":
+            usable = HAS_TWAIN
+        elif m == "wia":
+            usable = HAS_W32
+        elif m == "naps2":
+            usable = bool(self._opts.get("naps2_path") or find_naps2())
+        elif m == "escl":
+            usable = True
+        if usable:
+            return False
+        # chalne-wali method chuno
+        ip = ""
+        try:
+            ip = (self.ip_field.text().strip() if hasattr(self, "ip_field") else "") \
+                 or (self._opts.get("scanner_ip") or "")
+        except Exception:
+            ip = self._opts.get("scanner_ip") or ""
+        newm = None
+        if HAS_W32 and self._opts.get("wia_device_id"):
+            newm = "wia"
+        elif ip:
+            newm = "escl"
+        elif HAS_W32:
+            newm = "wia"
+        elif HAS_TWAIN:
+            newm = "twain"
+        if not newm or newm == m:
+            return False
+        self._opts["scanner_method"] = newm
+        if newm == "escl" and ip:
+            self._opts["scanner_ip"] = ip
+        try:
+            self._save_opts()
+        except Exception:
+            pass
+        try:
+            self._refresh_conn_and_method()
+        except Exception:
+            pass
+        if announce:
+            try:
+                _nm = {"wia": "WIA", "escl": "eSCL (network)", "twain": "TWAIN"}.get(newm, newm)
+                self.status.showMessage(self.L(
+                    "Scan method '%s' is PC par kaam nahi kar rahi thi — %s par le aaye." % (m, _nm),
+                    "Scan method '%s' wasn't available on this PC — switched to %s." % (m, _nm)),
+                    9000)
+            except Exception:
+                pass
+        return True
 
     def _prefer_wia_once(self):
         """(v234) HP ScanJet jaise scanner par WIA driver ka output (jaisa NAPS2
