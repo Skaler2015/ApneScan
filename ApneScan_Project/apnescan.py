@@ -244,7 +244,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "220"
+VERSION = "221"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -18124,22 +18124,22 @@ if the toggle is ticked).</p>
             if not self.files_panel.isVisible():
                 self.toggle_files_panel()
             self._jump_to_folder(pp)
-        for p in favs[:6]:
+        # (v221) SAARE favourites dikhao — koi '…N more' nahi. Bahut zyada hon
+        # to buttons thode compact ho jaate hain taaki sab ek saath aa jaayen.
+        _compact = len(favs) > 8
+        for p in favs:
             nm = os.path.basename(p) or p
             if len(nm) > 20:
                 nm = nm[:19] + "…"
             b = QtWidgets.QPushButton(" " + nm.replace("&", "&&"))
             if mk is not None:
                 b.setIcon(mk("star", "#F59E0B"))
-                b.setIconSize(QtCore.QSize(18, 18))
+                b.setIconSize(QtCore.QSize(15 if _compact else 18, 15 if _compact else 18))
+            if _compact:
+                b.setStyleSheet("QPushButton{padding:3px 9px;font-size:11.5px;}")
             b.setCursor(QtCore.Qt.PointingHandCursor)
             b.setToolTip(p)
             b.clicked.connect(lambda _c=False, pp=p: _go(pp))
-            lay.addWidget(b)
-        if len(favs) > 6:
-            b = QtWidgets.QPushButton(self.L("      … aur %d favourites", "      … %d more") % (len(favs) - 6))
-            b.setCursor(QtCore.Qt.PointingHandCursor)
-            b.clicked.connect(self._nav_show_favs)
             lay.addWidget(b)
 
     def _nav_show_favs(self):
