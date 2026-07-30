@@ -553,6 +553,48 @@ def auto_enhance(img):
         return img
 
 
+def naps2_clean(img):
+    """NAPS2 (HP WIA driver) jaisa SAAF + CHATAK look — eSCL ka kaccha/feeka scan
+    theek karo.
+
+    NAPS2 apne scanner-driver se global white-balance + contrast + halki
+    saturation lagata hai (isliye background PURA safed aur rang chatak). Ye
+    function wahi karta hai:
+      - autocontrast (per-channel, cutoff=1): background WHITE + poori tonal
+        range (feeka-pan gaya) + halka white-balance.
+      - Color (saturation) + Contrast + Sharpness: rang chatak, text crisp.
+
+    flatten_background se ALAG: ye background ko DIVIDE nahi karta, isliye rangeen
+    letterhead (gulabi/laal header, mohar) WASH-OUT nahi hota — ulta vivid hota
+    hai. Asli photo/X-ray par halka rehta hai (kam sharpen, kam saturation) taaki
+    over-process na ho. Grayscale page gray hi rehta hai (file chhoti)."""
+    try:
+        # Grayscale scan: rang nahi — sirf contrast + halka sharpen.
+        if img.mode == "L":
+            out = ImageOps.autocontrast(img, cutoff=1)
+            return ImageEnhance.Sharpness(out).enhance(1.25)
+        rgb = img.convert("RGB")
+        # Document jaisa (kaafi kagaz/near-white) ya photo jaisa?
+        paper = 0.5
+        try:
+            if HAS_NUMPY:
+                L = np.asarray(rgb.convert("L"), dtype=np.float32)
+                paper = float((L > 200).mean())
+        except Exception:
+            paper = 0.5
+        rgb = ImageOps.autocontrast(rgb, cutoff=1)   # bg->white, range poori, WB
+        if paper >= 0.30:                            # document: chatak
+            rgb = ImageEnhance.Color(rgb).enhance(1.18)
+            rgb = ImageEnhance.Contrast(rgb).enhance(1.08)
+            rgb = ImageEnhance.Sharpness(rgb).enhance(1.3)
+        else:                                        # photo/X-ray: halka haath
+            rgb = ImageEnhance.Color(rgb).enhance(1.06)
+            rgb = ImageEnhance.Sharpness(rgb).enhance(1.1)
+        return rgb
+    except Exception:
+        return img
+
+
 def auto_brightness(img):
     """F7: normalise exposure so pages are neither washed-out nor too dark.
     Nudges brightness toward a bright-but-not-blown target using the grey mean;

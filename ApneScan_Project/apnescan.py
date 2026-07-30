@@ -42,6 +42,7 @@ from apnescan_lib.search_engine import _folder_search_score
 from apnescan_lib.imaging import (
     is_blank_page, whiten_dark_background, autocrop, deskew, auto_enhance,
     denoise, apply_enhance_mode, clean_edges, split_two_pages, flatten_background,
+    naps2_clean,
     adaptive_bw, dewarp_page, smart_jpeg_quality, has_real_colour,
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
@@ -244,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "232"
+VERSION = "233"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -998,9 +999,15 @@ DEFAULT_OPTIONS = {
     "auto_crop": False,
     "deskew": False,
     "quality_enhance": False,
-    "auto_flatten": False,       # (v230) NAPS2-PARITY: default OFF — scan hubahu
-                                 # scanner/NAPS2 jaisa (natural background). ON karne
-                                 # par gray/maili background apne aap asli SAFED (HD).
+    # (v233) auto_flatten DEFAULT OFF: flatten_background rangeen letterhead
+    # (gulabi/laal header, mohar) ko background-division se WASH-OUT kar deta hai.
+    # Uski jagah auto_vivid (neeche) NAPS2-WIA jaisa saaf+chatak look deta hai
+    # bina rang bigade. flatten sirf pure text-photocopy ke liye optional raha.
+    "auto_flatten": False,
+    # (v233) NAPS2-MATCH: eSCL ka kaccha/feeka scan -> background WHITE +
+    # contrast + halki saturation (naps2_clean). DEFAULT ON — yahi NAPS2 (HP WIA
+    # driver) jaisa chatak/saaf look deta hai. Kaccha/raw chahiye to OFF karo.
+    "auto_vivid": True,
     "clean_edges": False,        # scan ki kaali border / kinare ke chhed saaf karo
     "split_two_page": False,     # ek glass par do page → apne aap alag karo
     "searchable_pdf": False,     # har save par PDF ke andar OCR text (Ctrl+F se dhoondo)
@@ -2749,8 +2756,22 @@ class ScanWorker(QtCore.QThread):
                     # (streak/shading bhi) — text gehra, print/PDF ekdam saaf.
                     # Photo/X-ray par apne aap no-op. Settings se band ho
                     # sakta hai (auto_flatten).
-                    if self.opts.get("auto_flatten", True):
+                    if self.opts.get("auto_flatten", False):
                         img = flatten_background(img)
+                    # (v233) NAPS2-MATCH: eSCL ka feeka/kaccha scan -> background
+                    # WHITE + contrast + halki saturation (NAPS2 ke HP-WIA-driver
+                    # jaisa saaf/chatak). Sirf colour/gray par; B&W apna adaptive
+                    # threshold khud lagata hai. Agar user ne khud koi enhance
+                    # (quality_enhance / enhance_mode / Smart Scan / flatten) chuna
+                    # ho to DOUBLE-process se bachne ke liye chhod do.
+                    _manual_enh = (self.opts.get("auto_flatten", False)
+                                   or self.opts.get("quality_enhance")
+                                   or self.opts.get("smart_scan")
+                                   or (self.opts.get("enhance_mode", "original")
+                                       not in ("original", "", None)))
+                    if (self.opts.get("auto_vivid", True)
+                            and self.pixel_type != "bw" and not _manual_enh):
+                        img = naps2_clean(img)
                     # ---- Smart Orientation = FIRST processing stage (spec) ----
                     # Har page ko sabse pehle seedha karo taaki aage ke sab stage
                     # (crop/deskew/enhance) + thumbnail/OCR/PDF sahi orientation par chalein.
@@ -3213,9 +3234,12 @@ class OptionsDialog(QtWidgets.QDialog):
         form.addRow(chkrow(self.chk_deskew, 'हिन्दी: चालू करने पर: टेढ़ा स्कैन हुआ पेज अपने-आप सीधा हो जाएगा।\nEnglish: ON: straightens a tilted/skewed page automatically.'))
         self.chk_enhance = QtWidgets.QCheckBox("Auto quality improvement (clean faded documents)")
         self.chk_enhance.setChecked(self.opts["quality_enhance"]); form.addRow(chkrow(self.chk_enhance, 'हिन्दी: चालू करने पर: फीके/हल्के document साफ़ और गहरे दिखेंगे।\nEnglish: ON: brightens & sharpens faded documents.'))
-        self.chk_flatten = QtWidgets.QCheckBox("Auto white background — HD scan & print (OFF = exactly like NAPS2)")
-        self.chk_flatten.setChecked(bool(self.opts.get("auto_flatten", True)))
-        form.addRow(chkrow(self.chk_flatten, 'हिन्दी: चालू रहने पर: photocopy जैसी gray/मैली background अपने-आप असली सफ़ेद हो जाती है और text गहरा — print और PDF एकदम साफ़। Photo/X-ray अपने-आप छोड़ दिए जाते हैं।\nEnglish: ON: photocopy-gray backgrounds become truly white and text darker — crisp prints & PDFs. Photos/X-rays are automatically left untouched.'))
+        self.chk_vivid = QtWidgets.QCheckBox("Clean & vivid like NAPS2 — auto white background + colour boost (Recommended)")
+        self.chk_vivid.setChecked(bool(self.opts.get("auto_vivid", True)))
+        form.addRow(chkrow(self.chk_vivid, 'हिन्दी: चालू रहने पर: eSCL/स्कैनर का फीका-कच्चा scan अपने-आप NAPS2 जैसा साफ़ और चटख — background सफ़ेद, रंग (गुलाबी/लाल header, मोहर) vivid, text crisp। रंगीन letterhead धुलता नहीं। Photo/X-ray पर हल्का। बंद = बिलकुल कच्चा scan।\nEnglish: ON: turns a flat/faded eSCL scan into a clean, vivid NAPS2-like page — white background, vivid colours (pink/red headers, stamps), crisp text. Coloured letterheads are NOT washed out. Gentle on photos/X-rays. OFF = raw scan.'))
+        self.chk_flatten = QtWidgets.QCheckBox("Flatten photocopy background (pure text docs only — may fade colour headers)")
+        self.chk_flatten.setChecked(bool(self.opts.get("auto_flatten", False)))
+        form.addRow(chkrow(self.chk_flatten, 'हिन्दी: सिर्फ़ बिना-रंग वाली photocopy के लिए: gray/मैली background को background-division से सफ़ेद करता है (streak/shading भी)। ⚠ रंगीन header/letterhead को धुंधला/सफ़ेद कर सकता है — इसलिए default बंद। Photo/X-ray पर no-op।\nEnglish: For plain (no-colour) photocopies only: removes gray/shaded background via background-division. ⚠ Can wash out coloured headers/letterheads, so OFF by default. No-op on photos/X-rays.'))
         self.chk_clean_edges = QtWidgets.QCheckBox("Clean scan edges (black border / punch-holes)")
         self.chk_clean_edges.setChecked(bool(self.opts.get("clean_edges"))); form.addRow(chkrow(self.chk_clean_edges, 'हिन्दी: चालू करने पर: स्कैन के किनारों की काली border और किनारे के छेद (punch-hole) के निशान अपने-आप सफ़ेद हो जाएँगे। बीच का टेक्स्ट/स्टांप नहीं छुआ जाता।\nEnglish: ON: whitens the black scan border and edge punch-hole marks. The middle content is never touched.'))
         self.chk_split2 = QtWidgets.QCheckBox("Split two pages on one glass into two")
@@ -3431,6 +3455,7 @@ class OptionsDialog(QtWidgets.QDialog):
         o["deskew"] = self.chk_deskew.isChecked()
         o["quality_enhance"] = self.chk_enhance.isChecked()
         o["auto_flatten"] = self.chk_flatten.isChecked()
+        o["auto_vivid"] = self.chk_vivid.isChecked()
         o["clean_edges"] = self.chk_clean_edges.isChecked()
         o["split_two_page"] = self.chk_split2.isChecked()
         o["twain_file_xfer"] = self.chk_filexfer.isChecked()
@@ -7431,14 +7456,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self._save_opts()
             except Exception:
                 pass
-        # (v230) One-time: scan ab HUBAHU NAPS2/scanner jaisa (faithful) — jo
-        # tonal-cleanup (auto_flatten) pehle silent default me ON tha, use ek baar
-        # OFF karo taaki koi bhi scanner ho, scan waise ka waisa (natural) aaye.
-        # (ADF ki kaali backing white karna + auto-rotate ab bhi chalu.) User chahe
-        # to Settings -> "Auto white background" dobara ON kar sakta hai.
-        if not self._opts.get("_scan_faithful_v230"):
-            self._opts["_scan_faithful_v230"] = True
+        # (v233) NAPS2-MATCH: eSCL ka scan NAPS2 ke HP-WIA-driver output se feeka
+        # tha (kam contrast, feeke rang, gray-maila bg). Ab auto_vivid (naps2_clean)
+        # se saaf+chatak. Purana flatten_background rangeen header WASH-OUT kar deta
+        # tha — use ek baar OFF karo (auto_vivid absent-key se apne aap ON hai).
+        if not self._opts.get("_scan_vivid_v233"):
+            self._opts["_scan_vivid_v233"] = True
             self._opts["auto_flatten"] = False
+            self._opts["auto_vivid"] = True
             try:
                 self._save_opts()
             except Exception:
