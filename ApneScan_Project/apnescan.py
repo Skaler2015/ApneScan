@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "263"
+VERSION = "264"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9470,33 +9470,38 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     return " ▼" if sdesc else " ▲"
                 return ""
 
-            h = ['<table width="100%" cellspacing="0" cellpadding="3" '
-                 'style="font-size:10.5px;">']
+            # (v264) REDESIGN — chhoti font + slim colour-dot (emoji ki jagah,
+            # jisse label wrap nahi hota) + saaf striped rows. Compact + attractive.
+            h = ['<table width="100%" cellspacing="0" cellpadding="2" '
+                 'style="font-size:9.5px;">']
             # heading
-            h.append('<tr><td colspan="3" style="padding:1px 3px 3px;">'
-                     '<b style="color:#4338CA;font-size:11.5px;">🌍 %s</b></td></tr>'
+            h.append('<tr><td colspan="3" style="padding:0px 2px 3px;">'
+                     '<b style="color:#4338CA;font-size:11px;">🌍 %s</b></td></tr>'
                      % self.L("Duniya", "World"))
             # column headers (Name | World | Today) — clickable links
             def _hcell(col, text, align):
-                return ('<td align="%s" style="color:#FFFFFF;">'
+                return ('<td align="%s" bgcolor="#4F46E5" '
+                        'style="color:#FFFFFF;font-size:9px;padding:3px 4px;">'
                         '<a href="wsort:%s" style="color:#FFFFFF;text-decoration:none;">'
                         '<b>%s%s</b></a></td>'
                         % (align, col, text, _arw(col)))
             h.append(
-                '<tr bgcolor="#4F46E5">'
+                '<tr>'
                 + _hcell("name", self.L("Analytics", "Analytics"), "left")
                 + _hcell("world", self.L("World", "World"), "right")
                 + _hcell("today", self.L("Aaj", "Today"), "right")
                 + '</tr>')
             for i, (ic, lab, tkey, dkey, col) in enumerate(rows):
-                bg = "#F3F4FB" if (i % 2 == 0) else "#FFFFFF"
+                bg = "#F1F3FC" if (i % 2 == 0) else "#FFFFFF"
                 h.append(
                     '<tr>'
-                    '<td bgcolor="%s" style="color:#4B5563;">'
-                    '<span style="color:%s;">%s</span> %s</td>'
-                    '<td bgcolor="%s" align="right"><b style="color:#111827;">%s</b></td>'
-                    '<td bgcolor="%s" align="right" style="color:#0D9488;"><b>%s</b></td>'
-                    '</tr>' % (bg, col, ic, lab, bg, wv(tkey), bg, wv(dkey)))
+                    '<td bgcolor="%s" style="color:#374151;padding:3px 4px;">'
+                    '<span style="color:%s;font-size:11px;">&#9679;</span>&nbsp;%s</td>'
+                    '<td bgcolor="%s" align="right" style="padding:3px 4px;">'
+                    '<b style="color:#111827;">%s</b></td>'
+                    '<td bgcolor="%s" align="right" style="padding:3px 4px;">'
+                    '<b style="color:#0D9488;">%s</b></td>'
+                    '</tr>' % (bg, col, lab, bg, wv(tkey), bg, wv(dkey)))
             h.append('</table>')
             lbl.setText("".join(h))
         except Exception:
