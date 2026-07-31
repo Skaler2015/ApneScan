@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "244"
+VERSION = "245"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2797,21 +2797,21 @@ class ScanWorker(QtCore.QThread):
                     # sakta hai (auto_flatten).
                     if self.opts.get("auto_flatten", False):
                         img = flatten_background(img)
-                    # (v244) NAPS2-MATCH: SIRF eSCL ke gray-maile/feeke scan par ->
-                    # naps2_levels: background CLEAN-WHITE + text DEEP-BLACK (NAPS2
-                    # ke HP-WIA-driver jaisa). white-point levels stretch — faint
-                    # line nahi udti, rangeen header/mohar nahi dhulte (test-verified:
-                    # mean 224->240, p50 255, faint 0% washed). WIA/TWAIN/NAPS2-engine
-                    # me driver khud yahi karta hai -> wahan SKIP (double na ho).
-                    # Colour/gray par (B&W ka apna threshold), aur tab nahi jab user
-                    # ne khud koi enhance chuna ho.
+                    # (v245) NAPS2-MATCH: gray-maile/feeke scan -> naps2_levels:
+                    # background CLEAN-WHITE + text DEEP-BLACK (NAPS2 jaisa). white-
+                    # point levels stretch — faint line nahi udti, rangeen header/
+                    # mohar nahi dhulte (test: mean 224->240, p50 255, faint 0%
+                    # washed). (v244 me ye SIRF eSCL par tha — galti: ApneScan ka
+                    # WIA output BHI grayish nikla, NAPS2-WIA jaisa whiten nahi hota.
+                    # Isliye ab HAR method par — function adaptive hai, pehle se
+                    # safed page par apne aap NO-OP.) Colour/gray par (B&W ka apna
+                    # threshold), aur tab nahi jab user ne khud koi enhance chuna ho.
                     _manual_enh = (self.opts.get("auto_flatten", False)
                                    or self.opts.get("quality_enhance")
                                    or self.opts.get("smart_scan")
                                    or (self.opts.get("enhance_mode", "original")
                                        not in ("original", "", None)))
                     if (self.opts.get("auto_vivid", True)
-                            and self.opts.get("scanner_method", "twain") == "escl"
                             and self.pixel_type != "bw" and not _manual_enh):
                         img = naps2_levels(img)
                     # ---- Smart Orientation = FIRST processing stage (spec) ----
@@ -7561,6 +7561,15 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # v237 ne ise OFF kar diya tha; ek baar wapas ON.
         if not self._opts.get("_naps2_levels_v244"):
             self._opts["_naps2_levels_v244"] = True
+            self._opts["auto_vivid"] = True
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+        # (v245) naps2_levels ab HAR method par (eSCL/WIA) — pehle sirf eSCL par
+        # tha, isliye WIA ke grayish scan par nahi lag raha tha. auto_vivid pakka ON.
+        if not self._opts.get("_naps2_levels_all_v245"):
+            self._opts["_naps2_levels_all_v245"] = True
             self._opts["auto_vivid"] = True
             try:
                 self._save_opts()
