@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "261"
+VERSION = "262"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9420,6 +9420,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             return "…"
 
+    def _an_rawv(self, key):
+        """(v262) raw int value (missing→0) — world table sort ke liye."""
+        w = getattr(self, "_an_world", {}) or {}
+        try:
+            return int(w.get(key))
+        except Exception:
+            return 0
+
     def _update_world_lbl(self):
         """(v257) Sidebar (storage box ke upar) me duniya ke live counters:
         Total/Today scan + Import + Print + WhatsApp + Rename + Phone scan."""
@@ -9432,8 +9440,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
         try:
             wv = self._an_wv
+            rawv = self._an_rawv
             # (v261) 3-column TABLE — col1: analytics ka naam, col2: World Total,
             # col3: Aaj (Today) ka total. Har metric ki dono value ek saath.
+            # (v262) column headers CLICKABLE — single click par us column se sort,
+            # dobara click par direction ulta (upar-se-niche / niche-se-upar).
             # rows = (icon, label, total_key, today_key, icon_colour)
             rows = [
                 ("🖨", self.L("Scan", "Scan"),    "total",     "today",           "#4F46E5"),
@@ -9443,21 +9454,39 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 ("✏", "Rename",                    "renames",   "renames_today",   "#9333EA"),
                 ("📱", self.L("Phone", "Phone"),   "phones",    "phones_today",    "#DB2777"),
             ]
+            # sort state: (column, descending). default = Aaj (Today), bada upar.
+            scol, sdesc = getattr(self, "_world_sort", ("today", True))
+            if scol == "name":
+                rows.sort(key=lambda r: r[1].lower(), reverse=sdesc)
+            elif scol == "today":
+                rows.sort(key=lambda r: rawv(r[3]), reverse=sdesc)
+            else:  # "world"
+                rows.sort(key=lambda r: rawv(r[2]), reverse=sdesc)
+
+            def _arw(col):
+                # active column par direction arrow, warna khaali
+                if col == scol:
+                    return " ▼" if sdesc else " ▲"
+                return ""
+
             h = ['<table width="100%" cellspacing="0" cellpadding="3" '
                  'style="font-size:10.5px;">']
             # heading
             h.append('<tr><td colspan="3" style="padding:1px 3px 3px;">'
                      '<b style="color:#4338CA;font-size:11.5px;">🌍 %s</b></td></tr>'
                      % self.L("Duniya", "World"))
-            # column headers (Name | World | Today)
+            # column headers (Name | World | Today) — clickable links
+            def _hcell(col, text, align):
+                return ('<td align="%s" style="color:#FFFFFF;">'
+                        '<a href="wsort:%s" style="color:#FFFFFF;text-decoration:none;">'
+                        '<b>%s%s</b></a></td>'
+                        % (align, col, text, _arw(col)))
             h.append(
                 '<tr bgcolor="#4F46E5">'
-                '<td style="color:#FFFFFF;"><b>%s</b></td>'
-                '<td align="right" style="color:#FFFFFF;"><b>%s</b></td>'
-                '<td align="right" style="color:#FFFFFF;"><b>%s</b></td>'
-                '</tr>' % (self.L("Analytics", "Analytics"),
-                          self.L("World", "World"),
-                          self.L("Aaj", "Today")))
+                + _hcell("name", self.L("Analytics", "Analytics"), "left")
+                + _hcell("world", self.L("World", "World"), "right")
+                + _hcell("today", self.L("Aaj", "Today"), "right")
+                + '</tr>')
             for i, (ic, lab, tkey, dkey, col) in enumerate(rows):
                 bg = "#F3F4FB" if (i % 2 == 0) else "#FFFFFF"
                 h.append(
@@ -9471,6 +9500,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
             lbl.setText("".join(h))
         except Exception:
             pass
+
+    def _world_sort_click(self, link):
+        """(v262) World table column header click — us column se sort; agar
+        wahi column dobara click ho to direction ulta kar do."""
+        try:
+            col = str(link).split(":", 1)[1] if ":" in str(link) else str(link)
+        except Exception:
+            return
+        if col not in ("name", "world", "today"):
+            return
+        scol, sdesc = getattr(self, "_world_sort", ("today", True))
+        if col == scol:
+            sdesc = not sdesc            # same column → direction toggle
+        else:
+            # naya column → naam A→Z se, numbers bade-se-chhote se shuru
+            sdesc = (col != "name")
+        self._world_sort = (col, sdesc)
+        self._update_world_lbl()
 
     def _an_update_box(self):
         try:
@@ -14780,8 +14827,14 @@ if the toggle is ticked).</p>
         self._world_lbl = QtWidgets.QLabel()
         self._world_lbl.setTextFormat(QtCore.Qt.RichText)
         self._world_lbl.setStyleSheet("font-size:10.5px;color:#4338CA;")
-        self._world_lbl.setToolTip(self.L("Duniya bhar ke ApneScan users ke scan (live)",
-                                           "Scans by ApneScan users worldwide (live)"))
+        # (v262) column header click → sort (upar-se-niche / niche-se-upar)
+        self._world_lbl.setOpenExternalLinks(False)
+        try:
+            self._world_lbl.linkActivated.connect(self._world_sort_click)
+        except Exception:
+            pass
+        self._world_lbl.setToolTip(self.L("Column heading par click karke sort karo (upar/niche)",
+                                           "Click a column heading to sort (asc/desc)"))
         _wvl.addWidget(self._world_lbl)
         nv.addWidget(_worldf)
         self._update_world_lbl()
