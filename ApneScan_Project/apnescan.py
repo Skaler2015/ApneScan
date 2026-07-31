@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "258"
+VERSION = "259"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -14614,14 +14614,15 @@ if the toggle is ticked).</p>
         nav.setFixedWidth(202)
         nav.setStyleSheet(
             "#navside{background:#FFFFFF;border-right:1px solid #E5E7EB;}"
-            "#navside QPushButton{border:none;border-radius:10px;text-align:left;"
-            "padding:7px 11px;font-size:12.5px;color:#374151;background:transparent;}"
+            "#navside QPushButton{border:none;border-radius:9px;text-align:left;"
+            "padding:4px 10px;font-size:12px;color:#374151;background:transparent;}"
             "#navside QPushButton:hover{background:#F3F4F6;}"
             "#navside QPushButton#navon{background:#EEF2FF;color:#4F46E5;font-weight:700;"
-            "border-left:3px solid #4F46E5;border-radius:8px;padding-left:9px;}"
+            "border-left:3px solid #4F46E5;border-radius:8px;padding-left:8px;}"
             "#navside QPushButton#navon:hover{background:#E0E7FF;}"
             "#navside QLabel{background:transparent;border:none;}")
-        nv = QtWidgets.QVBoxLayout(nav); nv.setContentsMargins(11, 13, 11, 9); nv.setSpacing(2)
+        # (v259) compact: kam padding/spacing taaki menu kam jagah le
+        nv = QtWidgets.QVBoxLayout(nav); nv.setContentsMargins(11, 8, 11, 6); nv.setSpacing(1)
         _lg = QtWidgets.QHBoxLayout(); _lg.setSpacing(9)
         # (v214) sidebar par ASLI naya icon (navy+teal) — 🖨 emoji ki jagah
         _mark = QtWidgets.QLabel(); _mark.setFixedSize(38, 38)
@@ -14637,12 +14638,12 @@ if the toggle is ticked).</p>
             "<span style='font-size:10px;color:#6B7280'>Document Studio · v%s</span><br>"
             "<span style='font-size:9px;color:#9CA3AF'>by Subhash Kaler</span>" % VERSION)
         _lg.addWidget(_lt, 1)
-        nv.addLayout(_lg); nv.addSpacing(8)
+        nv.addLayout(_lg); nv.addSpacing(3)
 
         def _ncap(txt):
             c = QtWidgets.QLabel(txt)
-            c.setStyleSheet("color:#9CA3AF;font-size:9px;font-weight:700;letter-spacing:1px;")
-            c.setContentsMargins(10, 9, 0, 3)
+            c.setStyleSheet("color:#9CA3AF;font-size:8.5px;font-weight:700;letter-spacing:1px;")
+            c.setContentsMargins(10, 5, 0, 1)
             nv.addWidget(c)
 
         def _nav_icon(kind, color="#6B7280"):
@@ -14705,7 +14706,7 @@ if the toggle is ticked).</p>
         def _nbtn(kind, txt, slot, on=False):
             b = QtWidgets.QPushButton(" " + txt.replace("&", "&&"))
             b.setIcon(_nav_icon(kind, "#4F46E5" if on else "#6B7280"))
-            b.setIconSize(QtCore.QSize(18, 18))
+            b.setIconSize(QtCore.QSize(16, 16))
             b.setCursor(QtCore.Qt.PointingHandCursor)
             if on:
                 b.setObjectName("navon")
