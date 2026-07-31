@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "240"
+VERSION = "241"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9278,7 +9278,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             return "…"
 
+    def _update_world_lbl(self):
+        """(v241) Sidebar (storage box ke upar) me duniya ke total + aaj ke scan."""
+        lbl = getattr(self, "_world_lbl", None)
+        if lbl is None:
+            return
+        try:
+            lbl.setText(self.L(
+                "🌍 <b>Duniya</b> total: <b>%s</b><br>🌍 Aaj: <b>%s</b> scans",
+                "🌍 <b>World</b> total: <b>%s</b><br>🌍 Today: <b>%s</b> scans")
+                % (self._an_wv("total"), self._an_wv("today")))
+        except Exception:
+            pass
+
     def _an_update_box(self):
+        try:
+            self._update_world_lbl()      # sidebar world-scans bhi taaza
+        except Exception:
+            pass
         if not hasattr(self, "an_box"):
             return
         st = self._pstats()
@@ -14526,6 +14543,20 @@ if the toggle is ticked).</p>
         _nbtn("gear", "Settings", self.open_options)
         _nbtn("book", self.L("Guide", "Help & Guide"), self.show_guide)
         nv.addStretch(1)
+        # (v241) WORLD scans — Storage box ke JUST UPAR: duniya ke total + aaj ke
+        # scan. Data _an_world se (analytics refresh par _an_update_box ise bhi
+        # taaza karta hai).
+        _worldf = QtWidgets.QFrame()
+        _worldf.setStyleSheet("background:#EEF2FF;border:1px solid #E0E7FF;border-radius:11px;")
+        _wvl = QtWidgets.QVBoxLayout(_worldf); _wvl.setContentsMargins(10, 7, 10, 7); _wvl.setSpacing(2)
+        self._world_lbl = QtWidgets.QLabel()
+        self._world_lbl.setTextFormat(QtCore.Qt.RichText)
+        self._world_lbl.setStyleSheet("font-size:10.5px;color:#4338CA;")
+        self._world_lbl.setToolTip(self.L("Duniya bhar ke ApneScan users ke scan (live)",
+                                           "Scans by ApneScan users worldwide (live)"))
+        _wvl.addWidget(self._world_lbl)
+        nv.addWidget(_worldf)
+        self._update_world_lbl()
         _store = QtWidgets.QFrame()
         _store.setStyleSheet("background:#F9FAFB;border:1px solid #E5E7EB;border-radius:11px;")
         _sv = QtWidgets.QVBoxLayout(_store); _sv.setContentsMargins(10, 8, 10, 8); _sv.setSpacing(3)
