@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "259"
+VERSION = "260"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9432,21 +9432,33 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
         try:
             wv = self._an_wv
-            # (v258) har counter ALAG line me — sidebar sankra hai, do-per-line
-            # me daaya hissa kat raha tha.
-            lbl.setText(self.L(
-                "🌍 <b>Duniya</b> (live)<br>"
-                "🖨 Total: <b>%s</b><br>📅 Aaj: <b>%s</b><br>"
-                "📥 Import: <b>%s</b><br>🖨 Print: <b>%s</b><br>"
-                "🟢 WhatsApp: <b>%s</b><br>✏ Rename: <b>%s</b><br>"
-                "📱 Phone scan: <b>%s</b>",
-                "🌍 <b>World</b> (live)<br>"
-                "🖨 Total: <b>%s</b><br>📅 Today: <b>%s</b><br>"
-                "📥 Import: <b>%s</b><br>🖨 Print: <b>%s</b><br>"
-                "🟢 WhatsApp: <b>%s</b><br>✏ Rename: <b>%s</b><br>"
-                "📱 Phone scan: <b>%s</b>")
-                % (wv("total"), wv("today"), wv("imports"), wv("prints"),
-                   wv("whatsapps"), wv("renames"), wv("phones")))
+            # (v260) 2-column TABLE (label | value) — striped rows, value bold+
+            # right-align. Sidebar me saaf/attractive dikhta hai, kuch katata nahi.
+            rows = [
+                ("🖨", self.L("Total", "Total"),      wv("total"),   "#4F46E5"),
+                ("📅", self.L("Aaj", "Today"),        wv("today"),   "#0D9488"),
+                ("📥", self.L("Import", "Import"),     wv("imports"), "#EA580C"),
+                ("🖨", "Print",                        wv("prints"),  "#2563EB"),
+                ("🟢", "WhatsApp",                     wv("whatsapps"), "#16A34A"),
+                ("✏", "Rename",                        wv("renames"), "#9333EA"),
+                ("📱", self.L("Phone", "Phone"),       wv("phones"),  "#DB2777"),
+            ]
+            h = ['<table width="100%" cellspacing="0" cellpadding="3" '
+                 'style="font-size:10.5px;">']
+            h.append('<tr><td colspan="2" style="padding:1px 3px 4px;">'
+                     '<b style="color:#4338CA;font-size:11.5px;">🌍 %s</b></td></tr>'
+                     % self.L("Duniya", "World"))
+            for i, (ic, lab, val, col) in enumerate(rows):
+                bg = "#F3F4FB" if (i % 2 == 0) else "#FFFFFF"
+                h.append(
+                    '<tr>'
+                    '<td bgcolor="%s" style="color:#4B5563;">'
+                    '<span style="color:%s;">%s</span> %s</td>'
+                    '<td bgcolor="%s" align="right">'
+                    '<b style="color:#111827;">%s</b></td>'
+                    '</tr>' % (bg, col, ic, lab, bg, val))
+            h.append('</table>')
+            lbl.setText("".join(h))
         except Exception:
             pass
 
@@ -14753,7 +14765,7 @@ if the toggle is ticked).</p>
         # scan. Data _an_world se (analytics refresh par _an_update_box ise bhi
         # taaza karta hai).
         _worldf = QtWidgets.QFrame()
-        _worldf.setStyleSheet("background:#EEF2FF;border:1px solid #E0E7FF;border-radius:11px;")
+        _worldf.setStyleSheet("background:#FFFFFF;border:1px solid #E0E7FF;border-radius:11px;")
         _wvl = QtWidgets.QVBoxLayout(_worldf); _wvl.setContentsMargins(10, 7, 10, 7); _wvl.setSpacing(2)
         self._world_lbl = QtWidgets.QLabel()
         self._world_lbl.setTextFormat(QtCore.Qt.RichText)
