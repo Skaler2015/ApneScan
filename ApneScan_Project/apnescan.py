@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "257"
+VERSION = "258"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9427,18 +9427,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if lbl is None:
             return
         try:
+            lbl.setWordWrap(True)
+        except Exception:
+            pass
+        try:
             wv = self._an_wv
+            # (v258) har counter ALAG line me — sidebar sankra hai, do-per-line
+            # me daaya hissa kat raha tha.
             lbl.setText(self.L(
                 "🌍 <b>Duniya</b> (live)<br>"
-                "🖨 Total <b>%s</b> · Aaj <b>%s</b><br>"
-                "📥 Import <b>%s</b> · 🖨 Print <b>%s</b><br>"
-                "🟢 WhatsApp <b>%s</b> · ✏ Rename <b>%s</b><br>"
-                "📱 Phone scan <b>%s</b>",
+                "🖨 Total: <b>%s</b><br>📅 Aaj: <b>%s</b><br>"
+                "📥 Import: <b>%s</b><br>🖨 Print: <b>%s</b><br>"
+                "🟢 WhatsApp: <b>%s</b><br>✏ Rename: <b>%s</b><br>"
+                "📱 Phone scan: <b>%s</b>",
                 "🌍 <b>World</b> (live)<br>"
-                "🖨 Total <b>%s</b> · Today <b>%s</b><br>"
-                "📥 Import <b>%s</b> · 🖨 Print <b>%s</b><br>"
-                "🟢 WhatsApp <b>%s</b> · ✏ Rename <b>%s</b><br>"
-                "📱 Phone scan <b>%s</b>")
+                "🖨 Total: <b>%s</b><br>📅 Today: <b>%s</b><br>"
+                "📥 Import: <b>%s</b><br>🖨 Print: <b>%s</b><br>"
+                "🟢 WhatsApp: <b>%s</b><br>✏ Rename: <b>%s</b><br>"
+                "📱 Phone scan: <b>%s</b>")
                 % (wv("total"), wv("today"), wv("imports"), wv("prints"),
                    wv("whatsapps"), wv("renames"), wv("phones")))
         except Exception:
