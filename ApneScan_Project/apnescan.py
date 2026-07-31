@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "241"
+VERSION = "242"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3011,7 +3011,7 @@ class EditProfileDialog(QtWidgets.QDialog):
         self.setWindowTitle("Profile settings")
         self.setMinimumWidth(420)
         self.profile = dict(profile) if profile else {
-            "name": "", "source_name": None, "dpi": 300, "color": "gray", "duplex": False}
+            "name": "", "source_name": None, "dpi": 150, "color": "color", "duplex": False}
         form = QtWidgets.QFormLayout(self)
 
         def qh(text, tip):
@@ -3039,7 +3039,7 @@ class EditProfileDialog(QtWidgets.QDialog):
         self.cmb_dpi.setValidator(QtGui.QIntValidator(50, 1200, self.cmb_dpi))
         self.cmb_dpi.addItems(RESOLUTIONS)
         self.cmb_dpi.setToolTip('You can type any DPI here (e.g. 250).')
-        self.cmb_dpi.setCurrentText(str(self.profile.get("dpi", 200)))
+        self.cmb_dpi.setCurrentText(str(self.profile.get("dpi", 150)))
         form.addRow(qh("Resolution (DPI):", "हिन्दी: स्कैन की सफ़ाई (रेज़ॉल्यूशन)। 200 = तेज़ और टेक्स्ट के लिए ठीक; 300 = बेहतर (धीमा); 600 = फ़ोटो के लिए।\nEnglish: Scan sharpness. 200 = fast, fine for text; 300 = better (slower); 600 = for photos."), self.cmb_dpi)
         self.cmb_color = QtWidgets.QComboBox(); self.cmb_color.addItems(list(COLOUR_MODES.keys()))
         for label, code in COLOUR_MODES.items():
@@ -3100,7 +3100,7 @@ class EditProfileDialog(QtWidgets.QDialog):
         try:
             self.profile["dpi"] = max(50, min(1200, int(self.cmb_dpi.currentText().strip())))
         except Exception:
-            self.profile["dpi"] = 200
+            self.profile["dpi"] = 150
         self.profile["color"] = COLOUR_MODES[self.cmb_color.currentText()]
         self.profile["duplex"] = self.chk_duplex.isChecked()
         self.profile["page_size"] = self._PSIZES[self.cmb_psize.currentIndex()][1]
@@ -7404,6 +7404,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 save_config(self._config)
             except Exception:
                 pass
+        # (v242) NAPS2-EXACT: user ki tulna (NAPS2 150dpi vs ApneScan 200dpi) me
+        # quality barabar nikli — farq sirf file-size, jo DPI se aata tha. User ne
+        # "hubahu NAPS2" chuna, isliye SAARI profiles ek baar 150 dpi par le aao
+        # (v155 ne inhe 300 par chadha diya tha). User kabhi bhi Settings se
+        # kisi profile ka DPI badha sakta hai.
+        if not self._config.get("naps2_dpi150_v242"):
+            self._config["naps2_dpi150_v242"] = True
+            for _p in (self._profiles or []):
+                try:
+                    _p["dpi"] = 150
+                except Exception:
+                    pass
+            if self._profiles:
+                self._config["profiles"] = self._profiles
+            try:
+                save_config(self._config)
+            except Exception:
+                pass
         # Layout v168 (one-time): scan-settings ab TOOLBAR ke neeche ek patti
         # me aur 'Meri Files' BAAYIN taraf — purani saved 'right' side ek baar
         # left kar rahe hain (Customize se wapas badla ja sakta hai).
@@ -7830,7 +7848,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         self._profiles = [{
             "name": "Default",
-            "dpi": 300,                # HD (pehle 150 tha — dhundhla scan)
+            "dpi": 150,                # (v242) NAPS2-EXACT: NAPS2 bhi 150 dpi par
+                                       # scan karta hai — wahi look + file-size.
             "color": "color",          # Colour
             "duplex": False,
             "page_size": "auto",       # Auto
