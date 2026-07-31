@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "242"
+VERSION = "243"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2014,15 +2014,27 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
     item = device.Items[1]         # enumerate the page item AFTER duplex is active
     _apply_quality(item)
     _props_ok = True
-    # BMP format id (widely accepted by HP WIA drivers).
-    WIA_FMT_BMP = "{B96B3CAB-0728-11D3-9D7B-0000F81EF32E}"
+    # WIA transfer formats.
+    WIA_FMT_BMP  = "{B96B3CAB-0728-11D3-9D7B-0000F81EF32E}"   # uncompressed (bada, dheema)
+    WIA_FMT_JPEG = "{B96B3CAE-0728-11D3-9D7B-0000F81EF32E}"   # device-compressed (chhota, TEZ)
 
     def _transfer_one(it):
-        # Try Transfer(format) first (robust on HP), then plain Transfer().
-        try:
-            return it.Transfer(WIA_FMT_BMP)
-        except Exception:
-            return it.Transfer()
+        # (v243) SPEED: JPEG me transfer sabse TEZ — device page ko khud JPEG
+        # compress karke bhejta hai (~1MB), jabki BMP poora uncompressed (~25MB
+        # at 150dpi colour) COM-layer se guzarta tha (isi se WIA dheema tha;
+        # NAPS2 bhi compressed/banded transfer karta hai). Colour/gray par JPEG
+        # try karo; driver na de to BMP; phir default. (B&W 1-bit JPEG nahi ho
+        # sakta -> seedha BMP, jo waise bhi chhota hai.)
+        fmts = []
+        if pixel_type in ("color", "gray"):
+            fmts.append(WIA_FMT_JPEG)
+        fmts.append(WIA_FMT_BMP)
+        for _fmt in fmts:
+            try:
+                return it.Transfer(_fmt)
+            except Exception:
+                continue
+        return it.Transfer()
 
     count = 0
     retry_stage = 0
