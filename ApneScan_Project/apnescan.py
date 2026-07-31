@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "255"
+VERSION = "256"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6159,6 +6159,22 @@ class HBars(QtWidgets.QWidget):
 
 
 _FT_ICON_CACHE = {}
+_FT_GROUPS = {
+    "pdf": ("PDF", "#DC2626"),
+    "jpg": ("IMG", "#16A34A"), "jpeg": ("IMG", "#16A34A"), "png": ("IMG", "#16A34A"),
+    "webp": ("IMG", "#16A34A"), "bmp": ("IMG", "#16A34A"), "tif": ("IMG", "#16A34A"),
+    "tiff": ("IMG", "#16A34A"), "gif": ("IMG", "#16A34A"), "heic": ("IMG", "#16A34A"),
+    "doc": ("DOC", "#2563EB"), "docx": ("DOC", "#2563EB"),
+    "xls": ("XLS", "#0D9488"), "xlsx": ("XLS", "#0D9488"), "csv": ("XLS", "#0D9488"),
+    "zip": ("ZIP", "#9333EA"), "rar": ("ZIP", "#9333EA"), "7z": ("ZIP", "#9333EA"),
+    "txt": ("TXT", "#6B7280"),
+}
+
+
+def _filetype_label(suffix):
+    """File-extension -> (chhota label, rang). Delegate + icon dono use karte."""
+    s = (suffix or "").lower()
+    return _FT_GROUPS.get(s, ((s[:3].upper() if s else "?"), "#6B7280"))
 
 
 def _filetype_icon(suffix):
@@ -6168,17 +6184,7 @@ def _filetype_icon(suffix):
     key = suffix or ""
     if key in _FT_ICON_CACHE:
         return _FT_ICON_CACHE[key]
-    groups = {
-        "pdf": ("PDF", "#DC2626"),
-        "jpg": ("IMG", "#16A34A"), "jpeg": ("IMG", "#16A34A"), "png": ("IMG", "#16A34A"),
-        "webp": ("IMG", "#16A34A"), "bmp": ("IMG", "#16A34A"), "tif": ("IMG", "#16A34A"),
-        "tiff": ("IMG", "#16A34A"), "gif": ("IMG", "#16A34A"), "heic": ("IMG", "#16A34A"),
-        "doc": ("DOC", "#2563EB"), "docx": ("DOC", "#2563EB"),
-        "xls": ("XLS", "#0D9488"), "xlsx": ("XLS", "#0D9488"), "csv": ("XLS", "#0D9488"),
-        "zip": ("ZIP", "#9333EA"), "rar": ("ZIP", "#9333EA"), "7z": ("ZIP", "#9333EA"),
-        "txt": ("TXT", "#6B7280"),
-    }
-    label, color = groups.get(key, ((key[:3].upper() if key else "?"), "#6B7280"))
+    label, color = _filetype_label(key)
     try:
         pm = QtGui.QPixmap(40, 48)
         pm.fill(QtCore.Qt.transparent)
@@ -6585,14 +6591,21 @@ class FilesCardDelegate(QtWidgets.QStyledItemDelegate):
             p.setBrush(QtGui.QColor("#F59E0B"))
             p.drawRoundedRect(QtCore.QRectF(x, cy - 2, 15, 8.5), 2, 2)       # front
         else:
-            p.setPen(QtGui.QPen(QtGui.QColor("#9CA3AF"), 1.4))
+            # (v256) File-type ke hisaab se RANGIN icon (PDF laal / IMG hara /
+            # DOC neela ...) — taaki foran pata chale konsi PDF hai konsi photo.
+            _lbl, _col = _filetype_label(name.rsplit(".", 1)[-1].lower() if "." in name else "")
+            dr = QtCore.QRectF(x, cy - 9, 17, 18)
+            p.setPen(QtGui.QPen(QtGui.QColor(_col), 1.4))
             p.setBrush(QtGui.QColor("#FFFFFF"))
-            p.drawRoundedRect(QtCore.QRectF(x + 2, cy - 7, 11, 14), 2, 2)
-            p.setPen(QtGui.QPen(QtGui.QColor("#C7CDD6"), 1.2))
-            p.drawLine(QtCore.QPointF(x + 4.5, cy - 2.5), QtCore.QPointF(x + 10.5, cy - 2.5))
-            p.drawLine(QtCore.QPointF(x + 4.5, cy + 0.5), QtCore.QPointF(x + 10.5, cy + 0.5))
-            p.drawLine(QtCore.QPointF(x + 4.5, cy + 3.5), QtCore.QPointF(x + 8.5, cy + 3.5))
-        x += 22
+            p.drawRoundedRect(dr, 2.5, 2.5)
+            # niche rang wali patti par type-naam (safed)
+            band = QtCore.QRectF(x, cy + 2, 17, 7)
+            p.setPen(QtCore.Qt.NoPen); p.setBrush(QtGui.QColor(_col))
+            p.drawRoundedRect(band, 2, 2)
+            _tf = QtGui.QFont(opt.font); _tf.setPixelSize(6); _tf.setBold(True)
+            p.setFont(_tf); p.setPen(QtGui.QColor("#FFFFFF"))
+            p.drawText(band, QtCore.Qt.AlignCenter, _lbl)
+        x += 24
         f = QtGui.QFont(opt.font)
         # right: sirf ⋮ (v193: NEW/Recent pill + DP/SC badge hata diye)
         p.setPen(QtGui.QColor("#9CA3AF"))
