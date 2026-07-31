@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "254"
+VERSION = "255"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -22365,8 +22365,20 @@ if the toggle is ticked).</p>
                 _save([])
         lw.itemDoubleClicked.connect(lambda _i: _edit_sel())
 
+        def _add_new():
+            nn, ok = QtWidgets.QInputDialog.getText(
+                dlg, self.L("Naam jodo", "Add name"),
+                self.L("Naya suggestion naam:", "New suggested name:"))
+            nn = (nn or "").strip()
+            if not ok or not nn:
+                return
+            h = [x for x in self._name_history() if x.strip().lower() != nn.lower()]
+            _save([nn] + h)          # naya naam sabse upar
+            search.setText("")       # taaki naya dikh jaye
+
         row = QtWidgets.QHBoxLayout()
-        for t, fn in ((self.L("🗑 Hatao", "🗑 Remove"), _remove_sel),
+        for t, fn in ((self.L("➕ Jodo", "➕ Add"), _add_new),
+                      (self.L("🗑 Hatao", "🗑 Remove"), _remove_sel),
                       (self.L("✏ Badlo", "✏ Edit"), _edit_sel),
                       (self.L("Sab hatao", "Clear all"), _clear_all)):
             b = QtWidgets.QPushButton(t); b.clicked.connect(fn); row.addWidget(b)
