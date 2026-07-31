@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "260"
+VERSION = "261"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9432,31 +9432,41 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
         try:
             wv = self._an_wv
-            # (v260) 2-column TABLE (label | value) — striped rows, value bold+
-            # right-align. Sidebar me saaf/attractive dikhta hai, kuch katata nahi.
+            # (v261) 3-column TABLE — col1: analytics ka naam, col2: World Total,
+            # col3: Aaj (Today) ka total. Har metric ki dono value ek saath.
+            # rows = (icon, label, total_key, today_key, icon_colour)
             rows = [
-                ("🖨", self.L("Total", "Total"),      wv("total"),   "#4F46E5"),
-                ("📅", self.L("Aaj", "Today"),        wv("today"),   "#0D9488"),
-                ("📥", self.L("Import", "Import"),     wv("imports"), "#EA580C"),
-                ("🖨", "Print",                        wv("prints"),  "#2563EB"),
-                ("🟢", "WhatsApp",                     wv("whatsapps"), "#16A34A"),
-                ("✏", "Rename",                        wv("renames"), "#9333EA"),
-                ("📱", self.L("Phone", "Phone"),       wv("phones"),  "#DB2777"),
+                ("🖨", self.L("Scan", "Scan"),    "total",     "today",           "#4F46E5"),
+                ("📥", self.L("Import", "Import"), "imports",   "imports_today",   "#EA580C"),
+                ("🖨", "Print",                    "prints",    "prints_today",    "#2563EB"),
+                ("🟢", "WhatsApp",                 "whatsapps", "whatsapps_today", "#16A34A"),
+                ("✏", "Rename",                    "renames",   "renames_today",   "#9333EA"),
+                ("📱", self.L("Phone", "Phone"),   "phones",    "phones_today",    "#DB2777"),
             ]
             h = ['<table width="100%" cellspacing="0" cellpadding="3" '
                  'style="font-size:10.5px;">']
-            h.append('<tr><td colspan="2" style="padding:1px 3px 4px;">'
+            # heading
+            h.append('<tr><td colspan="3" style="padding:1px 3px 3px;">'
                      '<b style="color:#4338CA;font-size:11.5px;">🌍 %s</b></td></tr>'
                      % self.L("Duniya", "World"))
-            for i, (ic, lab, val, col) in enumerate(rows):
+            # column headers (Name | World | Today)
+            h.append(
+                '<tr bgcolor="#4F46E5">'
+                '<td style="color:#FFFFFF;"><b>%s</b></td>'
+                '<td align="right" style="color:#FFFFFF;"><b>%s</b></td>'
+                '<td align="right" style="color:#FFFFFF;"><b>%s</b></td>'
+                '</tr>' % (self.L("Analytics", "Analytics"),
+                          self.L("World", "World"),
+                          self.L("Aaj", "Today")))
+            for i, (ic, lab, tkey, dkey, col) in enumerate(rows):
                 bg = "#F3F4FB" if (i % 2 == 0) else "#FFFFFF"
                 h.append(
                     '<tr>'
                     '<td bgcolor="%s" style="color:#4B5563;">'
                     '<span style="color:%s;">%s</span> %s</td>'
-                    '<td bgcolor="%s" align="right">'
-                    '<b style="color:#111827;">%s</b></td>'
-                    '</tr>' % (bg, col, ic, lab, bg, val))
+                    '<td bgcolor="%s" align="right"><b style="color:#111827;">%s</b></td>'
+                    '<td bgcolor="%s" align="right" style="color:#0D9488;"><b>%s</b></td>'
+                    '</tr>' % (bg, col, ic, lab, bg, wv(tkey), bg, wv(dkey)))
             h.append('</table>')
             lbl.setText("".join(h))
         except Exception:
