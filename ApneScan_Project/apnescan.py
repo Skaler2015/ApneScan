@@ -42,7 +42,7 @@ from apnescan_lib.search_engine import _folder_search_score
 from apnescan_lib.imaging import (
     is_blank_page, whiten_dark_background, autocrop, deskew, auto_enhance,
     denoise, apply_enhance_mode, clean_edges, split_two_pages, flatten_background,
-    naps2_clean, trim_dark_borders, trim_scanner_backing, whiten_outside_paper,
+    naps2_clean, naps2_levels, trim_dark_borders, trim_scanner_backing, whiten_outside_paper,
     adaptive_bw, dewarp_page, smart_jpeg_quality, has_real_colour,
     flatten_photo_shadows, clean_photo, detect_content_boxes, colorfulness,
     restore_photo, save_image_keep_ext, apply_watermark,
@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "243"
+VERSION = "244"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1004,13 +1004,16 @@ DEFAULT_OPTIONS = {
     # Uski jagah auto_vivid (neeche) NAPS2-WIA jaisa saaf+chatak look deta hai
     # bina rang bigade. flatten sirf pure text-photocopy ke liye optional raha.
     "auto_flatten": False,
-    # (v237) NAPS2-FAITHFUL: NAPS2 image par KUCH nahi karta (source-verified) —
-    # koi contrast/white-balance/whiten nahi. Isliye ye dono ab DEFAULT OFF:
-    #  - auto_vivid (naps2_clean): faint text (address-patti) ko safed kar deta
-    #    tha; ab off. Feeke eSCL ko chatak karna ho to Settings se ON.
-    #  - auto_whiten_backing: narrow sheet par kaali ADF-backing hataata hai, par
-    #    kinare ki halki line bhi uda sakta hai; ab off (zaroorat par ON).
-    "auto_vivid": False,
+    # (v244) auto_vivid ab naps2_levels chalata hai — eSCL ka gray-maila scan ->
+    # NAPS2 (WIA-driver) jaisa CLEAN-WHITE bg + DEEP-BLACK text. white-point
+    # levels stretch (per-channel same LUT): faint line nahi udti, rangeen
+    # header/mohar nahi dhulte, photo/x-ray par no-op. DEFAULT ON (user ki
+    # NAPS2-tulna me eSCL raw grayish tha; ye use barabar laata hai). Raw chahiye
+    # to OFF. (Purana naps2_clean/autocontrast wala tarika hata diya — wahi line
+    # uda raha tha.)
+    "auto_vivid": True,
+    # auto_whiten_backing: narrow sheet par kaali ADF-backing hataata hai, par
+    # kinare ki halki line bhi uda sakta hai; DEFAULT OFF (backing_mode se hota hai).
     "auto_whiten_backing": False,
     # (v238) choti sheet ke side/niche dikhne wali dark ADF-backing ko CROP
     # karke hatao (paper ke kinare tak). whiten se behtar — kinare ki halki
@@ -2794,22 +2797,23 @@ class ScanWorker(QtCore.QThread):
                     # sakta hai (auto_flatten).
                     if self.opts.get("auto_flatten", False):
                         img = flatten_background(img)
-                    # (v233) NAPS2-MATCH: SIRF eSCL ke KACCHE/feeke scan par ->
-                    # background WHITE + contrast + halki saturation (NAPS2 ke
-                    # HP-WIA-driver jaisa saaf/chatak). WIA/TWAIN/NAPS2-engine me
-                    # scanner-DRIVER khud enhance karta hai (bilkul NAPS2 jaisa),
-                    # isliye wahan naps2_clean SKIP — warna DOUBLE-process ho jaye.
-                    # Sirf colour/gray par (B&W apna adaptive threshold lagata hai),
-                    # aur tab nahi jab user ne khud koi enhance chuna ho.
+                    # (v244) NAPS2-MATCH: SIRF eSCL ke gray-maile/feeke scan par ->
+                    # naps2_levels: background CLEAN-WHITE + text DEEP-BLACK (NAPS2
+                    # ke HP-WIA-driver jaisa). white-point levels stretch — faint
+                    # line nahi udti, rangeen header/mohar nahi dhulte (test-verified:
+                    # mean 224->240, p50 255, faint 0% washed). WIA/TWAIN/NAPS2-engine
+                    # me driver khud yahi karta hai -> wahan SKIP (double na ho).
+                    # Colour/gray par (B&W ka apna threshold), aur tab nahi jab user
+                    # ne khud koi enhance chuna ho.
                     _manual_enh = (self.opts.get("auto_flatten", False)
                                    or self.opts.get("quality_enhance")
                                    or self.opts.get("smart_scan")
                                    or (self.opts.get("enhance_mode", "original")
                                        not in ("original", "", None)))
-                    if (self.opts.get("auto_vivid", False)
+                    if (self.opts.get("auto_vivid", True)
                             and self.opts.get("scanner_method", "twain") == "escl"
                             and self.pixel_type != "bw" and not _manual_enh):
-                        img = naps2_clean(img)
+                        img = naps2_levels(img)
                     # ---- Smart Orientation = FIRST processing stage (spec) ----
                     # Har page ko sabse pehle seedha karo taaki aage ke sab stage
                     # (crop/deskew/enhance) + thumbnail/OCR/PDF sahi orientation par chalein.
@@ -3279,9 +3283,9 @@ class OptionsDialog(QtWidgets.QDialog):
         form.addRow(chkrow(self.chk_deskew, 'हिन्दी: चालू करने पर: टेढ़ा स्कैन हुआ पेज अपने-आप सीधा हो जाएगा।\nEnglish: ON: straightens a tilted/skewed page automatically.'))
         self.chk_enhance = QtWidgets.QCheckBox("Auto quality improvement (clean faded documents)")
         self.chk_enhance.setChecked(self.opts["quality_enhance"]); form.addRow(chkrow(self.chk_enhance, 'हिन्दी: चालू करने पर: फीके/हल्के document साफ़ और गहरे दिखेंगे।\nEnglish: ON: brightens & sharpens faded documents.'))
-        self.chk_vivid = QtWidgets.QCheckBox("Vivid boost for faded eSCL scans (OFF = raw, exactly like NAPS2)")
-        self.chk_vivid.setChecked(bool(self.opts.get("auto_vivid", False)))
-        form.addRow(chkrow(self.chk_vivid, 'हिन्दी: DEFAULT बंद (NAPS2 जैसा faithful — scan ज्यों-का-त्यों)। सिर्फ़ तभी चालू करें जब eSCL का scan फीका लगे — तब background सफ़ेद + रंग चटख होते हैं। ⚠ चालू करने पर कभी-कभी बहुत हल्की line (जैसे नीचे की address-पट्टी) सफ़ेद हो सकती है। WIA पर ज़रूरत नहीं।\nEnglish: OFF by default (NAPS2-faithful — scan kept as-is). Turn ON only if an eSCL scan looks flat/faded — it whitens the background and makes colours pop. ⚠ When ON it can occasionally wash out a very faint line (e.g. the bottom address strip). Not needed on WIA.'))
+        self.chk_vivid = QtWidgets.QCheckBox("Clean white background like NAPS2 — for eSCL scans (Recommended)")
+        self.chk_vivid.setChecked(bool(self.opts.get("auto_vivid", True)))
+        form.addRow(chkrow(self.chk_vivid, 'हिन्दी: DEFAULT चालू। eSCL का gray/मैला scan अपने-आप NAPS2 (WIA-driver) जैसा — background साफ़ सफ़ेद + text गहरा काला। white-point levels से (autocontrast नहीं), इसलिए हल्की line (address-पट्टी) नहीं उड़ती, रंगीन header/मोहर नहीं धुलते, Photo/X-ray अछूते। WIA पर अपने-आप बंद (driver खुद करता है)।\nEnglish: ON by default. Turns a grey/dim eSCL scan into a clean NAPS2-like page — white background, deep-black text — via a gentle white-point levels stretch (not autocontrast), so faint lines are NOT washed and coloured headers/stamps stay intact. Photos/X-rays untouched. Auto-skipped on WIA (the driver already does this).'))
         self.chk_trim = QtWidgets.QCheckBox("Trim dark scanner backing around the sheet (Recommended)")
         self.chk_trim.setChecked(bool(self.opts.get("auto_trim_backing", True)))
         form.addRow(chkrow(self.chk_trim, 'हिन्दी: DEFAULT चालू। छोटी/सँकरी sheet scan करने पर उसके side/नीचे दिखने वाली काली-gray ADF-backing को अपने-आप CROP करके हटाता है (page अपने असली किनारे तक)। whiten से बेहतर — किनारे की हल्की line नहीं उड़ती। भरे/normal page पर कुछ नहीं करता।\nEnglish: ON by default. Auto-crops the dark/gray scanner backing that shows on the side/bottom of a small/narrow sheet, down to the real paper edge. Better than whitening — faint edge lines are preserved. No-op on full/normal pages.'))
@@ -7548,6 +7552,16 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if not self._opts.get("_trim_backing_v238"):
             self._opts["_trim_backing_v238"] = True
             self._opts["auto_trim_backing"] = True
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+        # (v244) auto_vivid ab SAFE naps2_levels chalata hai (v237 wala autocontrast
+        # nahi jo line uda raha tha) — eSCL ka gray scan NAPS2 jaisa clean-white.
+        # v237 ne ise OFF kar diya tha; ek baar wapas ON.
+        if not self._opts.get("_naps2_levels_v244"):
+            self._opts["_naps2_levels_v244"] = True
+            self._opts["auto_vivid"] = True
             try:
                 self._save_opts()
             except Exception:

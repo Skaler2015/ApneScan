@@ -686,6 +686,46 @@ def naps2_clean(img):
         return img
 
 
+def naps2_levels(img):
+    """NAPS2 (WIA-driver) jaisa CLEAN-WHITE background + DEEP-BLACK text — gray-
+    maila eSCL scan ko theek karo, BINA faint line udaye aur BINA rang bigade.
+
+    Tareeka = white-point LEVELS stretch (per-channel SAME LUT):
+      - paper ka asli background-value (bright pixels ka peak) khud naapo,
+      - use SAFED (255) tak khisko, halka black-point (~24) se text gehra,
+        halki gamma (0.94).
+    ImageOps.autocontrast (per-channel CLIP) se ALAG — isliye:
+      * rangeen header/mohar (gulabi/laal) sirf halke-chatak hote hain, DHULTE
+        nahi (same LUT hue surakshit rakhta hai),
+      * bahut halki line (address-patti) bhi safed nahi hoti (clip nahi hai).
+    Photo / X-ray (kam bright pixel) par apne aap NO-OP."""
+    try:
+        if not HAS_NUMPY:
+            return img
+        L = np.asarray(img.convert("L"), dtype=np.float32)
+        # Document-guard: kaafi 'paper' (bright) hona chahiye; warna photo/X-ray.
+        if float((L > 170).mean()) < 0.35:
+            return img
+        bright = L[L > 170]
+        if bright.size < L.size * 0.20:
+            return img
+        hist, _ = np.histogram(bright, bins=np.arange(170, 257))
+        peak = 170 + int(np.argmax(hist))         # paper background ka asli value
+        wp_in = max(205.0, peak * 0.95)           # isse upar sab -> safed
+        black = 24.0
+        gamma = 0.94
+        lut = []
+        for i in range(256):
+            v = (i - black) / max(1.0, (wp_in - black))
+            v = min(1.0, max(0.0, v)) ** gamma
+            lut.append(min(255, max(0, int(round(v * 255.0)))))
+        if img.mode == "L":
+            return img.point(lut)
+        return img.convert("RGB").point(lut * 3)
+    except Exception:
+        return img
+
+
 def auto_brightness(img):
     """F7: normalise exposure so pages are neither washed-out nor too dark.
     Nudges brightness toward a bright-but-not-blown target using the grey mean;
