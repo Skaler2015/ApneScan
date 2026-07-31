@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "265"
+VERSION = "266"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9470,19 +9470,20 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     return " ▼" if sdesc else " ▲"
                 return ""
 
-            # (v264) REDESIGN — chhoti font + slim colour-dot (emoji ki jagah,
-            # jisse label wrap nahi hota) + saaf striped rows. Compact + attractive.
-            h = ['<table width="100%" cellspacing="0" cellpadding="2" '
-                 'style="font-size:9.5px;">']
+            # (v264) REDESIGN — chhoti font + slim colour-dot (emoji ki jagah).
+            # (v266) font aur chhoti (8px) + padding kam => teeno column ek saath
+            # poore dikhein, kuch cut na ho. white-space:nowrap => kabhi wrap nahi.
+            h = ['<table width="100%" cellspacing="0" cellpadding="1" '
+                 'style="font-size:8px;">']
             # heading
-            h.append('<tr><td colspan="3" style="padding:0px 2px 3px;">'
-                     '<b style="color:#4338CA;font-size:11px;">🌍 %s</b></td></tr>'
+            h.append('<tr><td colspan="3" style="padding:0px 2px 2px;">'
+                     '<b style="color:#4338CA;font-size:9.5px;">🌍 %s</b></td></tr>'
                      % self.L("Duniya", "World"))
             # column headers (Name | World | Today) — clickable links.
             # white-space:nowrap => koi bhi text/number kabhi wrap nahi hoga.
             def _hcell(col, text, align):
                 return ('<td align="%s" bgcolor="#4F46E5" '
-                        'style="color:#FFFFFF;font-size:9px;padding:3px 4px;'
+                        'style="color:#FFFFFF;font-size:7.5px;padding:2px 3px;'
                         'white-space:nowrap;">'
                         '<a href="wsort:%s" style="color:#FFFFFF;text-decoration:none;">'
                         '<b>%s%s</b></a></td>'
@@ -9500,12 +9501,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 vd = wv(dkey).replace(",", "&#8239;")
                 h.append(
                     '<tr>'
-                    '<td bgcolor="%s" style="color:#374151;padding:3px 4px;'
+                    '<td bgcolor="%s" style="color:#374151;padding:2px 3px;'
                     'white-space:nowrap;">'
-                    '<span style="color:%s;font-size:11px;">&#9679;</span>&nbsp;%s</td>'
-                    '<td bgcolor="%s" align="right" style="padding:3px 4px;'
+                    '<span style="color:%s;font-size:9px;">&#9679;</span>&nbsp;%s</td>'
+                    '<td bgcolor="%s" align="right" style="padding:2px 3px;'
                     'white-space:nowrap;"><b style="color:#111827;">%s</b></td>'
-                    '<td bgcolor="%s" align="right" style="padding:3px 4px;'
+                    '<td bgcolor="%s" align="right" style="padding:2px 3px;'
                     'white-space:nowrap;"><b style="color:#0D9488;">%s</b></td>'
                     '</tr>' % (bg, col, lab, bg, vt, bg, vd))
             h.append('</table>')
@@ -14835,7 +14836,7 @@ if the toggle is ticked).</p>
         # taaza karta hai).
         _worldf = QtWidgets.QFrame()
         _worldf.setStyleSheet("background:#FFFFFF;border:1px solid #E0E7FF;border-radius:11px;")
-        _wvl = QtWidgets.QVBoxLayout(_worldf); _wvl.setContentsMargins(10, 7, 10, 7); _wvl.setSpacing(2)
+        _wvl = QtWidgets.QVBoxLayout(_worldf); _wvl.setContentsMargins(5, 6, 5, 6); _wvl.setSpacing(2)
         self._world_lbl = QtWidgets.QLabel()
         self._world_lbl.setTextFormat(QtCore.Qt.RichText)
         self._world_lbl.setStyleSheet("font-size:10.5px;color:#4338CA;")
