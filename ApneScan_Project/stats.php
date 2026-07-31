@@ -326,6 +326,10 @@ function compute_stats($d, $client) {
         'peak'=>intval(isset($d['peakDay'][$today])?$d['peakDay'][$today]:0),
         'peakAll'=>intval($d['peakAll']),'bestDay'=>$bestDay,'hour'=>$hourCount,
         'imports'=>intval($d['imports']),'prints'=>intval($d['prints']),
+        // (v257) app ke sidebar/box me dikhane ke liye — worldwide feature counts
+        'renames'=>intval(isset($d['features']['rename'])?$d['features']['rename']:0),
+        'whatsapps'=>intval(isset($d['features']['whatsapp'])?$d['features']['whatsapp']:0),
+        'phones'=>intval(isset($d['features']['phonescan'])?$d['features']['phonescan']:0),
         'versions'=>$versions,'countries'=>$countries,'methods'=>$methods,
         'top'=>$top,'topNamed'=>$topNamed,'topscans'=>(count($top)?$top[0]:0),
         'rank'=>$rank,'myscans'=>$mine,
