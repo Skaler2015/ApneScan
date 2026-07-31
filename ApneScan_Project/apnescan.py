@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "264"
+VERSION = "265"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9478,10 +9478,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
             h.append('<tr><td colspan="3" style="padding:0px 2px 3px;">'
                      '<b style="color:#4338CA;font-size:11px;">🌍 %s</b></td></tr>'
                      % self.L("Duniya", "World"))
-            # column headers (Name | World | Today) — clickable links
+            # column headers (Name | World | Today) — clickable links.
+            # white-space:nowrap => koi bhi text/number kabhi wrap nahi hoga.
             def _hcell(col, text, align):
                 return ('<td align="%s" bgcolor="#4F46E5" '
-                        'style="color:#FFFFFF;font-size:9px;padding:3px 4px;">'
+                        'style="color:#FFFFFF;font-size:9px;padding:3px 4px;'
+                        'white-space:nowrap;">'
                         '<a href="wsort:%s" style="color:#FFFFFF;text-decoration:none;">'
                         '<b>%s%s</b></a></td>'
                         % (align, col, text, _arw(col)))
@@ -9493,15 +9495,19 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 + '</tr>')
             for i, (ic, lab, tkey, dkey, col) in enumerate(rows):
                 bg = "#F1F3FC" if (i % 2 == 0) else "#FFFFFF"
+                # value me comma ki jagah non-breaking rakho — number kabhi na tute
+                vt = wv(tkey).replace(",", "&#8239;")
+                vd = wv(dkey).replace(",", "&#8239;")
                 h.append(
                     '<tr>'
-                    '<td bgcolor="%s" style="color:#374151;padding:3px 4px;">'
+                    '<td bgcolor="%s" style="color:#374151;padding:3px 4px;'
+                    'white-space:nowrap;">'
                     '<span style="color:%s;font-size:11px;">&#9679;</span>&nbsp;%s</td>'
-                    '<td bgcolor="%s" align="right" style="padding:3px 4px;">'
-                    '<b style="color:#111827;">%s</b></td>'
-                    '<td bgcolor="%s" align="right" style="padding:3px 4px;">'
-                    '<b style="color:#0D9488;">%s</b></td>'
-                    '</tr>' % (bg, col, lab, bg, wv(tkey), bg, wv(dkey)))
+                    '<td bgcolor="%s" align="right" style="padding:3px 4px;'
+                    'white-space:nowrap;"><b style="color:#111827;">%s</b></td>'
+                    '<td bgcolor="%s" align="right" style="padding:3px 4px;'
+                    'white-space:nowrap;"><b style="color:#0D9488;">%s</b></td>'
+                    '</tr>' % (bg, col, lab, bg, vt, bg, vd))
             h.append('</table>')
             lbl.setText("".join(h))
         except Exception:
