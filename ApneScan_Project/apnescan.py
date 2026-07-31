@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "250"
+VERSION = "251"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11235,6 +11235,20 @@ class ScannerWindow(QtWidgets.QMainWindow):
         tb("↻", self.L("Chune page dayen ghumao", "Rotate selected right"), self.rotate_right)
 
         h.addWidget(self._vsep())
+        # ---- (v251) ONE-CLICK AI Auto (everything) on selected pages ----
+        _aib = tb("🤖", self.L(
+            "AI Auto (sab kuch) — chune pages par EK CLICK me: seedha + crop + "
+            "rang wapsi + enhance + de-noise. (Koi na chuna ho to abhi wala page.)",
+            "AI Auto (everything) — ONE CLICK on selected pages: deskew + crop + "
+            "colour restore + enhance + de-noise. (Uses current page if none selected.)"),
+            self._ai_auto_selected)
+        try:
+            _aib.setStyleSheet(_aib.styleSheet() +
+                "QToolButton{color:#7C3AED;font-weight:800;}")
+        except Exception:
+            pass
+
+        h.addWidget(self._vsep())
         # ---- selection helpers ----
         tb("✅", self.L("Sab chuno (Ctrl+A)", "Select all (Ctrl+A)"), self.list.selectAll)
         tb("🔁", self.L("Ulta chunav (jo chune wo chhodo, baaki chuno)",
@@ -14922,6 +14936,8 @@ if the toggle is ticked).</p>
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+V"), self, self._paste_from_clipboard)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+C"), self, self._copy_pages_to_clipboard)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Y"), self, self._hist_redo_do)   # redo (alt)
+        # (v251) Ctrl+Shift+A = chune pages par AI Auto (everything) ek click
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+A"), self, self._ai_auto_selected)
         # Tesseract check ko startup par BACKGROUND me warm kar do (ye tesseract.exe
         # subprocess chalata hai ~1-2s) — taaki baad me koi bhi kaam (rename, scan)
         # is check par UI thread par ATKE nahi.
@@ -21185,6 +21201,8 @@ if the toggle is ticked).</p>
         em.addAction("\ud83d\udcd0 " + L("Seedha (straighten)", "Straighten"), self.deskew_current)
         em.addAction("\ud83d\udcd6 " + L("Book page seedha (flatten)", "Book flatten"), self.dewarp_current)
         em.addAction("\u2728 " + L("Auto-fix (saaf+seedha)", "Auto-fix"), self._autofix_current)
+        em.addAction("\U0001f916 " + L("AI Auto (sab kuch) \u2014 chune pages",
+                                       "AI Auto (everything) \u2014 selected"), self._ai_auto_selected)
         em.addAction("\u2b1c " + L("Whiten", "Whiten"), self.whiten_current_page)
         em.addAction("\u2728 " + L("Enhance", "Enhance"), self.enhance_current_page)
         em.addSeparator()
@@ -21257,6 +21275,54 @@ if the toggle is ticked).</p>
                 pass
             return im.convert("RGB")
         self._edit_current_bg(fn, self.L("Auto-fix ho raha hai\u2026", "Auto-fixing\u2026"))
+
+    def _ai_auto_selected(self):
+        """(v251) Thumbnail area me CHUNE (selected) pages par AI Auto (everything)
+        EK CLICK me \u2014 editor khole bina. Kuch na chuna ho to abhi wala page.
+        Background me chalta hai (UI nahi rukti), undo/redo bhi surakshit."""
+        items = list(self.list.selectedItems())
+        if not items and self.list.currentItem():
+            items = [self.list.currentItem()]
+        paths = [it.data(QtCore.Qt.UserRole) for it in items
+                 if it and it.data(QtCore.Qt.UserRole)]
+        if not paths:
+            self._warn(self.L("Pehle koi page chuno (thumbnail par click).",
+                              "Select a page first (click a thumbnail).")); return
+        self._pv_backup(paths)
+        _hist_before = self._hist_snapshot(paths)
+
+        def job():
+            for p in paths:
+                try:
+                    with Image.open(p) as im:
+                        ai_auto_all(im.convert("RGB")).convert("RGB").save(p, "PNG")
+                except Exception:
+                    pass
+            return True
+
+        def on_done(res):
+            for it in items:
+                try:
+                    self._refresh_item(it)
+                except Exception:
+                    pass
+            try:
+                self._pv_build_filmstrip(); self._update_preview_panel()
+            except Exception:
+                pass
+            self._dirty = True
+            try:
+                self._hist_record({"type": "edit", "before": _hist_before,
+                                   "after": self._hist_snapshot(paths)})
+            except Exception:
+                pass
+            try:
+                self.status.showMessage(self.L("\ud83e\udd16 %d page par AI Auto ho gaya",
+                                               "\ud83e\udd16 AI Auto applied to %d page(s)") % len(paths), 5000)
+            except Exception:
+                pass
+        self._run_bg(job, on_done, self.L("\ud83e\udd16 AI Auto ho raha hai\u2026 (%d page)",
+                                          "\ud83e\udd16 AI Auto\u2026 (%d pages)") % len(paths))
 
     def _move_to_top(self):
         it = self.list.currentItem()
