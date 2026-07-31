@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "252"
+VERSION = "253"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -22230,39 +22230,129 @@ if the toggle is ticked).</p>
             pass
 
     def _ask_name(self, title, label, text=""):
-        """Naam poochho + pehle likhe naamon ka dropdown sujhav. Jo naam abhi
-        type ho raha hai usse milte-julte purane naam dikhte hain. Naya naam
-        yaad rakh liya jaata hai (per-user, sirf is PC par). Returns (name, ok)."""
-        dlg = QtWidgets.QInputDialog(self)
-        dlg.setInputMode(QtWidgets.QInputDialog.TextInput)
+        """Naam poochho + pehle likhe naamon ka dropdown sujhav. '⚙ Manage names'
+        se un sujhav-naamon ko dekho/badlo/hatao. Naya naam yaad rehta hai
+        (per-user, sirf is PC par). Returns (name, ok)."""
+        dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(title)
-        dlg.setLabelText(label)
-        dlg.setTextValue(text or "")
-        try:
-            dlg.resize(460, dlg.height())
-        except Exception:
-            pass
-        try:
-            le = dlg.findChild(QtWidgets.QLineEdit)
+        dlg.resize(480, 150)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel(label))
+        le = QtWidgets.QLineEdit(text or "")
+        v.addWidget(le)
+
+        def _apply_completer():
             hist = self._name_history()
-            if le is not None and hist:
+            if hist:
                 comp = QtWidgets.QCompleter(hist, le)
                 comp.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
                 comp.setCompletionMode(QtWidgets.QCompleter.PopupCompletion)
                 comp.setMaxVisibleItems(12)
                 try:
-                    comp.setFilterMode(QtCore.Qt.MatchContains)   # kahin bhi milta naam
+                    comp.setFilterMode(QtCore.Qt.MatchContains)
                 except Exception:
-                    pass                                          # purane Qt: prefix match
+                    pass
                 le.setCompleter(comp)
-        except Exception:
-            pass
+            else:
+                le.setCompleter(None)
+        _apply_completer()
+
+        row = QtWidgets.QHBoxLayout()
+        bmanage = QtWidgets.QPushButton("⚙ " + self.L("Naam manage", "Manage names"))
+        bmanage.setToolTip(self.L("Sujhav me dikhne wale naam dekho/badlo/hatao",
+                                  "View / edit / remove the suggested names"))
+        bmanage.clicked.connect(lambda: (self._manage_name_history(), _apply_completer()))
+        row.addWidget(bmanage)
+        row.addStretch(1)
+        bb = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        row.addWidget(bb)
+        v.addLayout(row)
+        le.setFocus(); le.selectAll()
+        le.returnPressed.connect(dlg.accept)
+
         ok = (dlg.exec_() == QtWidgets.QDialog.Accepted)
-        val = dlg.textValue()
+        val = le.text()
         if ok and val.strip():
             self._remember_name(val)
             self._an_event("rename")      # worldwide analytics: rename ki ginti
         return val, ok
+
+    def _manage_name_history(self):
+        """(v253) Rename ke SUGGESTION naam (name_history) ko manage karo —
+        dhoondo, badlo, hatao, ya sab saaf. Yahi naam '⚙ Manage names' se khulte."""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("Suggestion naam manage", "Manage suggested names"))
+        dlg.resize(430, 480)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel(self.L(
+            "Ye wahi naam hain jo Rename me sujhav aate hain.\nChuno aur hatao/badlo.",
+            "These are the names suggested when renaming.\nSelect to remove / edit.")))
+        search = QtWidgets.QLineEdit(); search.setPlaceholderText("🔍 " + self.L("dhoondo", "search"))
+        v.addWidget(search)
+        lw = QtWidgets.QListWidget()
+        lw.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        v.addWidget(lw, 1)
+
+        def _fill():
+            lw.clear()
+            q = search.text().strip().lower()
+            for nm in self._name_history():
+                if q and q not in nm.lower():
+                    continue
+                lw.addItem(nm)
+        _fill()
+        search.textChanged.connect(_fill)
+        cnt = QtWidgets.QLabel(""); cnt.setStyleSheet("color:#6B7280;font-size:11px;")
+        v.addWidget(cnt)
+
+        def _save(newlist):
+            self._config["name_history"] = newlist
+            try:
+                save_config(self._config)
+            except Exception:
+                pass
+            _fill()
+
+        def _remove_sel():
+            names = {i.text() for i in lw.selectedItems()}
+            if not names:
+                return
+            _save([n for n in self._name_history() if n not in names])
+
+        def _edit_sel():
+            it = lw.currentItem()
+            if not it:
+                return
+            nn, ok = QtWidgets.QInputDialog.getText(
+                dlg, self.L("Naam badlo", "Edit name"),
+                self.L("Naya naam:", "New name:"), text=it.text())
+            nn = (nn or "").strip()
+            if ok and nn:
+                _save([nn if n == it.text() else n for n in self._name_history()])
+
+        def _clear_all():
+            if QtWidgets.QMessageBox.question(
+                    dlg, self.L("Sab hatao", "Clear all"),
+                    self.L("Saare suggestion naam hata dein?",
+                           "Remove ALL suggested names?"),
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes:
+                _save([])
+        lw.itemDoubleClicked.connect(lambda _i: _edit_sel())
+
+        row = QtWidgets.QHBoxLayout()
+        for t, fn in ((self.L("🗑 Hatao", "🗑 Remove"), _remove_sel),
+                      (self.L("✏ Badlo", "✏ Edit"), _edit_sel),
+                      (self.L("Sab hatao", "Clear all"), _clear_all)):
+            b = QtWidgets.QPushButton(t); b.clicked.connect(fn); row.addWidget(b)
+        row.addStretch(1)
+        bc = QtWidgets.QPushButton(self.L("Band", "Close")); bc.clicked.connect(dlg.accept)
+        row.addWidget(bc)
+        v.addLayout(row)
+        dlg.exec_()
 
     def rename_current_page(self):
         # If SEVERAL pages are selected, rename them ALL to the same name at once.
