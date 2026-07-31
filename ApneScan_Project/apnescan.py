@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "248"
+VERSION = "249"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1019,10 +1019,11 @@ DEFAULT_OPTIONS = {
     # karke hatao (paper ke kinare tak). whiten se behtar — kinare ki halki
     # line nahi udti. DEFAULT ON. Bhari/normal page par apne aap no-op.
     "auto_trim_backing": True,
-    # (v240) backing ko kaise theek karein: "white" = gray/kaali backing ko
-    # SAFED karo (page size same; DEFAULT — user ki maang), "crop" = paper tak
-    # kaat do, "off" = kuch mat karo.
-    "backing_mode": "white",
+    # (v249) backing ko kaise theek karein: "crop" = paper ke asli kinare tak
+    # KAAT do (DEFAULT — side/niche ka gray backing AUR blank space dono hate,
+    # page tight), "white" = backing ko sirf SAFED karo (page size same rahe),
+    # "off" = kuch mat karo. trim_scanner_backing gray+dark dono kaat leta hai.
+    "backing_mode": "crop",
     "clean_edges": False,        # scan ki kaali border / kinare ke chhed saaf karo
     "split_two_page": False,     # ek glass par do page → apne aap alag karo
     "searchable_pdf": False,     # har save par PDF ke andar OCR text (Ctrl+F se dhoondo)
@@ -2783,7 +2784,7 @@ class ScanWorker(QtCore.QThread):
                     # (jo paper ke ANDAR hai) NAHI udti — purana pixel-whiten use
                     # bhi uda deta tha. Bhari/normal page par no-op.
                     #   backing_mode: "white" (default) / "crop" / "off"
-                    _bm = self.opts.get("backing_mode", "white")
+                    _bm = self.opts.get("backing_mode", "crop")
                     if self.opts.get("auto_trim_backing", True) and _bm != "off":
                         if _bm == "crop":
                             img = trim_scanner_backing(img)      # kaat kar hatao
@@ -7571,6 +7572,16 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if not self._opts.get("_naps2_levels_all_v245"):
             self._opts["_naps2_levels_all_v245"] = True
             self._opts["auto_vivid"] = True
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+        # (v249) backing ab CROP (pehle "white" tha -> niche/side blank space reh
+        # jaata tha). trim ab gray+dark dono kaat leta hai, page tight aata hai.
+        if not self._opts.get("_backing_crop_v249"):
+            self._opts["_backing_crop_v249"] = True
+            self._opts["backing_mode"] = "crop"
+            self._opts["auto_trim_backing"] = True
             try:
                 self._save_opts()
             except Exception:
