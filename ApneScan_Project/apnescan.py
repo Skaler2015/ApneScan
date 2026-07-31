@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "251"
+VERSION = "252"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -14155,18 +14155,20 @@ if the toggle is ticked).</p>
         def _sortbtn(field, label):
             b = QtWidgets.QPushButton(label)
             b.setCheckable(True); b.setCursor(QtCore.Qt.PointingHandCursor)
+            # (v252) poori chaudai me barabar faile — aage koi blank space nahi
+            b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+            b.setMinimumHeight(28)
             b.setStyleSheet(
                 "QPushButton{background:#fff;border:1px solid #E5E7EB;border-radius:12px;"
-                "padding:4px 9px;font-size:10px;font-weight:600;color:#374151;}"
+                "padding:6px 6px;font-size:11px;font-weight:700;color:#374151;}"
                 "QPushButton:checked{background:#0D9488;border-color:#0D9488;color:#fff;}"
                 "QPushButton:hover{border-color:#93C5FD;}")
             b.clicked.connect(lambda _c=False, f=field: self._sort_toggle(f))
             self._sort_btns[field] = (b, label)
-            _sortrow.addWidget(b)
+            _sortrow.addWidget(b, 1)      # stretch=1 -> teeno barabar space lete hain
         _sortbtn("name", self.L("Naam", "Name"))
         _sortbtn("date", self.L("Date", "Date"))
         _sortbtn("size", "Size")
-        _sortrow.addStretch(1)
         fp.addLayout(_sortrow)
         self._refresh_sort_btns()      # chalu sort ka teer/highlight dikhao
         # ⬅ Peeche · ⭐ Favourites (dropdown) · ⇅ Sort
@@ -14209,8 +14211,9 @@ if the toggle is ticked).</p>
         # (v190) ⬅ Back button bhi hata diya (user request) — upar jaane ke
         # liye breadcrumb / double-click hi kaafi hai; object zinda hai
         self.btn_panel_back.hide()
-        # (v191) Sort ab UPAR search ke bagal me (📄 ki jagah) — fav_bar khaali
-        self._files_srow.addWidget(self.btn_panel_sort)
+        # (v252) purana ⇅ sort-dropdown HATA diya — ab neeche Naam/Date/Size ke
+        # bade buttons hain. (Object zinda rehta hai taaki koi reference na toote.)
+        self.btn_panel_sort.hide()
         fp.addLayout(self.fav_bar)
         # ---- Filter · Recent · Grid (quick controls) ----
         _qrow = QtWidgets.QHBoxLayout(); _qrow.setSpacing(4)
