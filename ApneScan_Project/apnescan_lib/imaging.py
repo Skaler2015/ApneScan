@@ -719,15 +719,18 @@ def naps2_levels(img, black=22.0, gamma=0.94):
         paper_mask = L > 150
         if int(paper_mask.sum()) < L.size * 0.15:
             return img
+        # (v247) halka UNSHARP — chhape (printed) akshar + line crisp/tez, bina
+        # halo ya background-noise (threshold=3 se flat safed bg pe asar nahi).
+        _sharp = ImageFilter.UnsharpMask(radius=1.2, percent=80, threshold=3)
         if img.mode == "L":
             g = np.asarray(img.convert("L"), dtype=np.uint8)
-            return Image.fromarray(_lut_for(g[paper_mask])[g], "L")
+            return Image.fromarray(_lut_for(g[paper_mask])[g], "L").filter(_sharp)
         a = np.asarray(img.convert("RGB"))
         out = np.empty_like(a)
         for c in range(3):
             ch = a[:, :, c]
             out[:, :, c] = _lut_for(ch[paper_mask].astype(np.float32))[ch]
-        return Image.fromarray(out, "RGB")
+        return Image.fromarray(out, "RGB").filter(_sharp)
     except Exception:
         return img
 
