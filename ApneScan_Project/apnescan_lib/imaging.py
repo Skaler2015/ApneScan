@@ -686,42 +686,48 @@ def naps2_clean(img):
         return img
 
 
-def naps2_levels(img):
-    """NAPS2 (WIA-driver) jaisa CLEAN-WHITE background + DEEP-BLACK text — gray-
-    maila eSCL scan ko theek karo, BINA faint line udaye aur BINA rang bigade.
+def naps2_levels(img, black=22.0, gamma=0.94):
+    """NAPS2 (WIA-driver) jaisa CLEAN-WHITE background + DEEP-BLACK text — gray/
+    beige-maila scan ko theek karo, BINA faint line udaye aur BINA rang bigade.
 
-    Tareeka = white-point LEVELS stretch (per-channel SAME LUT):
-      - paper ka asli background-value (bright pixels ka peak) khud naapo,
-      - use SAFED (255) tak khisko, halka black-point (~24) se text gehra,
-        halki gamma (0.94).
-    ImageOps.autocontrast (per-channel CLIP) se ALAG — isliye:
-      * rangeen header/mohar (gulabi/laal) sirf halke-chatak hote hain, DHULTE
-        nahi (same LUT hue surakshit rakhta hai),
-      * bahut halki line (address-patti) bhi safed nahi hoti (clip nahi hai).
-    Photo / X-ray (kam bright pixel) par apne aap NO-OP."""
+    Tareeka = PER-CHANNEL white-point LEVELS (yani WHITE-BALANCE):
+      - har channel (R,G,B) ke bright-'paper' pixels ka asli value khud naapo,
+      - use SAFED (255) tak khisko (isliye peela/beige/neela tint NEUTRAL safed
+        ho jaata hai — NAPS2-driver bhi yahi karta hai),
+      - halka black-point + gamma se text DEEP-BLACK.
+    ImageOps.autocontrast (aggressive clip) se ALAG — isliye:
+      * rangeen header/mohar (gulabi/laal) DHULTE nahi (paper se calibrated LUT),
+      * bahut halki line (address-patti) safed nahi hoti.
+    Photo / X-ray (kam bright pixel) par apne aap NO-OP. Grayscale bhi handle."""
     try:
         if not HAS_NUMPY:
             return img
         L = np.asarray(img.convert("L"), dtype=np.float32)
         # Document-guard: kaafi 'paper' (bright) hona chahiye; warna photo/X-ray.
-        if float((L > 170).mean()) < 0.35:
+        if float((L > 175).mean()) < 0.30:
             return img
-        bright = L[L > 170]
-        if bright.size < L.size * 0.20:
+
+        def _lut_for(vals):
+            # 'vals' = us channel ke paper (bright) pixels; unka peak = white-point.
+            hist, _ = np.histogram(vals, bins=np.arange(150, 257))
+            peak = 150 + int(np.argmax(hist))
+            wp = max(200.0, peak * 0.985)
+            lut = ((np.clip((np.arange(256) - black) / max(1.0, wp - black), 0, 1))
+                   ** gamma) * 255.0
+            return np.clip(lut, 0, 255).astype(np.uint8)
+
+        paper_mask = L > 150
+        if int(paper_mask.sum()) < L.size * 0.15:
             return img
-        hist, _ = np.histogram(bright, bins=np.arange(170, 257))
-        peak = 170 + int(np.argmax(hist))         # paper background ka asli value
-        wp_in = max(205.0, peak * 0.95)           # isse upar sab -> safed
-        black = 24.0
-        gamma = 0.94
-        lut = []
-        for i in range(256):
-            v = (i - black) / max(1.0, (wp_in - black))
-            v = min(1.0, max(0.0, v)) ** gamma
-            lut.append(min(255, max(0, int(round(v * 255.0)))))
         if img.mode == "L":
-            return img.point(lut)
-        return img.convert("RGB").point(lut * 3)
+            g = np.asarray(img.convert("L"), dtype=np.uint8)
+            return Image.fromarray(_lut_for(g[paper_mask])[g], "L")
+        a = np.asarray(img.convert("RGB"))
+        out = np.empty_like(a)
+        for c in range(3):
+            ch = a[:, :, c]
+            out[:, :, c] = _lut_for(ch[paper_mask].astype(np.float32))[ch]
+        return Image.fromarray(out, "RGB")
     except Exception:
         return img
 
