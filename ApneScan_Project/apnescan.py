@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "262"
+VERSION = "263"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9448,6 +9448,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             # rows = (icon, label, total_key, today_key, icon_colour)
             rows = [
                 ("🖨", self.L("Scan", "Scan"),    "total",     "today",           "#4F46E5"),
+                ("💾", self.L("PDF Save", "PDF Save"), "pdfs",  "pdfs_today",      "#DC2626"),
                 ("📥", self.L("Import", "Import"), "imports",   "imports_today",   "#EA580C"),
                 ("🖨", "Print",                    "prints",    "prints_today",    "#2563EB"),
                 ("🟢", "WhatsApp",                 "whatsapps", "whatsapps_today", "#16A34A"),

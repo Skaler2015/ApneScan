@@ -330,12 +330,15 @@ function compute_stats($d, $client) {
         'renames'=>intval(isset($d['features']['rename'])?$d['features']['rename']:0),
         'whatsapps'=>intval(isset($d['features']['whatsapp'])?$d['features']['whatsapp']:0),
         'phones'=>intval(isset($d['features']['phonescan'])?$d['features']['phonescan']:0),
+        // (v262) PDF-save ki worldwide ginti (app 'save' feat bhejti hai)
+        'pdfs'=>intval(isset($d['features']['save'])?$d['features']['save']:0),
         // (v261) aaj (today) ke per-metric counts — 3-column world table ke liye
         'imports_today'=>intval(isset($d['featDaily'][$today]['import'])?$d['featDaily'][$today]['import']:0),
         'prints_today'=>intval(isset($d['featDaily'][$today]['print'])?$d['featDaily'][$today]['print']:0),
         'whatsapps_today'=>intval(isset($d['featDaily'][$today]['whatsapp'])?$d['featDaily'][$today]['whatsapp']:0),
         'renames_today'=>intval(isset($d['featDaily'][$today]['rename'])?$d['featDaily'][$today]['rename']:0),
         'phones_today'=>intval(isset($d['featDaily'][$today]['phonescan'])?$d['featDaily'][$today]['phonescan']:0),
+        'pdfs_today'=>intval(isset($d['featDaily'][$today]['save'])?$d['featDaily'][$today]['save']:0),
         'versions'=>$versions,'countries'=>$countries,'methods'=>$methods,
         'top'=>$top,'topNamed'=>$topNamed,'topscans'=>(count($top)?$top[0]:0),
         'rank'=>$rank,'myscans'=>$mine,
