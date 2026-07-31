@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "253"
+VERSION = "254"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -22257,6 +22257,17 @@ if the toggle is ticked).</p>
                 le.setCompleter(None)
         _apply_completer()
 
+        # (v254) AUTOSAVE toggle — ON hone par ye naam YAAD rehta hai (suggestion
+        # me judta + document ki shakl/text se seekha jaata taaki agli baar auto
+        # aaye). OFF karne par sirf naam LAGTA hai, kahin save/seekha nahi jaata.
+        # User ki pasand yaad rehti hai (rename_remember opt).
+        chk = QtWidgets.QCheckBox(self.L("💾 Ye naam yaad rakho (autosave — suggestion + auto-naam)",
+                                         "💾 Remember this name (autosave — suggestions + auto-naming)"))
+        chk.setChecked(bool(self._opts.get("rename_remember", True)))
+        chk.setToolTip(self.L("Band karne par: naam lagega par yaad/suggestion me nahi jayega.",
+                              "When off: the name is applied but not remembered/suggested."))
+        v.addWidget(chk)
+
         row = QtWidgets.QHBoxLayout()
         bmanage = QtWidgets.QPushButton("⚙ " + self.L("Naam manage", "Manage names"))
         bmanage.setToolTip(self.L("Sujhav me dikhne wale naam dekho/badlo/hatao",
@@ -22275,9 +22286,20 @@ if the toggle is ticked).</p>
 
         ok = (dlg.exec_() == QtWidgets.QDialog.Accepted)
         val = le.text()
+        remember = bool(chk.isChecked())
+        # user ki pasand (autosave on/off) yaad rakho
+        if self._opts.get("rename_remember", True) != remember:
+            self._opts["rename_remember"] = remember
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+        # caller (rename_current_page) isse padhkar seekhna/na-seekhna tay karta hai
+        self._rename_remember_last = remember
         if ok and val.strip():
-            self._remember_name(val)
-            self._an_event("rename")      # worldwide analytics: rename ki ginti
+            if remember:
+                self._remember_name(val)     # suggestions me tabhi jodo jab autosave ON
+            self._an_event("rename")         # worldwide analytics: rename ki ginti
         return val, ok
 
     def _manage_name_history(self):
@@ -22367,12 +22389,15 @@ if the toggle is ticked).</p>
             name = underscore_name(name)
             if not name:
                 return
+            _remember = getattr(self, "_rename_remember_last", True)   # (v254) autosave toggle
             for it in sel:
                 it.setData(TITLE_ROLE, name)
                 it.setText(name)
-                self._store_visual_name(it.data(QtCore.Qt.UserRole), name)   # har page ki shakl yaad
-            self._learn_name(sel[0].data(QtCore.Qt.UserRole), name)
-            self._ai_learn_page_rename(sel[0].data(QtCore.Qt.UserRole), name)   # AI memory (silent)
+                if _remember:
+                    self._store_visual_name(it.data(QtCore.Qt.UserRole), name)   # har page ki shakl yaad
+            if _remember:
+                self._learn_name(sel[0].data(QtCore.Qt.UserRole), name)
+                self._ai_learn_page_rename(sel[0].data(QtCore.Qt.UserRole), name)   # AI memory (silent)
             self.status.showMessage("Renamed %d pages to '%s'" % (len(sel), name), 4000)
             return
         it = self.list.currentItem() or (sel or [None])[0]
@@ -22397,14 +22422,15 @@ if the toggle is ticked).</p>
             return
         it.setData(TITLE_ROLE, name)
         it.setText(name)
-        # LEARN: remember this document's content -> this name, so next time a
-        # similar page is scanned it gets named automatically.
-        # (a) SHAKL se (design/rang/type) — OCR nahi chahiye, handwritten par bhi
-        self._store_visual_name(it.data(QtCore.Qt.UserRole), name)
-        # (b) TEXT se (OCR) — chhapa hua document ho to
-        self._learn_name(it.data(QtCore.Qt.UserRole), name)
-        # (c) AI Document Memory — agar yeh document pehchana gaya tha to naya naam seekho
-        self._ai_learn_page_rename(it.data(QtCore.Qt.UserRole), name)
+        # (v254) LEARN sirf tab jab rename dialog me "autosave" (yaad rakho) ON ho.
+        # OFF ho to naam laga diya, par shakl/text/AI-memory me kuch nahi seekha.
+        if getattr(self, "_rename_remember_last", True):
+            # (a) SHAKL se (design/rang/type) — OCR nahi chahiye, handwritten par bhi
+            self._store_visual_name(it.data(QtCore.Qt.UserRole), name)
+            # (b) TEXT se (OCR) — chhapa hua document ho to
+            self._learn_name(it.data(QtCore.Qt.UserRole), name)
+            # (c) AI Document Memory — agar yeh document pehchana gaya tha to naya naam seekho
+            self._ai_learn_page_rename(it.data(QtCore.Qt.UserRole), name)
 
     def _learn_name(self, path, name):
         """Rename ka OCR-learning ab BACKGROUND me hota hai — pehle yahi OCR
