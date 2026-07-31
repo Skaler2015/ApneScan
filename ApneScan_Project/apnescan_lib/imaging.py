@@ -711,10 +711,14 @@ def naps2_levels(img, black=22.0, gamma=0.94):
             # 'vals' = us channel ke paper (bright) pixels; unka peak = white-point.
             hist, _ = np.histogram(vals, bins=np.arange(150, 257))
             peak = 150 + int(np.argmax(hist))
-            wp = max(200.0, peak * 0.985)
+            # (v248) wp thoda aggressive (0.94) taaki background ka halka gray/
+            # tint bhi PURA safed ho jaaye (user: "print me thoda bg colour").
+            wp = max(200.0, peak * 0.94)
             lut = ((np.clip((np.arange(256) - black) / max(1.0, wp - black), 0, 1))
                    ** gamma) * 255.0
-            return np.clip(lut, 0, 255).astype(np.uint8)
+            lut = np.clip(lut, 0, 255)
+            lut[lut >= 246] = 255          # near-white -> PURA 255 (saaf bg)
+            return lut.astype(np.uint8)
 
         paper_mask = L > 150
         if int(paper_mask.sum()) < L.size * 0.15:
