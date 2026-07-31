@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "249"
+VERSION = "250"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -4466,6 +4466,16 @@ class ImageEditor(QtWidgets.QDialog):
         self.lbl_status = QtWidgets.QLabel(""); self.lbl_status.setObjectName("status")
         root.addWidget(self.lbl_status)
 
+        # (v250) Keyboard shortcuts — user ki maang:
+        #   Ctrl+↓ = Straighten (deskew) · C = Auto-crop · A = AI Auto (everything)
+        for _seq, _fn in (
+                ("Ctrl+Down", lambda: self._op(lambda im: deskew(im).convert("RGB"))),
+                ("C",         lambda: self._op(lambda im: autocrop(im).convert("RGB"))),
+                ("A",         lambda: self._ai_op("auto", ai_auto_all))):
+            _sc = QtWidgets.QShortcut(QtGui.QKeySequence(_seq), self)
+            _sc.setContext(QtCore.Qt.WindowShortcut)
+            _sc.activated.connect(_fn)
+
         self._load_current(initial=True)
         self._build_film()
         QtCore.QTimer.singleShot(0, self._render)
@@ -6148,6 +6158,49 @@ class HBars(QtWidgets.QWidget):
             p.end()
 
 
+_FT_ICON_CACHE = {}
+
+
+def _filetype_icon(suffix):
+    """(v250) File-type ke hisaab se ALAG icon — PDF/IMG/DOC/XLS... taaki panel
+    me foran pata chale konsi PDF hai konsi photo. (Badge-style: safed doc +
+    rang wali patti par type-naam.) Cache hota hai."""
+    key = suffix or ""
+    if key in _FT_ICON_CACHE:
+        return _FT_ICON_CACHE[key]
+    groups = {
+        "pdf": ("PDF", "#DC2626"),
+        "jpg": ("IMG", "#16A34A"), "jpeg": ("IMG", "#16A34A"), "png": ("IMG", "#16A34A"),
+        "webp": ("IMG", "#16A34A"), "bmp": ("IMG", "#16A34A"), "tif": ("IMG", "#16A34A"),
+        "tiff": ("IMG", "#16A34A"), "gif": ("IMG", "#16A34A"), "heic": ("IMG", "#16A34A"),
+        "doc": ("DOC", "#2563EB"), "docx": ("DOC", "#2563EB"),
+        "xls": ("XLS", "#0D9488"), "xlsx": ("XLS", "#0D9488"), "csv": ("XLS", "#0D9488"),
+        "zip": ("ZIP", "#9333EA"), "rar": ("ZIP", "#9333EA"), "7z": ("ZIP", "#9333EA"),
+        "txt": ("TXT", "#6B7280"),
+    }
+    label, color = groups.get(key, ((key[:3].upper() if key else "?"), "#6B7280"))
+    try:
+        pm = QtGui.QPixmap(40, 48)
+        pm.fill(QtCore.Qt.transparent)
+        p = QtGui.QPainter(pm)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        p.setBrush(QtGui.QColor("#FFFFFF"))
+        p.setPen(QtGui.QPen(QtGui.QColor(color), 2))
+        p.drawRoundedRect(6, 3, 28, 42, 5, 5)
+        p.setBrush(QtGui.QColor(color))
+        p.setPen(QtCore.Qt.NoPen)
+        p.drawRoundedRect(6, 28, 28, 14, 4, 4)
+        p.setPen(QtGui.QColor("#FFFFFF"))
+        f = p.font(); f.setPixelSize(9); f.setBold(True); p.setFont(f)
+        p.drawText(QtCore.QRectF(6, 28, 28, 14), QtCore.Qt.AlignCenter, label)
+        p.end()
+        ic = QtGui.QIcon(pm)
+    except Exception:
+        ic = None
+    _FT_ICON_CACHE[key] = ic
+    return ic
+
+
 class LibraryModel(QtWidgets.QFileSystemModel):
     """'Meri Files' panel ka model — AAJ banayi files hari dikhti hain, aur
     har file ke naam ke aage () me uska size bhi dikhta hai."""
@@ -6169,6 +6222,17 @@ class LibraryModel(QtWidgets.QFileSystemModel):
 
     def data(self, index, role=QtCore.Qt.DisplayRole):
         if index.column() == 0:
+            # (v250) File-type ke hisaab se alag icon (PDF/IMG/DOC...) — folder
+            # ka default icon waisa hi rehta hai.
+            if role == QtCore.Qt.DecorationRole:
+                try:
+                    fi = self.fileInfo(index)
+                    if fi.isFile():
+                        ic = _filetype_icon(fi.suffix().lower())
+                        if ic is not None:
+                            return ic
+                except Exception:
+                    pass
             # (v196) naam ke aage "(size)" ab NAHI — size card ki neechli
             # line me pehle se dikhta hai (user request: naam saaf rahe)
             if role == QtCore.Qt.ForegroundRole:
@@ -14068,6 +14132,29 @@ if the toggle is ticked).</p>
         _chip("📂 " + self.L("Sab", "All"), "all").setChecked(True)
         _chrow.addStretch(1)
         fp.addLayout(_chrow)
+        # (v250) SORT buttons — Naam / Date / Size. Ek click = us hisaab se sort
+        # (upar se niche); dobara click = ulta (niche se upar). Chalu sort par
+        # teer (↑/↓) dikhta hai. Pasand save rehti hai.
+        _sortrow = QtWidgets.QHBoxLayout(); _sortrow.setSpacing(5)
+        self._sort_btns = {}
+
+        def _sortbtn(field, label):
+            b = QtWidgets.QPushButton(label)
+            b.setCheckable(True); b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setStyleSheet(
+                "QPushButton{background:#fff;border:1px solid #E5E7EB;border-radius:12px;"
+                "padding:4px 9px;font-size:10px;font-weight:600;color:#374151;}"
+                "QPushButton:checked{background:#0D9488;border-color:#0D9488;color:#fff;}"
+                "QPushButton:hover{border-color:#93C5FD;}")
+            b.clicked.connect(lambda _c=False, f=field: self._sort_toggle(f))
+            self._sort_btns[field] = (b, label)
+            _sortrow.addWidget(b)
+        _sortbtn("name", self.L("Naam", "Name"))
+        _sortbtn("date", self.L("Date", "Date"))
+        _sortbtn("size", "Size")
+        _sortrow.addStretch(1)
+        fp.addLayout(_sortrow)
+        self._refresh_sort_btns()      # chalu sort ka teer/highlight dikhao
         # ⬅ Peeche · ⭐ Favourites (dropdown) · ⇅ Sort
         self.fav_bar = QtWidgets.QHBoxLayout()
         self.fav_bar.setSpacing(4)
@@ -16847,10 +16934,41 @@ if the toggle is ticked).</p>
             grp.addAction(act)
         return menu
 
+    def _sort_toggle(self, field):
+        """(v250) Naam/Date/Size button click: pehli baar = us hisaab se sort;
+        us button par dobara click = ULTA (asc <-> desc)."""
+        cur = self._opts.get("files_sort", "name_asc")
+        if cur == field + "_asc":
+            new = field + "_desc"
+        elif cur == field + "_desc":
+            new = field + "_asc"
+        else:
+            # pehli baar is field par — samajhdaar default (naam A→Z, date/size bade/naye pehle)
+            new = field + ("_asc" if field == "name" else "_desc")
+        self._set_files_sort(new)
+
+    def _refresh_sort_btns(self):
+        cur = self._opts.get("files_sort", "name_asc")
+        for field, (b, label) in getattr(self, "_sort_btns", {}).items():
+            arrow = ""
+            if cur == field + "_asc":
+                arrow = "  ↑"
+            elif cur == field + "_desc":
+                arrow = "  ↓"
+            try:
+                b.setText(label + arrow)
+                b.setChecked(cur.startswith(field + "_"))
+            except Exception:
+                pass
+
     def _set_files_sort(self, key):
         self._opts["files_sort"] = key
         self._save_opts()
         self._apply_files_sort()
+        try:
+            self._refresh_sort_btns()
+        except Exception:
+            pass
 
     def _apply_files_sort(self):
         key = self._opts.get("files_sort", "name_asc")
