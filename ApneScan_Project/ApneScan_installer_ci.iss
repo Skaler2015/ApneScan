@@ -2,8 +2,11 @@
 ; (Tesseract alag se install hota hai; ye sirf app install karta hai.)
 
 [Setup]
+; Fixed AppId => har naya per-user version PURANI jagah par hi upgrade hota
+; hai (do-do copy nahi bante), aur future updates saaf replace hote hain.
+AppId={{8F3A1C2E-5B7D-4E9A-9C1F-2A6B8D4E7F03}
 AppName=ApneScan
-AppVersion=268
+AppVersion=269
 AppPublisher=ApneSoft
 AppPublisherURL=https://apnescan.apnesoft.com
 ; (v268) PER-USER install (LocalAppData) — Administrator/UAC ki zaroorat NAHI.
