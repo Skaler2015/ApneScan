@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "266"
+VERSION = "267"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11784,9 +11784,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
         """Naya version download karke KHUD install karo (feature 36).
         Pehle website se, na mile (website down/SSL) to GitHub Releases se —
         taaki update kabhi na atke."""
+        # (v267) INSTALLER download karo (raw exe nahi). Pehle raw ApneScan.exe
+        # ko seedha Program Files me copy karte the — bina Administrator ke wo
+        # copy chupchaap fail ho jaati thi, isliye restart par PURANA version
+        # hi khulta tha. Installer UAC (admin) ke saath chalta hai aur purani
+        # exe ko sach me replace kar deta hai.
         urls = [
-            "https://github.com/Skaler2015/ApneScan/releases/latest/download/ApneScan.exe",  # GitHub (version se match)
-            "https://apnescan.apnesoft.com/ApneScan.exe",                                   # website fallback
+            "https://github.com/Skaler2015/ApneScan/releases/latest/download/ApneScan-Setup.exe",  # GitHub
+            "https://apnescan.apnesoft.com/ApneScan-Setup.exe",                                     # website fallback
         ]
 
         def job():
@@ -11846,30 +11851,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
         if not getattr(sys, "frozen", False):
             self._reveal_in_explorer(tmp_exe)
             QtWidgets.QMessageBox.information(
-                self, "Download complete", "The new exe is here:\n%s" % tmp_exe)
+                self, "Download complete", "The installer is here:\n%s" % tmp_exe)
             return
-        cur = os.path.abspath(sys.executable)
+        app_exe = os.path.abspath(sys.executable)
         bat = os.path.join(tempfile.gettempdir(), "apnescan_update.bat")
-        # App band hone ka intezaar karo, phir purani exe ko nayi se badlo.
-        # Kabhi purani exe abhi bhi lock hoti hai -> copy fail; isliye kai baar
-        # koshish karte hain. Agar phir bhi na ho, to (verified) nayi exe ko
-        # SEEDHA temp se hi chala dete hain — taaki adhoori-copy exe kabhi na
-        # chale (wahi 'python DLL load fail' deti thi).
+        # (v267) INSTALLER ko Administrator (UAC) ke saath silently chalao —
+        # tabhi wo Program Files me purani exe ko sach me replace kar paata hai.
+        # PowerShell '-Verb RunAs' UAC prompt laata hai, '-Wait' install poora
+        # hone tak rukta hai; uske baad nayi (updated) app khud khul jaati hai.
+        ps = ("Start-Process -FilePath '__SETUP__' -ArgumentList "
+              "'/VERYSILENT','/NORESTART','/SUPPRESSMSGBOXES','/CLOSEAPPLICATIONS' "
+              "-Verb RunAs -Wait").replace("__SETUP__", tmp_exe)
         body = (
             "@echo off\r\n"
-            "ping 127.0.0.1 -n 4 > nul\r\n"
-            "set SRC=__SRC__\r\n"
-            "set DST=__DST__\r\n"
-            "set OK=0\r\n"
-            "for /L %%i in (1,1,15) do (\r\n"
-            "  copy /y \"%SRC%\" \"%DST%\" > nul 2>&1\r\n"
-            "  if not errorlevel 1 ( set OK=1 & goto launch )\r\n"
-            "  ping 127.0.0.1 -n 2 > nul\r\n"
-            ")\r\n"
-            ":launch\r\n"
-            "if \"%OK%\"==\"1\" ( start \"\" \"%DST%\" ) else ( start \"\" \"%SRC%\" )\r\n"
+            "ping 127.0.0.1 -n 4 > nul\r\n"          # app band hone do
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"" + ps + "\"\r\n"
+            "start \"\" \"__APP__\"\r\n"             # nayi installed app kholo
             "del \"%~f0\"\r\n"
-        ).replace("__SRC__", tmp_exe).replace("__DST__", cur)
+        ).replace("__APP__", app_exe)
         try:
             with open(bat, "w") as fh:
                 fh.write(body)
@@ -11878,8 +11877,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         r = QtWidgets.QMessageBox.question(
             self, "Update ready",
-            "The new version has been downloaded.\n\nThe app will now close and the new version "
-            "will open by itself. OK?",
+            "The new version has been downloaded.\n\nThe app will now close and update itself "
+            "(please click 'Yes' on the Windows permission prompt). The new version will open "
+            "by itself when done. OK?",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
         if r == QtWidgets.QMessageBox.Yes:
             try:
