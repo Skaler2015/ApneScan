@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "267"
+VERSION = "268"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11855,20 +11855,19 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         app_exe = os.path.abspath(sys.executable)
         bat = os.path.join(tempfile.gettempdir(), "apnescan_update.bat")
-        # (v267) INSTALLER ko Administrator (UAC) ke saath silently chalao —
-        # tabhi wo Program Files me purani exe ko sach me replace kar paata hai.
-        # PowerShell '-Verb RunAs' UAC prompt laata hai, '-Wait' install poora
-        # hone tak rukta hai; uske baad nayi (updated) app khud khul jaati hai.
-        ps = ("Start-Process -FilePath '__SETUP__' -ArgumentList "
-              "'/VERYSILENT','/NORESTART','/SUPPRESSMSGBOXES','/CLOSEAPPLICATIONS' "
-              "-Verb RunAs -Wait").replace("__SETUP__", tmp_exe)
+        # (v268) INSTALLER ko SILENTLY chalao — koi UAC prompt NAHI. App ab
+        # per-user (LocalAppData) install hoti hai, isliye admin ki zaroorat
+        # nahi; batch installer ke poora hone tak rukta hai (blocking), phir
+        # nayi (updated) app khud khul jaati hai. UAC ko programmatically 'Yes'
+        # nahi kiya ja sakta (Windows security) — isliye UAC hi hataa diya.
         body = (
             "@echo off\r\n"
             "ping 127.0.0.1 -n 4 > nul\r\n"          # app band hone do
-            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"" + ps + "\"\r\n"
-            "start \"\" \"__APP__\"\r\n"             # nayi installed app kholo
+            "\"__SETUP__\" /VERYSILENT /NORESTART /SUPPRESSMSGBOXES /CLOSEAPPLICATIONS\r\n"
+            "set NEWAPP=%LOCALAPPDATA%\\Programs\\ApneScan\\ApneScan.exe\r\n"
+            "if exist \"%NEWAPP%\" ( start \"\" \"%NEWAPP%\" ) else ( start \"\" \"__APP__\" )\r\n"
             "del \"%~f0\"\r\n"
-        ).replace("__APP__", app_exe)
+        ).replace("__SETUP__", tmp_exe).replace("__APP__", app_exe)
         try:
             with open(bat, "w") as fh:
                 fh.write(body)
@@ -11878,8 +11877,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         r = QtWidgets.QMessageBox.question(
             self, "Update ready",
             "The new version has been downloaded.\n\nThe app will now close and update itself "
-            "(please click 'Yes' on the Windows permission prompt). The new version will open "
-            "by itself when done. OK?",
+            "silently. The new version will open by itself when done. OK?",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
         if r == QtWidgets.QMessageBox.Yes:
             try:

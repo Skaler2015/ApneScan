@@ -3,10 +3,14 @@
 
 [Setup]
 AppName=ApneScan
-AppVersion=267
+AppVersion=268
 AppPublisher=ApneSoft
 AppPublisherURL=https://apnescan.apnesoft.com
-DefaultDirName={autopf}\ApneScan
+; (v268) PER-USER install (LocalAppData) — Administrator/UAC ki zaroorat NAHI.
+; Isse auto-update ke waqt UAC prompt bilkul nahi aata (Chrome/VS Code jaisa),
+; app khud ko chupchaap update kar leti hai.
+PrivilegesRequired=lowest
+DefaultDirName={localappdata}\Programs\ApneScan
 DefaultGroupName=ApneScan
 OutputDir=Output
 OutputBaseFilename=ApneScan-Setup
