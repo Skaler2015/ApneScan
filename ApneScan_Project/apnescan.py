@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "272"
+VERSION = "273"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13184,11 +13184,26 @@ class ScannerWindow(QtWidgets.QMainWindow):
 <li><b>📦 फ़ोल्डर जानकारी:</b> नीचे दिखता है इस फ़ोल्डर में कितनी फ़ाइलें और कुल कितनी जगह।</li>
 </ul>
 
-<h3>🔍 ढूँढना (Search) — तुरंत</h3>
+<h3>🔍 ढूँढना (Search) — Live dropdown</h3>
 <ul>
-<li>ऊपर search बॉक्स में <b>2 अक्षर</b> लिखते ही नतीजे तुरंत आ जाते हैं (नाम बीच से भी मिलता है)।</li>
+<li><b>पहले अक्षर से ही</b> — जैसे-जैसे टाइप करो, मिलते नाम search बॉक्स के <b>नीचे एक dropdown</b> में तुरंत दिखते हैं (Google suggestions जैसा)।</li>
+<li>dropdown में <b>click</b> करो → file खुल जाती है / folder के अंदर चले जाओ। कीबोर्ड से <b>↓ ↑</b> चुनो, <b>Enter</b> खोलो, <b>Esc</b> बंद।</li>
+<li>नाम <b>बीच से</b> भी मिलता है; <b>typo</b> चले (जैसे "Garma" → "Garima"); हिन्दी/English दोनों।</li>
 <li>कई शब्द लिखें (जैसे <b>राम बिल</b>) तो सब मिलने चाहिए।</li>
-<li><b>📄 बटन</b> दबाकर search करें तो PDF के <b>अंदर के टेक्स्ट</b> में भी ढूँढेगा (मरीज़ का नाम/claim नंबर)।</li>
+<li>कोई suggestion चुने बिना <b>Enter</b> = पूरी grouped list (folder-wise) पैनल में।</li>
+<li><b>फ़िल्टर शब्द:</b> <b>pdf</b> · <b>today</b> · <b>&gt;1mb</b> जैसे लिखकर छाँटो।</li>
+</ul>
+
+<h3>📄 PDF के अंदर ढूँढना + झलक (snippet)</h3>
+<ul>
+<li>search बॉक्स के पास <b>📄 बटन ON</b> करके नाम/नंबर टाइप करके <b>Enter</b> — अब PDF के <b>अंदर के टेक्स्ट</b> में भी ढूँढेगा (मरीज़ का नाम/claim नंबर)।</li>
+<li>हर मिली file के <b>नीचे 💬 grey लाइन</b> में वो हिस्सा दिखेगा जहाँ शब्द मिला — पता चल जाए किस file में है।</li>
+</ul>
+
+<h3>🏷 रंग-वाले Tags</h3>
+<ul>
+<li>किसी file पर right-click → <b>🏷 Tag लगाओ</b> (जैसे: Insurance, Paid, ज़रूरी)। हर tag का अपना <b>पक्का रंग</b>।</li>
+<li>ऊपर <b>🏷 Tags</b> बटन → सारे tags (रंगीन dot + गिनती); किसी एक पर click = उस tag की <b>सारी files</b> दिख जाएँ।</li>
 </ul>
 
 <h3>🎛 छाँटना और दिखाना</h3>
@@ -13219,7 +13234,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
 </ul>
 <h3>🖱 कई फ़ाइलें चुनकर (Ctrl/Shift से)</h3>
 <ul>
-<li><b>🧩 एक PDF में जोड़ो</b>, <b>📁 Move</b>, <b>📄 Copy</b>, <b>✏ Bulk rename</b> (naam_001, 002…), <b>🗑 Delete</b></li>
+<li><b>🧩 एक PDF में जोड़ो</b>, <b>🗜 एक साथ Compress</b>, <b>📁 Move</b>, <b>📄 Copy</b>, <b>✏ Bulk rename</b> (naam_001, 002…), <b>🗑 Delete</b></li>
+<li><b>नया:</b> ये सारे right-click actions अब <b>search के नतीजों (results) पर भी</b> चलते हैं — ढूँढने के बाद वहीं से काम करो।</li>
 </ul>
 
 <h3>🧹 और सुविधाएँ</h3>
@@ -13242,11 +13258,26 @@ folder. From here you can save straight into a folder, search, and act on files.
 <li><b>📦 Folder info:</b> shows the file count and total size of the folder.</li>
 </ul>
 
-<h3>🔍 Search — instant</h3>
+<h3>🔍 Search — live dropdown</h3>
 <ul>
-<li>Type <b>2 letters</b> in the search box — results appear instantly (matches anywhere in the name).</li>
+<li><b>From the first letter</b> — as you type, matching names appear in a <b>dropdown right below</b> the search box (Google-suggestions style).</li>
+<li><b>Click</b> a suggestion to open the file / go into the folder. With the keyboard: <b>↓ ↑</b> to pick, <b>Enter</b> to open, <b>Esc</b> to close.</li>
+<li>Matches <b>anywhere</b> in the name; <b>typo-tolerant</b> ("Garma" → "Garima"); works in Hindi &amp; English.</li>
 <li>Type several words (e.g. <b>ram bill</b>) — all must match.</li>
-<li>Turn on the <b>📄 button</b> to also search <b>inside PDF text</b> (a patient name / claim number).</li>
+<li>Press <b>Enter</b> without picking a suggestion = full grouped list (folder-wise) in the panel.</li>
+<li><b>Filter words:</b> <b>pdf</b> · <b>today</b> · <b>&gt;1mb</b> to narrow results.</li>
+</ul>
+
+<h3>📄 Search inside PDFs + snippet</h3>
+<ul>
+<li>Turn on the <b>📄 button</b>, type a name/number, press <b>Enter</b> — it now searches <b>inside the PDF text</b> too (a patient name / claim number).</li>
+<li>Each hit shows a <b>grey 💬 excerpt</b> underneath — the line where the term was found, so you know which file has it.</li>
+</ul>
+
+<h3>🏷 Colour tags</h3>
+<ul>
+<li>Right-click a file → <b>🏷 Add tag</b> (e.g. Insurance, Paid, Urgent). Each tag gets its own <b>stable colour</b>.</li>
+<li>The <b>🏷 Tags</b> button shows every tag (colour dot + count); click one to list <b>all files</b> with that tag.</li>
 </ul>
 
 <h3>🎛 Filter & view</h3>
@@ -13277,7 +13308,8 @@ folder. From here you can save straight into a folder, search, and act on files.
 </ul>
 <h3>🖱 Several files selected (Ctrl/Shift)</h3>
 <ul>
-<li><b>🧩 Merge into one PDF</b>, <b>📁 Move</b>, <b>📄 Copy</b>, <b>✏ Bulk rename</b> (name_001, 002…), <b>🗑 Delete</b></li>
+<li><b>🧩 Merge into one PDF</b>, <b>🗜 Compress together</b>, <b>📁 Move</b>, <b>📄 Copy</b>, <b>✏ Bulk rename</b> (name_001, 002…), <b>🗑 Delete</b></li>
+<li><b>New:</b> all these right-click actions now work <b>on search results too</b> — act on files right after finding them.</li>
 </ul>
 
 <h3>🧹 More</h3>
