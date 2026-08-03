@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "271"
+VERSION = "272"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -18352,6 +18352,8 @@ if the toggle is ticked).</p>
         farak nahi, Hindi/English, typo-tolerant, 'pdf'/'today'/'>1mb' filter.
         Index purana ho to purane se TURANT jawab + background me taaza."""
         q = self.files_search.text().strip().lower()
+        self._search_snippets = {}          # (v272) purane snippet saaf; sirf
+        #                                     inside-text search inko bharta hai
         if len(q) < 2:
             self.files_results.hide()
             self.files_tree.show()
@@ -18404,6 +18406,7 @@ if the toggle is ticked).</p>
 
         def job():
             dir_hits, file_hits = [], []
+            snips = {}                       # (v272) path -> jis line me mila uska tukda
             for dp, dns, fn in os.walk(scope):
                 for d in dns:
                     if not terms:
@@ -18432,12 +18435,16 @@ if the toggle is ticked).</p>
                                       txt.lower()) if terms else (3, [9])
                     if m is not None:
                         file_hits.append((SE.rank_key(m[0], m[1], n), f.lower(), full))
+                        if txt:
+                            sn = self._make_snippet(txt, terms)
+                            if sn:
+                                snips[full] = sn
                 if len(dir_hits) + len(file_hits) >= 1000:
                     break
             dir_hits.sort(key=lambda h: (h[0], h[1]))
             file_hits.sort(key=lambda h: (h[0], h[1]))
-            return ([("dir", h[2]) for h in dir_hits] +
-                    [("file", h[2]) for h in file_hits])
+            return (([("dir", h[2]) for h in dir_hits] +
+                     [("file", h[2]) for h in file_hits]), snips)
 
         def done(res):
             if isinstance(res, Exception):
@@ -18445,10 +18452,33 @@ if the toggle is ticked).</p>
                 return
             if self.files_search.text().strip().lower() != q:
                 return
-            SE.log(q, time.time() - t0, len(res))
-            self._render_files_results(res, q, preserve_order=True)
+            results, snips = res
+            self._search_snippets = snips     # render me file ke neeche dikhega
+            SE.log(q, time.time() - t0, len(results))
+            self._render_files_results(results, q, preserve_order=True)
         self._run_bg(job, done, self.L("Andar ka text dhoondh rahe…",
                                        "Searching inside text…"))
+
+    def _make_snippet(self, txt, terms, width=42):
+        """PDF-andar-search: jis term par match hua uske aas-paas ka chhota tukda
+        (context) — file ke neeche dikhane ke liye. txt pehle se lowercase hai."""
+        if not txt or not terms:
+            return ""
+        pos = -1
+        for t in terms:
+            i = txt.find(t)
+            if i >= 0 and (pos < 0 or i < pos):
+                pos = i
+        if pos < 0:
+            return ""
+        start = max(0, pos - width)
+        end = min(len(txt), pos + width)
+        seg = " ".join(txt[start:end].split())
+        if start > 0:
+            seg = "… " + seg
+        if end < len(txt):
+            seg = seg + " …"
+        return seg[:130]
 
     def _update_files_suggest(self):
         """(v270) LIVE dropdown: jaise-jaise type karo, top matches search box ke
@@ -18637,6 +18667,17 @@ if the toggle is ticked).</p>
                                          "   (click = preview · double-click = open · drag = import)"))
                 it.setData(QtCore.Qt.UserRole, p)
                 self.files_results.addItem(it)
+                # (v272) PDF-andar-search ka snippet — file ke neeche grey line me
+                # (jis line me mareez/claim ka naam mila). Term khud highlight hota.
+                snip = (getattr(self, "_search_snippets", None) or {}).get(p)
+                if snip and not grid:
+                    s = QtWidgets.QListWidgetItem("           💬 " + snip)
+                    s.setData(QtCore.Qt.UserRole, p)     # click par bhi wahi file
+                    _sf = s.font(); _sf.setItalic(True)
+                    _sf.setPointSizeF(max(7.5, _sf.pointSizeF() - 1.0)); s.setFont(_sf)
+                    s.setForeground(QtGui.QColor("#6B7280"))
+                    s.setToolTip(p)
+                    self.files_results.addItem(s)
         if not order:
             it = QtWidgets.QListWidgetItem(self.L("(kuch nahi mila)", "(nothing found)"))
             it.setFlags(QtCore.Qt.NoItemFlags)
@@ -20963,6 +21004,7 @@ if the toggle is ticked).</p>
             self._sugg.hide()
         except Exception:
             pass
+        self._search_snippets = {}               # tag-filter me koi snippet nahi
         res = [("file", p) for p in sorted(matches, key=lambda x: os.path.basename(x).lower())]
         self._render_files_results(res)
         self.status.showMessage("🏷 %s — %d file" % (tag, len(matches)), 5000)
