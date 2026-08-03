@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "270"
+VERSION = "271"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -14245,10 +14245,15 @@ if the toggle is ticked).</p>
             "Also search INSIDE PDF text (not just the name) — e.g. a patient name\n"
             "or claim number. Turn on, then search again."))
         self.btn_search_text.toggled.connect(lambda _c: self._files_search_timer.start())
+        # (v271) 📄 inside-PDF-text search wapas DIKHAO — user PDF ke andar mareez
+        # ka naam/claim number dhoondh sake. On karke Enter dabao.
+        self.btn_search_text.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_search_text.setStyleSheet(
+            "QToolButton{background:#fff;border:1px solid #E5E7EB;border-radius:9px;"
+            "padding:3px 6px;font-size:13px;}"
+            "QToolButton:checked{background:#2563EB;border-color:#2563EB;}"
+            "QToolButton:hover{border-color:#93C5FD;}")
         _srow.addWidget(self.btn_search_text)
-        # (v191) 📄 button ki jagah ab yahan ⇅ Sort aata hai (user request);
-        # PDF-ke-andar-search ka object zinda hai, bas chhupa
-        self.btn_search_text.hide()
         self._files_srow = _srow
         fp.addLayout(_srow)
         # ✨ (v192) Filter CHIPS — mockup jaise (Fav/Recent/Today/All);
@@ -14280,6 +14285,16 @@ if the toggle is ticked).</p>
         _chip("🕒 " + self.L("Hafta", "Recent"), "week")
         _chip("📅 " + self.L("Aaj", "Today"), "today")
         _chip("📂 " + self.L("Sab", "All"), "all").setChecked(True)
+        # (v271) 🏷 Tags — rang-wale tag; click par sabhi tag ki list, kisi ek
+        # par filter (us tag wali saari files dikhein).
+        _btag = QtWidgets.QPushButton("🏷 " + self.L("Tags", "Tags"))
+        _btag.setCursor(QtCore.Qt.PointingHandCursor)
+        _btag.setStyleSheet(
+            "QPushButton{background:#fff;border:1px solid #E5E7EB;border-radius:12px;"
+            "padding:4px 9px;font-size:10px;font-weight:600;color:#374151;}"
+            "QPushButton:hover{border-color:#F59E0B;color:#B45309;}")
+        _btag.clicked.connect(self._show_tag_filter)
+        _chrow.addWidget(_btag)
         _chrow.addStretch(1)
         fp.addLayout(_chrow)
         # (v250) SORT buttons — Naam / Date / Size. Ek click = us hisaab se sort
@@ -14480,6 +14495,10 @@ if the toggle is ticked).</p>
         self.files_results.itemDoubleClicked.connect(self._files_result_activated)
         self.files_results.itemActivated.connect(self._files_result_activated)  # Enter = kholo
         self.files_results.itemClicked.connect(self._on_result_clicked)  # 1-click = preview
+        # (v271) SEARCH results par bhi right-click menu + multi-select bulk
+        # actions (jaise folder-browse me): share/compress/rename/move/delete…
+        self.files_results.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.files_results.customContextMenuRequested.connect(self._files_results_menu)
         self.files_results._hl_terms = None                 # smart-search match highlight
         self.files_results.setItemDelegate(SearchHLDelegate(self.files_results))
         self.files_results.hide()
@@ -17506,6 +17525,80 @@ if the toggle is ticked).</p>
                               "🔁 Find duplicate files…"), self._find_duplicates)
         menu.addAction(self.L("🗑 Recycle Bin…", "🗑 Recycle Bin…"), self.show_recycle_bin)
         menu.exec_(self.files_tree.viewport().mapToGlobal(pos))
+
+    def _selected_result_paths(self):
+        """Search-results list me chuni hui saari file/folder paths (UserRole)."""
+        out, seen = [], set()
+        try:
+            for it in self.files_results.selectedItems():
+                p = it.data(QtCore.Qt.UserRole)
+                if p and p not in seen and os.path.exists(p):
+                    seen.add(p); out.append(p)
+        except Exception:
+            pass
+        return out
+
+    def _files_results_menu(self, pos):
+        """(v271) SEARCH-results list par right-click — wahi bulk/single actions
+        jo folder-browse me milte hain (share/compress/rename/move/delete/tag…)."""
+        it = self.files_results.itemAt(pos)
+        sel = self._selected_result_paths()
+        if it is not None:
+            p0 = it.data(QtCore.Qt.UserRole)
+            if p0 and p0 not in sel:
+                sel = [p0]                       # jis par right-click, wahi
+        files = [p for p in sel if os.path.isfile(p)]
+        dirs = [p for p in sel if os.path.isdir(p)]
+        menu = QtWidgets.QMenu(self)
+        if len(files) > 1:
+            menu.addAction(self.L("🧩 %d files → ek PDF…" % len(files),
+                                  "🧩 Merge %d files → one PDF…" % len(files)),
+                           lambda: self._bulk_merge(files))
+            _npdf = len([f for f in files if f.lower().endswith(".pdf")])
+            if _npdf:
+                menu.addAction(self.L("🗜 %d PDF compress…" % _npdf,
+                                      "🗜 Compress %d PDFs…" % _npdf),
+                               lambda: self._bulk_compress(files))
+            menu.addAction(self.L("📁 Dusre folder me le jao…", "📁 Move to another folder…"),
+                           lambda: self._bulk_move(files, copy=False))
+            menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
+                           lambda: self._bulk_move(files, copy=True))
+            menu.addAction(self.L("✏ Bulk rename…", "✏ Bulk rename…"),
+                           lambda: self._bulk_rename(files))
+            menu.addSeparator()
+            menu.addAction(self.L("🗑 %d files delete (Recycle Bin)" % len(files),
+                                  "🗑 Delete %d files (Recycle Bin)" % len(files)),
+                           lambda: self._bulk_delete(files))
+        elif len(files) == 1:
+            path = files[0]
+            menu.addAction("📖 " + self.L("Kholo", "Open"), lambda: self._open_path(path))
+            if path.lower().endswith(".pdf"):
+                menu.addAction("🟢 WhatsApp", lambda: self.share_whatsapp(path))
+                menu.addAction("✉ Email", lambda: self.share_email(path))
+                menu.addAction("🗜 " + self.L("Compress…", "Compress…"),
+                               lambda: self.compress_pdf_tool(path))
+            menu.addAction("🏷 " + self.L("Tag lagao…", "Add tag…"), lambda: self.tag_pdf(path))
+            menu.addAction("🖨 Print", lambda: self._print_library_file(path))
+            menu.addSeparator()
+            menu.addAction(self.L("📄 Copy…", "📄 Copy to folder…"),
+                           lambda: self._bulk_move([path], copy=True))
+            menu.addAction(self.L("📁 Le jao…", "📁 Move to folder…"),
+                           lambda: self._bulk_move([path], copy=False))
+            menu.addAction("✏ " + self.L("Rename…", "Rename…"),
+                           lambda: self._rename_library_file(path))
+            menu.addAction("🗑 " + self.L("Delete…", "Delete…"),
+                           lambda: self._delete_library_file(path))
+        elif len(dirs) == 1:
+            d = dirs[0]
+            menu.addAction("📂 " + self.L("Folder kholo", "Open folder"),
+                           lambda: self._jump_to_folder(d))
+            menu.addAction(self.L("📂 Explorer me kholo", "📂 Open in Explorer"),
+                           lambda: self._open_path(d))
+        else:
+            return
+        menu.addSeparator()
+        menu.addAction(self.L("🗑 Recycle Bin…", "🗑 Recycle Bin…"), self.show_recycle_bin)
+        menu.exec_(self.files_results.viewport().mapToGlobal(pos))
 
     def _unique_fs_path(self, path, is_dir=False, exclude=None):
         """Agar 'path' (file/folder) pehle se maujood hai to naam ke aage
@@ -20801,10 +20894,84 @@ if the toggle is ticked).</p>
         lst = [t.strip() for t in text.split(",") if t.strip()]
         if lst:
             tags[src] = lst
+            self._ensure_tag_colors(lst)          # (v271) naye tag ko rang do
         else:
             tags.pop(src, None)
         self._save_opts()
         self.status.showMessage("Tags saved: %s" % (", ".join(lst) or "(removed)"), 5000)
+
+    # (v271) tag palette — har tag ko ek pakka rang (dobara wahi tag = wahi rang)
+    _TAG_PALETTE = ["#2563EB", "#16A34A", "#DC2626", "#9333EA", "#EA580C",
+                    "#0D9488", "#DB2777", "#CA8A04", "#4F46E5", "#0891B2"]
+
+    def _ensure_tag_colors(self, tag_list):
+        tc = self._opts.setdefault("tag_colors", {})
+        for t in tag_list:
+            if t not in tc:
+                tc[t] = self._TAG_PALETTE[len(tc) % len(self._TAG_PALETTE)]
+        return tc
+
+    def _tag_color(self, tag):
+        return (self._opts.get("tag_colors", {}) or {}).get(tag, "#6B7280")
+
+    def _dot_icon(self, color, d=12):
+        """Chhota rang-wala gol icon (tag menu me dikhane ke liye)."""
+        pm = QtGui.QPixmap(d, d); pm.fill(QtCore.Qt.transparent)
+        p = QtGui.QPainter(pm)
+        p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        p.setBrush(QtGui.QColor(color)); p.setPen(QtCore.Qt.NoPen)
+        p.drawEllipse(1, 1, d - 2, d - 2); p.end()
+        return QtGui.QIcon(pm)
+
+    def _show_tag_filter(self):
+        """🏷 Tags button — sabhi tag (rang ke saath) ki list; kisi ek par click
+        se us tag wali saari files search-results me dikhein."""
+        tags = self._opts.get("tags", {}) or {}
+        all_tags = sorted({t for lst in tags.values() for t in lst})
+        menu = QtWidgets.QMenu(self)
+        if not all_tags:
+            a = menu.addAction(self.L("(Abhi koi tag nahi — file par right-click → 🏷 Tag lagao)",
+                                      "(No tags yet — right-click a file → 🏷 Add tag)"))
+            a.setEnabled(False)
+        else:
+            self._ensure_tag_colors(all_tags)
+            for t in all_tags:
+                cnt = sum(1 for p, lst in tags.items() if t in lst and os.path.exists(p))
+                act = menu.addAction(self._dot_icon(self._tag_color(t)),
+                                     "%s  (%d)" % (t, cnt))
+                act.triggered.connect(lambda _c=False, tag=t: self._filter_by_tag(tag))
+            menu.addSeparator()
+            menu.addAction("🏷 " + self.L("Tag lagao (chuni file par)…", "Add tag (to selected file)…"),
+                           self._tag_selected_result)
+        # button ke neeche dikhao
+        try:
+            btn = self.sender()
+            menu.exec_(btn.mapToGlobal(QtCore.QPoint(0, btn.height())))
+        except Exception:
+            menu.exec_(QtGui.QCursor.pos())
+
+    def _filter_by_tag(self, tag):
+        """Us tag wali maujood files search-results list me dikhao."""
+        tags = self._opts.get("tags", {}) or {}
+        matches = [p for p, lst in tags.items() if tag in lst and os.path.exists(p)]
+        if not matches:
+            self._warn(self.L("Is tag ki koi file nahi mili.", "No files for this tag.")); return
+        self.files_search.blockSignals(True)
+        self.files_search.setText("")            # naam-search saaf
+        self.files_search.blockSignals(False)
+        try:
+            self._sugg.hide()
+        except Exception:
+            pass
+        res = [("file", p) for p in sorted(matches, key=lambda x: os.path.basename(x).lower())]
+        self._render_files_results(res)
+        self.status.showMessage("🏷 %s — %d file" % (tag, len(matches)), 5000)
+
+    def _tag_selected_result(self):
+        """Search-results me chuni file par tag lagao (warna PDF chuno)."""
+        sel = self._selected_result_paths()
+        f = next((p for p in sel if os.path.isfile(p)), None)
+        self.tag_pdf(f) if f else self.tag_pdf()
 
     def search_by_tag(self):
         tags = self._opts.get("tags", {}) or {}
