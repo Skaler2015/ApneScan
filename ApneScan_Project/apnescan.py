@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "273"
+VERSION = "274"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11663,6 +11663,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 if k == QtCore.Qt.Key_Escape and vis:
                     sg.hide()
                     return True
+            elif ev.type() == QtCore.QEvent.FocusIn and sg is not None:
+                QtCore.QTimer.singleShot(0, self._show_recent_searches)  # khaali box -> recents
             elif ev.type() == QtCore.QEvent.FocusOut and sg is not None:
                 QtCore.QTimer.singleShot(200, sg.hide)   # click land hone do, phir chhupao
         if obj is self.list.viewport():
@@ -14286,6 +14288,19 @@ if the toggle is ticked).</p>
             "QToolButton:checked{background:#2563EB;border-color:#2563EB;}"
             "QToolButton:hover{border-color:#93C5FD;}")
         _srow.addWidget(self.btn_search_text)
+        # (v274) 🌐/📂 scope toggle — poore My Files me dhoondo vs sirf is folder
+        self.btn_scope = QtWidgets.QToolButton()
+        self.btn_scope.setCheckable(True)
+        self.btn_scope.setChecked(bool(self._opts.get("search_all_scope")))
+        self.btn_scope.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_scope.setStyleSheet(
+            "QToolButton{background:#fff;border:1px solid #E5E7EB;border-radius:9px;"
+            "padding:3px 6px;font-size:13px;}"
+            "QToolButton:checked{background:#0D9488;border-color:#0D9488;}"
+            "QToolButton:hover{border-color:#93C5FD;}")
+        self._refresh_scope_btn()
+        self.btn_scope.toggled.connect(self._on_scope_toggle)
+        _srow.addWidget(self.btn_scope)
         self._files_srow = _srow
         fp.addLayout(_srow)
         # ✨ (v192) Filter CHIPS — mockup jaise (Fav/Recent/Today/All);
@@ -17459,6 +17474,15 @@ if the toggle is ticked).</p>
             menu.addAction(self.L("🧩 %d files → ek PDF…" % len(sel_files),
                                   "🧩 Merge %d files → one PDF…" % len(sel_files)),
                            lambda: self._bulk_merge(sel_files))
+            menu.addAction(self.L("🖊 %d files editor me kholo" % len(sel_files),
+                                  "🖊 Open %d files in editor" % len(sel_files)),
+                           lambda: self._open_in_editor(sel_files))
+            menu.addAction("🟢 " + self.L("%d files WhatsApp (ZIP)" % len(sel_files),
+                                          "WhatsApp %d files (ZIP)" % len(sel_files)),
+                           lambda: self._bulk_share(sel_files))
+            menu.addAction("🏷 " + self.L("%d files par tag…" % len(sel_files),
+                                          "Tag %d files…" % len(sel_files)),
+                           lambda: self._bulk_tag(sel_files))
             _npdf = len([f for f in sel_files if f.lower().endswith(".pdf")])
             if _npdf:
                 menu.addAction(self.L("🗜 %d PDF ek saath compress… (custom size)" % _npdf,
@@ -17506,6 +17530,9 @@ if the toggle is ticked).</p>
                                lambda: self._delete_folder(path))
             else:
                 menu.addAction("📖 Open", lambda: self._open_path(path))
+                if path.lower().endswith(self._IMPORTABLE_EXTS):
+                    menu.addAction("🖊 " + self.L("Editor me kholo", "Open in editor"),
+                                   lambda: self._open_in_editor([path]))
                 pinned = self._opts.get("pinned_files") or []
                 menu.addAction(self.L("📌 Pin hatao", "📌 Unpin") if path in pinned
                                else self.L("📌 Pin karo (upar rakho)", "📌 Pin (keep on top)"),
@@ -17586,6 +17613,15 @@ if the toggle is ticked).</p>
             menu.addAction(self.L("🧩 %d files → ek PDF…" % len(files),
                                   "🧩 Merge %d files → one PDF…" % len(files)),
                            lambda: self._bulk_merge(files))
+            menu.addAction(self.L("🖊 %d files editor me kholo" % len(files),
+                                  "🖊 Open %d files in editor" % len(files)),
+                           lambda: self._open_in_editor(files))
+            menu.addAction("🟢 " + self.L("%d files WhatsApp (ZIP)" % len(files),
+                                          "WhatsApp %d files (ZIP)" % len(files)),
+                           lambda: self._bulk_share(files))
+            menu.addAction("🏷 " + self.L("%d files par tag…" % len(files),
+                                          "Tag %d files…" % len(files)),
+                           lambda: self._bulk_tag(files))
             _npdf = len([f for f in files if f.lower().endswith(".pdf")])
             if _npdf:
                 menu.addAction(self.L("🗜 %d PDF compress…" % _npdf,
@@ -17604,6 +17640,9 @@ if the toggle is ticked).</p>
         elif len(files) == 1:
             path = files[0]
             menu.addAction("📖 " + self.L("Kholo", "Open"), lambda: self._open_path(path))
+            if path.lower().endswith(self._IMPORTABLE_EXTS):
+                menu.addAction("🖊 " + self.L("Editor me kholo", "Open in editor"),
+                               lambda: self._open_in_editor([path]))
             if path.lower().endswith(".pdf"):
                 menu.addAction("🟢 WhatsApp", lambda: self.share_whatsapp(path))
                 menu.addAction("✉ Email", lambda: self.share_email(path))
@@ -18402,9 +18441,8 @@ if the toggle is ticked).</p>
         except Exception:
             pass
         terms, filters = SE.parse_query(q)
-        scope = self._panel_current_dir()
-        if not (scope and os.path.isdir(scope)):
-            scope = self._files_root()
+        self._remember_search(q)                         # (v274) pichhli searches yaad
+        scope = self._search_scope()                     # (v274) toggle: folder / poora My Files
         search_text = self.btn_search_text.isChecked()   # PDF ke andar bhi?
         self.files_results._hl_terms = terms              # results me match highlight
 
@@ -18439,6 +18477,8 @@ if the toggle is ticked).</p>
         def job():
             dir_hits, file_hits = [], []
             snips = {}                       # (v272) path -> jis line me mila uska tukda
+            _img_budget = [120]              # (v274) itni images tak hi OCR (hang na ho)
+            _img_exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
             for dp, dns, fn in os.walk(scope):
                 for d in dns:
                     if not terms:
@@ -18460,8 +18500,13 @@ if the toggle is ticked).</p>
                         continue
                     n = SE.norm(f)
                     txt = ""
-                    if full.lower().endswith(".pdf"):
+                    fl = full.lower()
+                    if fl.endswith(".pdf"):
                         txt = (self._pdf_text_cached(full) or "")
+                    elif fl.endswith(_img_exts) and _img_budget[0] > 0:
+                        # (v274) scan ki hui IMAGE ke andar bhi OCR se dhoondo
+                        _img_budget[0] -= 1
+                        txt = (self._img_text_cached(full) or "")
                     m = SE.match_file(terms, n, SE.compact(n), n.split(),
                                       SE.norm(dp), SE.compact(SE.norm(dp)),
                                       txt.lower()) if terms else (3, [9])
@@ -18532,9 +18577,7 @@ if the toggle is ticked).</p>
             terms, filters = SE.parse_query(q)
         except Exception:
             sg.hide(); return
-        scope = self._panel_current_dir()
-        if not (scope and os.path.isdir(scope)):
-            scope = self._files_root()
+        scope = self._search_scope()                     # (v274) folder / poora My Files
         idx = getattr(self, "_files_index", None)
         if idx is None or getattr(self, "_files_index_scope", None) != scope:
             self._ensure_files_index_async(scope)   # ban jaate hi dobara aa jayega
@@ -18583,6 +18626,11 @@ if the toggle is ticked).</p>
             pass
         if not p:
             return
+        # (v274) recent-search item? -> us query se dobara search
+        if isinstance(p, str) and p.startswith(self._RS_SENTINEL):
+            self.files_search.setText(p[len(self._RS_SENTINEL):])
+            self._files_search_enter()
+            return
         if os.path.isdir(p):
             self._jump_to_folder(p)
         else:
@@ -18599,6 +18647,74 @@ if the toggle is ticked).</p>
         if sg is not None:
             sg.hide()
         self._run_files_search()
+
+    # ---- (v274) scope toggle: sirf folder vs poora My Files ----
+    def _search_scope(self):
+        if self._opts.get("search_all_scope"):
+            return self._files_root()
+        scope = self._panel_current_dir()
+        if not (scope and os.path.isdir(scope)):
+            scope = self._files_root()
+        return scope
+
+    def _refresh_scope_btn(self):
+        try:
+            on = bool(self._opts.get("search_all_scope"))
+            self.btn_scope.setText("🌐" if on else "📂")
+            self.btn_scope.setToolTip(self.L(
+                "Poore My Files me dhoondo" if on else "Sirf is folder me dhoondo (click: poore My Files me)",
+                "Searching all of My Files" if on else "Searching this folder only (click: all of My Files)"))
+        except Exception:
+            pass
+
+    def _on_scope_toggle(self, on):
+        self._opts["search_all_scope"] = bool(on)
+        self._save_opts()
+        self._refresh_scope_btn()
+        # index scope badla — dobara search/suggest
+        self._sugg_timer.start()
+        if len(self.files_search.text().strip()) >= 2:
+            self._files_search_timer.start()
+
+    # ---- (v274) recent searches — pichhli searches yaad rakho ----
+    _RS_SENTINEL = "\x00rs\x00"
+
+    def _remember_search(self, q):
+        q = (q or "").strip()
+        if len(q) < 2:
+            return
+        rs = self._opts.setdefault("recent_searches", [])
+        low = [x.lower() for x in rs]
+        if q.lower() in low:
+            rs.pop(low.index(q.lower()))
+        rs.insert(0, q)
+        del rs[12:]
+        self._save_opts()
+
+    def _show_recent_searches(self):
+        """Search-box focus (khaali) par — pichhli searches dropdown me."""
+        sg = getattr(self, "_sugg", None)
+        if sg is None:
+            return
+        if self.files_search.text().strip():
+            return
+        rs = self._opts.get("recent_searches", []) or []
+        if not rs:
+            return
+        sg.clear()
+        for q in rs[:10]:
+            it = QtWidgets.QListWidgetItem("🕘  " + q)
+            it.setData(QtCore.Qt.UserRole, self._RS_SENTINEL + q)
+            sg.addItem(it)
+        try:
+            gp = self.files_search.mapToGlobal(
+                QtCore.QPoint(0, self.files_search.height() + 2))
+            h = min(sg.count(), 8) * 30 + 8
+            sg.setGeometry(gp.x(), gp.y(), max(180, self.files_search.width()), h)
+        except Exception:
+            pass
+        sg.setCurrentRow(-1)
+        sg.raise_(); sg.show()
 
     def _render_files_results(self, res, q=None, preserve_order=False):
         """Search/filter ke natije (list) ko panel me dikhao. q diya ho to sirf
@@ -18693,8 +18809,15 @@ if the toggle is ticked).</p>
                     it.setSizeHint(QtCore.QSize(108, 150))
                     grid_files.append((self.files_results.count(), p))
                 else:
+                    # (v274) file ke aage size bhi dikhe (kitni MB/KB)
+                    try:
+                        _b = os.path.getsize(p)
+                        _sz = ("  ·  %d KB" % round(_b / 1024.0)) if _b < 1048576 \
+                            else ("  ·  %.1f MB" % (_b / 1048576.0))
+                    except Exception:
+                        _sz = ""
                     it = QtWidgets.QListWidgetItem("      " + pin + _icon.get(ext, "🖼")
-                                                   + "  " + os.path.basename(p))
+                                                   + "  " + os.path.basename(p) + _sz)
                 it.setToolTip(p + self.L("   (click = preview · 2x = kholo · drag = import)",
                                          "   (click = preview · double-click = open · drag = import)"))
                 it.setData(QtCore.Qt.UserRole, p)
@@ -19191,6 +19314,96 @@ if the toggle is ticked).</p>
         except Exception:
             pass
         return out
+
+    # ---- (v274) naye bulk/single actions ----
+    _IMPORTABLE_EXTS = (".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+
+    def _open_in_editor(self, files):
+        """(v274) Saved file(s) ko wapas kaam-wali page-list me laao — dobara
+        crop/sidha/AI-Auto/rotate ke liye (jaise import)."""
+        paths = [p for p in files
+                 if os.path.isfile(p) and p.lower().endswith(self._IMPORTABLE_EXTS)]
+        if not paths:
+            self._warn(self.L("Sirf PDF/photo editor me khul sakti hai.",
+                              "Only PDF/photo files can be opened in the editor.")); return
+        try:
+            self.list.setFocus()
+        except Exception:
+            pass
+        self._start_import(paths, "normal")
+
+    def _bulk_tag(self, files):
+        """(v274) Kai files par ek saath tag lagao (ek baar likho — sab par lage)."""
+        files = [f for f in files if os.path.isfile(f)]
+        if not files:
+            return
+        tags = self._opts.setdefault("tags", {})
+        # pehle se kisi ek ka tag suggest ke liye
+        cur = ", ".join(tags.get(files[0], []))
+        text, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Tags (%d files)" % len(files), "Tags (%d files)" % len(files)),
+            self.L("Sab par yahi tag lagao (comma se, jaise: Insurance, ज़रूरी):",
+                   "Apply these tags to all (comma-separated, e.g.: Insurance, Urgent):"),
+            text=cur)
+        if not ok:
+            return
+        lst = [t.strip() for t in text.split(",") if t.strip()]
+        for f in files:
+            if lst:
+                tags[f] = lst
+            else:
+                tags.pop(f, None)
+        if lst:
+            self._ensure_tag_colors(lst)
+        self._save_opts()
+        self.status.showMessage(self.L("🏷 %d files par tag: %s" % (len(files), ", ".join(lst) or "(hataya)"),
+                                       "🏷 Tagged %d files: %s" % (len(files), ", ".join(lst) or "(removed)")), 5000)
+
+    def _bulk_share(self, files):
+        """(v274) Kai files ek saath WhatsApp — ek ZIP bana ke share (clipboard
+        par ZIP, WhatsApp khul jaata hai; Ctrl+V se attach)."""
+        files = [f for f in files if os.path.isfile(f)]
+        if not files:
+            return
+        if len(files) == 1:
+            self.share_whatsapp(files[0]); return
+        try:
+            import zipfile
+            fd, z = tempfile.mkstemp(suffix=".zip", dir=self._tmpdir); os.close(fd)
+            with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as zf:
+                for f in files:
+                    zf.write(f, os.path.basename(f))
+        except Exception as exc:
+            self._warn("ZIP failed: %s" % exc); return
+        self.share_whatsapp(z)
+
+    def _img_text_cached(self, path):
+        """(v274) Scan ki hui IMAGE ke andar ka text (OCR) — content-search ke
+        liye. Result yaad rakhte hain (path+time). Tesseract bundled hai."""
+        if not HAS_OCR_LIBS:
+            return ""
+        try:
+            mt = os.path.getmtime(path)
+        except Exception:
+            return ""
+        cache = getattr(self, "_img_text_cache", None)
+        if cache is None:
+            cache = self._img_text_cache = {}
+        key = (path, mt)
+        if key in cache:
+            return cache[key]
+        txt = ""
+        try:
+            txt = (pytesseract.image_to_string(Image.open(path), lang="hin+eng") or "").lower()
+        except Exception:
+            txt = ""
+        cache[key] = txt
+        if len(cache) > 300:
+            try:
+                cache.pop(next(iter(cache)))
+            except Exception:
+                pass
+        return txt
 
     def _bulk_delete(self, files):
         if QtWidgets.QMessageBox.question(
