@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "269"
+VERSION = "270"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11645,6 +11645,26 @@ class ScannerWindow(QtWidgets.QMainWindow):
         return ""
 
     def eventFilter(self, obj, ev):
+        # (v270) My Files live-search dropdown — keyboard control
+        if hasattr(self, "files_search") and obj is self.files_search:
+            sg = getattr(self, "_sugg", None)
+            if ev.type() == QtCore.QEvent.KeyPress and sg is not None:
+                k = ev.key()
+                vis = sg.isVisible() and sg.count() > 0
+                if k == QtCore.Qt.Key_Down and vis:
+                    self._sugg_nav = True
+                    sg.setCurrentRow(min(sg.currentRow() + 1, sg.count() - 1)
+                                     if sg.currentRow() >= 0 else 0)
+                    return True
+                if k == QtCore.Qt.Key_Up and vis:
+                    self._sugg_nav = True
+                    sg.setCurrentRow(max(sg.currentRow() - 1, 0))
+                    return True
+                if k == QtCore.Qt.Key_Escape and vis:
+                    sg.hide()
+                    return True
+            elif ev.type() == QtCore.QEvent.FocusOut and sg is not None:
+                QtCore.QTimer.singleShot(200, sg.hide)   # click land hone do, phir chhupao
         if obj is self.list.viewport():
             if ev.type() == QtCore.QEvent.Resize:
                 self._empty_lbl.setGeometry(self.list.viewport().rect())
@@ -14468,7 +14488,33 @@ if the toggle is ticked).</p>
         self._files_search_timer.setSingleShot(True)
         self._files_search_timer.setInterval(60)   # index memory me — lagbhag turant
         self._files_search_timer.timeout.connect(self._run_files_search)
-        self.files_search.textChanged.connect(lambda _t: self._files_search_timer.start())
+        # (v270) LIVE DROPDOWN — pehle akshar se hi, jaise-jaise type karo, milte
+        # matches search box ke NEECHE ek dropdown me turant dikhte hain (Google
+        # suggestions jaisa). Click/Enter par file khul jaati / folder me chale
+        # jao. Folder-tree peeche dikhta rehta hai; poori list Enter par.
+        self._sugg = QtWidgets.QListWidget(self.files_panel)
+        self._sugg.setWindowFlags(QtCore.Qt.Tool | QtCore.Qt.FramelessWindowHint
+                                  | QtCore.Qt.WindowStaysOnTopHint
+                                  | QtCore.Qt.NoDropShadowWindowHint)
+        self._sugg.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)  # focus box me rahe
+        self._sugg.setFocusPolicy(QtCore.Qt.NoFocus)
+        self._sugg.setMouseTracking(True)
+        self._sugg.setUniformItemSizes(True)
+        self._sugg.setStyleSheet(
+            "QListWidget{background:#fff;border:1px solid #C7D2FE;border-radius:8px;"
+            "outline:0;font-size:12px;padding:3px;}"
+            "QListWidget::item{padding:5px 7px;border-radius:5px;}"
+            "QListWidget::item:selected{background:#EEF2FF;color:#111827;}"
+            "QListWidget::item:hover{background:#F1F5F9;}")
+        self._sugg.itemClicked.connect(self._files_sugg_pick)
+        self._sugg.hide()
+        self._sugg_timer = QtCore.QTimer(self)
+        self._sugg_timer.setSingleShot(True)
+        self._sugg_timer.setInterval(25)                 # bahut tez — har keystroke
+        self._sugg_timer.timeout.connect(self._update_files_suggest)
+        self.files_search.textChanged.connect(lambda _t: self._sugg_timer.start())
+        self.files_search.returnPressed.connect(self._files_search_enter)
+        self.files_search.installEventFilter(self)       # ↓ ↑ Esc Enter dropdown ke liye
         self._rebuild_fav_bar()
         _row = QtWidgets.QHBoxLayout()
         _bopen = QtWidgets.QPushButton(self.L("📂 Kholo", "📂 Open"))
@@ -18123,10 +18169,10 @@ if the toggle is ticked).</p>
             except Exception:
                 pass
             # index aate hi agar search-box me abhi bhi kuch likha hai to
-            # turant natije dikha do
+            # (v270) live dropdown turant taaza karo
             try:
-                if len(self.files_search.text().strip()) >= 2:
-                    self._run_files_search()
+                if len(self.files_search.text().strip()) >= 1:
+                    self._update_files_suggest()
             except Exception:
                 pass
         self._run_bg_quiet(lambda: self._build_files_index(scope), _done)
@@ -18310,6 +18356,94 @@ if the toggle is ticked).</p>
             self._render_files_results(res, q, preserve_order=True)
         self._run_bg(job, done, self.L("Andar ka text dhoondh rahe…",
                                        "Searching inside text…"))
+
+    def _update_files_suggest(self):
+        """(v270) LIVE dropdown: jaise-jaise type karo, top matches search box ke
+        neeche turant (pehle akshar se) dikhao. In-memory index se — bahut tez."""
+        sg = getattr(self, "_sugg", None)
+        if sg is None:
+            return
+        self._sugg_nav = False                # nayi type => koi manual selection nahi
+        try:
+            if not self.files_search.isVisible():
+                sg.hide(); return
+        except Exception:
+            return
+        q = self.files_search.text().strip().lower()
+        if len(q) < 1:                        # pehle akshar se hi
+            sg.hide(); return
+        SE = FileSearchEngine
+        try:
+            terms, filters = SE.parse_query(q)
+        except Exception:
+            sg.hide(); return
+        scope = self._panel_current_dir()
+        if not (scope and os.path.isdir(scope)):
+            scope = self._files_root()
+        idx = getattr(self, "_files_index", None)
+        if idx is None or getattr(self, "_files_index_scope", None) != scope:
+            self._ensure_files_index_async(scope)   # ban jaate hi dobara aa jayega
+            return
+        try:
+            res = self._search_index_entries(terms, filters, idx, limit=80)
+        except Exception:
+            sg.hide(); return
+        _icon = {".pdf": "📕", ".docx": "📘", ".doc": "📘", ".xlsx": "📗",
+                 ".xls": "📗", ".txt": "📄", ".png": "🖼", ".jpg": "🖼",
+                 ".jpeg": "🖼", ".tif": "🖼", ".tiff": "🖼"}
+        sg.clear()
+        shown = 0
+        for kind, p in res:
+            if shown >= 12:
+                break
+            base = os.path.basename(p) or p
+            ic = "📁" if kind == "dir" else _icon.get(os.path.splitext(p)[1].lower(), "🖼")
+            it = QtWidgets.QListWidgetItem("%s  %s" % (ic, base))
+            it.setData(QtCore.Qt.UserRole, p)
+            it.setToolTip(p)
+            sg.addItem(it)
+            shown += 1
+        if shown == 0:
+            sg.hide(); return
+        # position: search box ke theek neeche, usi width me (global coords)
+        try:
+            gp = self.files_search.mapToGlobal(
+                QtCore.QPoint(0, self.files_search.height() + 2))
+            row_h = 30
+            h = min(shown, 8) * row_h + 8
+            sg.setGeometry(gp.x(), gp.y(), max(180, self.files_search.width()), h)
+        except Exception:
+            pass
+        sg.setCurrentRow(-1)                  # default koi highlight nahi
+        sg.raise_()
+        sg.show()
+
+    def _files_sugg_pick(self, it):
+        """Dropdown me kisi item par click/Enter — folder ho to usme chale jao,
+        file ho to kholo."""
+        p = it.data(QtCore.Qt.UserRole) if it else None
+        try:
+            self._sugg.hide()
+        except Exception:
+            pass
+        if not p:
+            return
+        if os.path.isdir(p):
+            self._jump_to_folder(p)
+        else:
+            self._open_path(p)
+
+    def _files_search_enter(self):
+        """Enter: agar user ne ↓/↑ se koi suggestion chuna hai to wahi kholo;
+        warna poori search-list panel me dikhao."""
+        sg = getattr(self, "_sugg", None)
+        if (sg is not None and sg.isVisible() and getattr(self, "_sugg_nav", False)
+                and sg.currentItem() is not None):
+            self._files_sugg_pick(sg.currentItem())
+            return
+        if sg is not None:
+            sg.hide()
+        self._run_files_search()
 
     def _render_files_results(self, res, q=None, preserve_order=False):
         """Search/filter ke natije (list) ko panel me dikhao. q diya ho to sirf
