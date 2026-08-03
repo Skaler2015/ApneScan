@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "275"
+VERSION = "276"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -6584,11 +6584,19 @@ class FilesCardDelegate(QtWidgets.QStyledItemDelegate):
         cy = r.center().y()
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         if isdir:
+            # (v276) folder ka apna rang (agar set kiya ho), warna amber
+            try:
+                _fc = (self.win._opts.get("folder_colors", {}) or {}).get(
+                    os.path.normpath(path))
+            except Exception:
+                _fc = None
+            _c_tab = QtGui.QColor(_fc) if _fc else QtGui.QColor("#FBBF24")
+            _c_front = _c_tab.darker(112)
             p.setPen(QtCore.Qt.NoPen)
-            p.setBrush(QtGui.QColor("#FBBF24"))
+            p.setBrush(_c_tab)
             p.drawRoundedRect(QtCore.QRectF(x, cy - 6.5, 6, 3.5), 1, 1)      # tab
             p.drawRoundedRect(QtCore.QRectF(x, cy - 4.5, 15, 11), 2, 2)      # body
-            p.setBrush(QtGui.QColor("#F59E0B"))
+            p.setBrush(_c_front)
             p.drawRoundedRect(QtCore.QRectF(x, cy - 2, 15, 8.5), 2, 2)       # front
         else:
             # (v256) File-type ke hisaab se RANGIN icon (PDF laal / IMG hara /
@@ -11645,6 +11653,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
         return ""
 
     def eventFilter(self, obj, ev):
+        # (v276) Space = quick-look (badी झलक) — results/tree me chuni file
+        if (ev.type() == QtCore.QEvent.KeyPress and ev.key() == QtCore.Qt.Key_Space
+                and (obj is getattr(self, "files_results", None)
+                     or obj is getattr(self, "files_tree", None))):
+            self._quick_look_selected()
+            return True
         # (v270) My Files live-search dropdown — keyboard control
         if hasattr(self, "files_search") and obj is self.files_search:
             sg = getattr(self, "_sugg", None)
@@ -14301,6 +14315,18 @@ if the toggle is ticked).</p>
         self._refresh_scope_btn()
         self.btn_scope.toggled.connect(self._on_scope_toggle)
         _srow.addWidget(self.btn_scope)
+        # (v276) ★ current search ko save karo (smart search)
+        self.btn_save_search = QtWidgets.QToolButton()
+        self.btn_save_search.setText("★")
+        self.btn_save_search.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_save_search.setToolTip(self.L("Is search ko save karo (baad me ek click me chalao)",
+                                               "Save this search (re-run later in one click)"))
+        self.btn_save_search.setStyleSheet(
+            "QToolButton{background:#fff;border:1px solid #E5E7EB;border-radius:9px;"
+            "padding:3px 6px;font-size:13px;color:#CA8A04;}"
+            "QToolButton:hover{border-color:#F59E0B;}")
+        self.btn_save_search.clicked.connect(self._save_current_search)
+        _srow.addWidget(self.btn_save_search)
         self._files_srow = _srow
         fp.addLayout(_srow)
         # ✨ (v192) Filter CHIPS — mockup jaise (Fav/Recent/Today/All);
@@ -14508,6 +14534,7 @@ if the toggle is ticked).</p>
         self.files_tree._on_activate = self._files_tree_open   # Enter = folder kholo
         self.files_tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.files_tree.customContextMenuRequested.connect(self._files_tree_menu)
+        self.files_tree.installEventFilter(self)      # (v276) Space = quick-look
         self.files_tree.selectionModel().currentChanged.connect(self._files_sel_changed)
         # (v201) F2 ab GLOBAL dispatcher se aata hai (_rename_shortcut) —
         # v196 wala widget-shortcut global F2 se TAKRA kar dono ko rok deta
@@ -14551,6 +14578,7 @@ if the toggle is ticked).</p>
         # actions (jaise folder-browse me): share/compress/rename/move/delete…
         self.files_results.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.files_results.customContextMenuRequested.connect(self._files_results_menu)
+        self.files_results.installEventFilter(self)   # (v276) Space = quick-look
         self.files_results._hl_terms = None                 # smart-search match highlight
         self.files_results.setItemDelegate(SearchHLDelegate(self.files_results))
         self.files_results.hide()
@@ -17178,6 +17206,83 @@ if the toggle is ticked).</p>
         if p and os.path.isdir(p):
             self._jump_to_folder(p)
 
+    # ---- (v276) folder ka rang ----
+    def _set_folder_color(self, path, hexcol):
+        fc = self._opts.setdefault("folder_colors", {})
+        key = os.path.normpath(path)
+        if hexcol:
+            fc[key] = hexcol
+        else:
+            fc.pop(key, None)                 # None = default amber
+        self._save_opts()
+        try:
+            self.files_tree.viewport().update()
+        except Exception:
+            pass
+
+    # ---- (v276) saved / smart searches ----
+    def _save_current_search(self):
+        q = self.files_search.text().strip()
+        if len(q) < 2:
+            self._warn(self.L("Pehle search box me kuch likho, phir save karo.",
+                              "Type something in the search box first, then save.")); return
+        ss = self._opts.setdefault("saved_searches", [])
+        if q not in ss:
+            ss.insert(0, q); del ss[20:]
+            self._save_opts()
+        self.status.showMessage(self.L("⭐ Search save ho gaya: %s" % q,
+                                       "⭐ Saved search: %s" % q), 4000)
+
+    # ---- (v276) quick-look: badी झलक (Spacebar) ----
+    def _quick_look(self, path):
+        if not (path and os.path.isfile(path)):
+            return
+        pm = None
+        try:
+            pm = self._render_file_pixmap(path)
+        except Exception:
+            pm = None
+        if pm is None or pm.isNull():
+            self._open_path(path); return
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("👁 " + os.path.basename(path))
+        v = QtWidgets.QVBoxLayout(dlg); v.setContentsMargins(6, 6, 6, 6)
+        lbl = QtWidgets.QLabel(); lbl.setAlignment(QtCore.Qt.AlignCenter)
+        scr = None
+        try:
+            scr = self.screen().availableGeometry()
+        except Exception:
+            scr = None
+        mw = int((scr.width() if scr else 1000) * 0.7)
+        mh = int((scr.height() if scr else 800) * 0.8)
+        lbl.setPixmap(pm.scaled(mw, mh, QtCore.Qt.KeepAspectRatio,
+                                QtCore.Qt.SmoothTransformation))
+        sa = QtWidgets.QScrollArea(); sa.setWidget(lbl); sa.setWidgetResizable(True)
+        v.addWidget(sa)
+        hint = QtWidgets.QLabel(self.L("Space/Esc band · 2x = kholo", "Space/Esc to close · double-click to open"))
+        hint.setStyleSheet("color:#6B7280;font-size:11px;"); hint.setAlignment(QtCore.Qt.AlignCenter)
+        v.addWidget(hint)
+        lbl.mouseDoubleClickEvent = lambda _e, pth=path: (dlg.accept(), self._open_path(pth))
+        for k in (QtCore.Qt.Key_Space, QtCore.Qt.Key_Escape):
+            QtWidgets.QShortcut(QtGui.QKeySequence(k), dlg, dlg.accept)
+        dlg.resize(mw + 40, mh + 40)
+        dlg.exec_()
+
+    def _quick_look_selected(self):
+        """Search-results ya tree me chuni file ki badी झलक."""
+        p = None
+        try:
+            if self.files_results.isVisible():
+                it = self.files_results.currentItem()
+                p = it.data(QtCore.Qt.UserRole) if it else None
+            if not p:
+                sel = self._selected_library_files()
+                p = sel[0] if sel else None
+        except Exception:
+            p = None
+        if p:
+            self._quick_look(p)
+
     # ---- (v275) file notes — kisi file par apna chhota note ----
     def _file_note(self, path):
         return (self._opts.get("file_notes", {}) or {}).get(path, "")
@@ -17620,6 +17725,13 @@ if the toggle is ticked).</p>
                                       "🗜 Make a ZIP of this folder…"),
                                lambda: self._zip_folder(path))
                 menu.addAction("📂 Open in Explorer", lambda: self._open_path(path))
+                # (v276) folder ka rang — pehchaan aasaan
+                cm = menu.addMenu("🎨 " + self.L("Folder ka rang", "Folder colour"))
+                for _nm, _hex in (("🟡 Amber", None), ("🔵 Neela", "#3B82F6"),
+                                  ("🟢 Hara", "#16A34A"), ("🔴 Laal", "#DC2626"),
+                                  ("🟣 Baingani", "#9333EA"), ("🟠 Naarangi", "#EA580C"),
+                                  ("🩷 Gulaabi", "#DB2777"), ("🩵 Teal", "#0D9488")):
+                    cm.addAction(_nm, lambda _c=False, h=_hex, pp=path: self._set_folder_color(pp, h))
                 favs = self._opts.get("fav_folders") or []
                 menu.addAction("⭐ Remove favourite" if path in favs else "⭐ Add favourite",
                                lambda: self._toggle_fav(path))
@@ -17743,6 +17855,8 @@ if the toggle is ticked).</p>
         elif len(files) == 1:
             path = files[0]
             menu.addAction("📖 " + self.L("Kholo", "Open"), lambda: self._open_path(path))
+            menu.addAction("👁 " + self.L("Badी झलक (Space)", "Quick-look (Space)"),
+                           lambda: self._quick_look(path))
             if path.lower().endswith(self._IMPORTABLE_EXTS):
                 menu.addAction("🖊 " + self.L("Editor me kholo", "Open in editor"),
                                lambda: self._open_in_editor([path]))
@@ -18810,14 +18924,23 @@ if the toggle is ticked).</p>
             return
         if self.files_search.text().strip():
             return
+        saved = self._opts.get("saved_searches", []) or []
         rs = self._opts.get("recent_searches", []) or []
-        if not rs:
+        if not saved and not rs:
             return
         sg.clear()
+        for q in saved[:8]:                          # ⭐ saved sabse upar
+            it = QtWidgets.QListWidgetItem("⭐  " + q)
+            it.setData(QtCore.Qt.UserRole, self._RS_SENTINEL + q)
+            sg.addItem(it)
         for q in rs[:10]:
+            if q in saved:
+                continue
             it = QtWidgets.QListWidgetItem("🕘  " + q)
             it.setData(QtCore.Qt.UserRole, self._RS_SENTINEL + q)
             sg.addItem(it)
+        if sg.count() == 0:
+            return
         try:
             gp = self.files_search.mapToGlobal(
                 QtCore.QPoint(0, self.files_search.height() + 2))
