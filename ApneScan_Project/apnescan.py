@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "274"
+VERSION = "275"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -14458,6 +14458,11 @@ if the toggle is ticked).</p>
         self.lbl_panel_cwd.setStyleSheet("color:#4F46E5;font-size:11px;font-weight:600;")
         self.lbl_panel_cwd.setWordWrap(True)
         self.lbl_panel_cwd.setAlignment(QtCore.Qt.AlignCenter)
+        # (v275) clickable breadcrumb — kisi bhi hisse par click = wahi folder
+        self.lbl_panel_cwd.setTextFormat(QtCore.Qt.RichText)
+        self.lbl_panel_cwd.setOpenExternalLinks(False)
+        self.lbl_panel_cwd.linkActivated.connect(self._crumb_click)
+        self._crumb_paths = []
         _cwdrow.addWidget(self.lbl_panel_cwd, 1)
         self.btn_cwd_fav = QtWidgets.QToolButton()
         self.btn_cwd_fav.setText("☆"); self.btn_cwd_fav.setAutoRaise(True)
@@ -17125,7 +17130,7 @@ if the toggle is ticked).</p>
         if hasattr(self, "btn_panel_back"):
             self.btn_panel_back.setEnabled(not at_top)
         if hasattr(self, "lbl_panel_cwd"):
-            self.lbl_panel_cwd.setText("📂 " + (os.path.basename(cur) or cur))
+            self.lbl_panel_cwd.setText(self._build_crumb_html(base, cur))
         # ⭐ star: abhi khula folder favourite hai to bhara ⭐, warna khaali ☆
         if hasattr(self, "btn_cwd_fav"):
             favs = self._opts.get("fav_folders") or []
@@ -17136,6 +17141,101 @@ if the toggle is ticked).</p>
                 else "Is khule folder ko favourite banao",
                 "Remove this folder from favourites" if is_fav
                 else "Add this open folder as a favourite"))
+
+    def _build_crumb_html(self, base, cur):
+        """(v275) 🏠 / folder / subfolder — har hissa clickable link."""
+        try:
+            base = os.path.normpath(base); cur = os.path.normpath(cur)
+            self._crumb_paths = [base]
+            names = ["🏠"]
+            rel = os.path.relpath(cur, base)
+            if rel and rel != ".":
+                acc = base
+                for part in rel.split(os.sep):
+                    if not part or part == "..":
+                        continue
+                    acc = os.path.join(acc, part)
+                    self._crumb_paths.append(acc)
+                    names.append(part)
+            import html as _html
+            segs = []
+            for i, nm in enumerate(names):
+                if i == len(names) - 1:            # aakhri = abhi wala (link nahi)
+                    segs.append("<b style='color:#4338CA;'>%s</b>" % _html.escape(nm))
+                else:
+                    segs.append("<a href='crumb:%d' style='color:#6366F1;"
+                                "text-decoration:none;'>%s</a>" % (i, _html.escape(nm)))
+            return " <span style='color:#9CA3AF;'>›</span> ".join(segs)
+        except Exception:
+            return "📂 " + (os.path.basename(cur) or cur)
+
+    def _crumb_click(self, href):
+        try:
+            i = int(str(href).split(":", 1)[1])
+            p = self._crumb_paths[i]
+        except Exception:
+            return
+        if p and os.path.isdir(p):
+            self._jump_to_folder(p)
+
+    # ---- (v275) file notes — kisi file par apna chhota note ----
+    def _file_note(self, path):
+        return (self._opts.get("file_notes", {}) or {}).get(path, "")
+
+    def _edit_note(self, path):
+        notes = self._opts.setdefault("file_notes", {})
+        cur = notes.get(path, "")
+        text, ok = QtWidgets.QInputDialog.getMultiLineText(
+            self, self.L("📝 Note", "📝 Note"),
+            self.L("Is file par apna note likho (dikhega + tooltip me):",
+                   "Write a note for this file (shown here + in tooltip):"), cur)
+        if not ok:
+            return
+        text = text.strip()
+        if text:
+            notes[path] = text[:400]
+        else:
+            notes.pop(path, None)
+        self._save_opts()
+        self.status.showMessage(self.L("📝 Note save ho gaya", "📝 Note saved") if text
+                                else self.L("📝 Note hataya", "📝 Note removed"), 4000)
+        # agar search-results khule hain to taaza dikhao
+        try:
+            if self.files_results.isVisible() and getattr(self, "_last_files_res", None):
+                self._render_files_results(self._last_files_res, preserve_order=self._last_files_preserve)
+        except Exception:
+            pass
+
+    # ---- (v275) search operators: "exact phrase" aur -hatao ----
+    def _parse_ops(self, q):
+        """q me se "exact phrase" aur -exclude nikaalo; baaki (positive) query
+        engine ko do, phir results ko in operators se chhaano."""
+        import re as _re
+        phrases = _re.findall(r'"([^"]+)"', q)
+        q2 = _re.sub(r'"[^"]*"', " ", q)
+        excludes = _re.findall(r'(?:^|\s)-(\S+)', q2)
+        q2 = _re.sub(r'(?:^|\s)-\S+', " ", q2)
+        clean = (q2 + " " + " ".join(phrases)).strip()
+        return (clean,
+                [e.lower() for e in excludes if len(e) >= 2],
+                [p.lower().strip() for p in phrases if p.strip()])
+
+    def _apply_ops(self, res, excludes, phrases, search_text):
+        if not excludes and not phrases:
+            return res
+        out = []
+        for kind, p in res:
+            if kind != "file":
+                out.append((kind, p)); continue
+            hay = os.path.basename(p).lower()
+            if search_text and p.lower().endswith(".pdf"):
+                hay = hay + " " + (self._pdf_text_cached(p) or "")
+            if excludes and any(x in hay for x in excludes):
+                continue
+            if phrases and not all(ph in hay for ph in phrases):
+                continue
+            out.append((kind, p))
+        return out
 
     def _toggle_current_fav(self):
         """Abhi khule (breadcrumb wale) folder ko favourite banao/hatao.
@@ -17561,6 +17661,9 @@ if the toggle is ticked).</p>
                     tm.addAction("📂 " + self.L("Folder kholo (file drag karne ke liye)",
                                                 "Open folder (to drag the file)"),
                                  lambda p=path: self._open_path(os.path.dirname(p)))
+                menu.addAction("📝 " + (self.L("Note badlo…", "Edit note…") if self._file_note(path)
+                                        else self.L("Note lagao…", "Add note…")),
+                               lambda: self._edit_note(path))
                 menu.addAction(self.L("🖨 Print", "🖨 Print"), lambda: self._print_library_file(path))
                 menu.addSeparator()
                 menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
@@ -17649,6 +17752,9 @@ if the toggle is ticked).</p>
                 menu.addAction("🗜 " + self.L("Compress…", "Compress…"),
                                lambda: self.compress_pdf_tool(path))
             menu.addAction("🏷 " + self.L("Tag lagao…", "Add tag…"), lambda: self.tag_pdf(path))
+            menu.addAction("📝 " + (self.L("Note badlo…", "Edit note…") if self._file_note(path)
+                                    else self.L("Note lagao…", "Add note…")),
+                           lambda: self._edit_note(path))
             menu.addAction("🖨 Print", lambda: self._print_library_file(path))
             menu.addSeparator()
             menu.addAction(self.L("📄 Copy…", "📄 Copy to folder…"),
@@ -18440,7 +18546,10 @@ if the toggle is ticked).</p>
                 self._an_event("search")
         except Exception:
             pass
-        terms, filters = SE.parse_query(q)
+        # (v275) operators: "exact phrase" + -exclude nikaalo; baaki engine ko
+        clean_q, ex_ops, ph_ops = self._parse_ops(q)
+        self._search_ops = (ex_ops, ph_ops)
+        terms, filters = SE.parse_query(clean_q)
         self._remember_search(q)                         # (v274) pichhli searches yaad
         scope = self._search_scope()                     # (v274) toggle: folder / poora My Files
         search_text = self.btn_search_text.isChecked()   # PDF ke andar bhi?
@@ -18466,6 +18575,7 @@ if the toggle is ticked).</p>
             res = _search_engine.cached(ckey)
             if res is None:
                 res = self._search_index_entries(terms, filters, idx)
+                res = self._apply_ops(res, ex_ops, ph_ops, False)   # (v275) operators
                 _search_engine.remember(ckey, res)
             SE.log(q, time.time() - t0, len(res))
             self._render_files_results(res, q, preserve_order=True)
@@ -18530,6 +18640,7 @@ if the toggle is ticked).</p>
             if self.files_search.text().strip().lower() != q:
                 return
             results, snips = res
+            results = self._apply_ops(results, ex_ops, ph_ops, True)   # (v275) operators
             self._search_snippets = snips     # render me file ke neeche dikhega
             SE.log(q, time.time() - t0, len(results))
             self._render_files_results(results, q, preserve_order=True)
@@ -18574,7 +18685,8 @@ if the toggle is ticked).</p>
             sg.hide(); return
         SE = FileSearchEngine
         try:
-            terms, filters = SE.parse_query(q)
+            clean_q, _ex, _ph = self._parse_ops(q)       # (v275) operators hatao
+            terms, filters = SE.parse_query(clean_q or q)
         except Exception:
             sg.hide(); return
         scope = self._search_scope()                     # (v274) folder / poora My Files
@@ -18818,10 +18930,20 @@ if the toggle is ticked).</p>
                         _sz = ""
                     it = QtWidgets.QListWidgetItem("      " + pin + _icon.get(ext, "🖼")
                                                    + "  " + os.path.basename(p) + _sz)
-                it.setToolTip(p + self.L("   (click = preview · 2x = kholo · drag = import)",
-                                         "   (click = preview · double-click = open · drag = import)"))
+                _note = self._file_note(p)       # (v275) file ka note (agar hai)
+                it.setToolTip(p + (("\n📝 " + _note) if _note else "")
+                              + self.L("   (click = preview · 2x = kholo · drag = import)",
+                                       "   (click = preview · double-click = open · drag = import)"))
                 it.setData(QtCore.Qt.UserRole, p)
                 self.files_results.addItem(it)
+                # (v275) file ka note — neeche halki line me
+                if _note and not grid:
+                    nz = QtWidgets.QListWidgetItem("           📝 " + _note.replace("\n", " "))
+                    nz.setData(QtCore.Qt.UserRole, p)
+                    _nf = nz.font(); _nf.setPointSizeF(max(7.5, _nf.pointSizeF() - 0.5))
+                    nz.setFont(_nf); nz.setForeground(QtGui.QColor("#B45309"))
+                    nz.setToolTip(p)
+                    self.files_results.addItem(nz)
                 # (v272) PDF-andar-search ka snippet — file ke neeche grey line me
                 # (jis line me mareez/claim ka naam mila). Term khud highlight hota.
                 snip = (getattr(self, "_search_snippets", None) or {}).get(p)
