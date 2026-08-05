@@ -23,9 +23,9 @@ error_reporting(0);
 header('X-Content-Type-Options: nosniff');
 
 $DIR       = __DIR__ . '/phone_uploads';
-$MAX_FILE  = 25 * 1024 * 1024;    // ek file
-$MAX_TOTAL = 120 * 1024 * 1024;   // poore session ka jod
-$MAX_FILES = 40;                  // session me files
+$MAX_FILE  = 200 * 1024 * 1024;   // ek file (v279: video/office ke liye bada)
+$MAX_TOTAL = 800 * 1024 * 1024;   // poore session ka jod
+$MAX_FILES = 60;                  // session me files
 $TTL_MIN   = 60; $TTL_MAX = 3600; // 1 min – 60 min
 $RATE_UP_PER_HOUR = 200;          // per-IP uploads/ghanta
 $EXT_OK = array('jpg','jpeg','png','webp','heic','heif','pdf','tif','tiff');
@@ -141,16 +141,11 @@ if ($api === 'upload') {
     if ($sz <= 0 || $sz > $MAX_FILE) jout(array('ok'=>0,'err'=>'file too large'), 413);
     $tot = 0; foreach ($s['files'] as $fm) $tot += intval($fm['s']);
     if ($tot + $sz > $MAX_TOTAL) jout(array('ok'=>0,'err'=>'session full'), 413);
-    $name = preg_replace('/[^A-Za-z0-9._ -]/', '_', (string)$_FILES['file']['name']);
-    $name = substr($name !== '' ? $name : 'file', 0, 80);
-    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
-    if (!in_array($ext, $EXT_OK)) jout(array('ok'=>0,'err'=>'unsupported type'), 415);
-    $mime = '';
-    if (function_exists('finfo_open')) {
-        $fi = finfo_open(FILEINFO_MIME_TYPE);
-        if ($fi) { $mime = (string)finfo_file($fi, $_FILES['file']['tmp_name']); finfo_close($fi); }
-    }
-    if ($mime !== '' && !in_array($mime, $MIME_OK)) jout(array('ok'=>0,'err'=>'unsupported type'), 415);
+    $name = preg_replace('/[^A-Za-z0-9._ ()-]/', '_', (string)$_FILES['file']['name']);
+    $name = substr($name !== '' ? $name : 'file', 0, 90);
+    // (v279) KOI BHI file-type — image/pdf ke saath video/office/zip/anything.
+    // Suraksha: files '.bin' naam se store hoti hain, folder web se band
+    // (.htaccess deny + php engine off) — is liye kabhi execute nahi hotीं.
     $id = bin2hex(function_exists('random_bytes') ? random_bytes(8) : md5(uniqid('', true)));
     $p = 'f_' . $t . '_' . $id . '.bin';
     if (!@move_uploaded_file($_FILES['file']['tmp_name'], $DIR . '/' . $p))
@@ -330,13 +325,13 @@ h1{font-size:19px;margin:2px 0 4px;display:flex;align-items:center;gap:8px}
   <button class="btn cam" onclick="pick('cam')"><span class="ic">📷</span> Capture Photo</button>
   <button class="btn" onclick="pick('gal')"><span class="ic">🖼</span> Choose from Gallery</button>
   <button class="btn" onclick="pick('pdf')"><span class="ic">📄</span> Upload PDF</button>
-  <button class="btn" onclick="pick('any')"><span class="ic">📁</span> Browse Files</button>
+  <button class="btn" onclick="pick('any')"><span class="ic">📁</span> Koi bhi file (video / Office / zip…)</button>
   <label class="opt"><input type="checkbox" id="optim" checked>
     Optimized upload (photo chhoti karke tez bhejo — quality print-layak)</label>
   <input type="file" id="fcam" accept="image/*" capture="environment" style="display:none">
   <input type="file" id="fgal" accept="image/*" multiple style="display:none">
   <input type="file" id="fpdf" accept="application/pdf" multiple style="display:none">
-  <input type="file" id="fany" accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,.tif,.tiff" multiple style="display:none">
+  <input type="file" id="fany" multiple style="display:none">
   <div id="list"></div>
   <!-- (v277) Computer se aayi files — phone par download -->
   <div id="frompc" style="display:none;margin-top:14px">

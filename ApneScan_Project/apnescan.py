@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "278"
+VERSION = "279"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9146,15 +9146,32 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._phone_n = 0
         self._relay_left = int(sess.get("ttl") or 1800)
 
+        _IMGX = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".heic", ".heif", ".tif", ".tiff")
+
         def on_file(path, name):
+            low = str(name or path).lower()
             added = 0
             try:
-                if str(name or path).lower().endswith(".pdf"):
+                if low.endswith(".pdf"):
                     for pg in (pdf_to_images(path, self._tmpdir) or []):
                         self._add_item_for_path(pg); added += 1
-                else:
+                elif low.endswith(_IMGX):
                     # (v211) photo aate hi scan-jaisi saaf (auto)
                     self._add_item_for_path(self._clean_incoming_photo(path)); added = 1
+                else:
+                    # (v279) KOI AUR file (video/office/zip…) — scan-page nahi
+                    # banti; seedhe My Files (save-folder) me save ho jaati hai.
+                    dest = self._phone_save_other(path, os.path.basename(str(name or "file")))
+                    if dest:
+                        self._phone_n += 1
+                        count_lbl.setText(L("✅ '%s' computer par save ho gayi (My Files me)",
+                                            "✅ '%s' saved on the computer (in My Files)")
+                                          % os.path.basename(dest))
+                        try:
+                            QtWidgets.QApplication.beep()
+                        except Exception:
+                            pass
+                    return
             except Exception:
                 status_lbl.setText(L("⚠ '%s' import nahi hui (format support nahi)",
                                      "⚠ Could not import '%s' (unsupported format)") % (name or "file"))
@@ -9253,6 +9270,29 @@ class ScannerWindow(QtWidgets.QMainWindow):
         poller.shutdown()
         if self._phone_n:
             self.status.showMessage(L("📱 %d file phone se aayi.", "📱 %d file(s) from phone.") % self._phone_n, 6000)
+
+    def _phone_save_other(self, tmp_path, name):
+        """(v279) Phone se aayi image/PDF ke alawa koi bhi file (video/office/
+        zip…) ko save-folder (My Files) me rakho. Returns saved path ya None."""
+        try:
+            base = (self._opts.get("save_folder")
+                    or (self._files_root() if hasattr(self, "_files_root") else "")
+                    or os.path.expanduser("~"))
+            if not os.path.isdir(base):
+                os.makedirs(base, exist_ok=True)
+            safe = re.sub(r'[<>:"/\\|?*]', "_", name or "file").strip() or "file"
+            dest = os.path.join(base, safe)
+            if hasattr(self, "_unique_fs_path"):
+                dest = self._unique_fs_path(dest)
+            shutil.copy2(tmp_path, dest)
+            try:
+                if hasattr(self, "_refresh_files_root"):
+                    self._refresh_files_root()
+            except Exception:
+                pass
+            return dest
+        except Exception:
+            return None
 
     def _phone_scan_local(self, relay_failed=False):
         """Purana LOCAL WiFi mode (internet/relay na ho to) — same-WiFi QR."""

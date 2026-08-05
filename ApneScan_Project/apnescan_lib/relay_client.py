@@ -84,8 +84,10 @@ def take(base, token, key, file_id, name, dest_dir):
     url = (base + "?api=take&t=" + urllib.parse.quote(token)
            + "&k=" + urllib.parse.quote(key) + "&id=" + urllib.parse.quote(file_id))
     req = urllib.request.Request(url, headers=UA)
+    # (v279) koi bhi file — asli extension rakho (video/office/zip bhi). Ajeeb/
+    # khaali ext ho to hi .bin.
     ext = os.path.splitext(name or "")[1].lower()
-    if not re.match(r"^\.(jpe?g|png|webp|heic|heif|pdf|tiff?)$", ext):
+    if not re.match(r"^\.[a-z0-9]{1,10}$", ext):
         ext = ".bin"
     fd, path = tempfile.mkstemp(prefix="phone_", suffix=ext, dir=dest_dir)
     try:
