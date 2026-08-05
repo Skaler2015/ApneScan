@@ -6,7 +6,7 @@
 ; hai (do-do copy nahi bante), aur future updates saaf replace hote hain.
 AppId={{8F3A1C2E-5B7D-4E9A-9C1F-2A6B8D4E7F03}
 AppName=ApneScan
-AppVersion=279
+AppVersion=280
 AppPublisher=ApneSoft
 AppPublisherURL=https://apnescan.apnesoft.com
 ; (v268) PER-USER install (LocalAppData) — Administrator/UAC ki zaroorat NAHI.
@@ -26,7 +26,10 @@ DisableProgramGroupPage=yes
 Name: "desktopicon"; Description: "Desktop par icon banao"; GroupDescription: "Shortcuts:"
 
 [Files]
-Source: "dist\ApneScan.exe"; DestDir: "{app}"; Flags: ignoreversion
+; (v280) ONEDIR — poora dist\ApneScan folder (ApneScan.exe + _internal\ me
+; python312.dll aur baaki DLL). Runtime par kuch extract nahi hota, isliye
+; 'Failed to load python312.dll' error kabhi nahi aata.
+Source: "dist\ApneScan\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 Source: "apnescan.ico"; DestDir: "{app}"
 ; (v205) Tesseract OCR BUNDLED — auto-rotate/OCR ke liye alag install nahi
 Source: "tesseract_dist\*"; DestDir: "{app}\tesseract"; Flags: recursesubdirs ignoreversion skipifsourcedoesntexist

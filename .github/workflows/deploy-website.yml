@@ -95,24 +95,21 @@ jobs:
           # ka intezaar karte hain (build parallel me chal rahi hoti hai).
           V=$(grep -m1 -oP 'VERSION = "\K[0-9]+' ApneScan_Project/apnescan.py)
           echo "Chahiye version: v$V"
+          # (v280) onedir: installer (.exe) + portable folder ka ZIP publish hote
+          # hain; standalone ApneScan.exe ab nahi (usko chalane ke liye _internal
+          # folder chahiye). Website: main = Setup.exe, portable = Portable.zip.
           for i in $(seq 1 30); do
             if gh release download "v$V" -R "$GITHUB_REPOSITORY" \
-                 -p "ApneScan.exe" -p "ApneScan-Setup.exe" -D _site/ --clobber 2>/dev/null; then
+                 -p "ApneScan-Setup.exe" -p "ApneScan-Portable.zip" -D _site/ --clobber 2>/dev/null; then
               echo "Release v$V mil gaya"; break
             fi
             echo "Release v$V abhi ban raha hai... intezaar ($i/30)"; sleep 20
           done
           # Na mile to sabse nayi release se (taaki website kabhi khaali na ho)
-          if [ ! -f _site/ApneScan.exe ]; then
+          if [ ! -f _site/ApneScan-Setup.exe ]; then
             echo "v$V na mila — latest release se le rahe hain"
             gh release download -R "$GITHUB_REPOSITORY" \
-              -p "ApneScan.exe" -p "ApneScan-Setup.exe" -D _site/ --clobber || true
-          fi
-          # Browser "Suspicious download blocked" (SmartScreen) sirf naye unsigned
-          # .exe par aata hai — .zip ko browser block nahi karta. Isliye exe ka
-          # ek ZIP bhi banate hain; website ka main download button isi par lagta hai.
-          if [ -f _site/ApneScan.exe ]; then
-            (cd _site && zip -q ApneScan.zip ApneScan.exe && echo "ApneScan.zip banaya")
+              -p "ApneScan-Setup.exe" -p "ApneScan-Portable.zip" -D _site/ --clobber || true
           fi
           # ---- ASLI download data website me daalo (size, SHA-256, date) ----
           # Fake "~15 MB" jaisi ginti nahi — jo exe deploy ho rahi hai usi ke

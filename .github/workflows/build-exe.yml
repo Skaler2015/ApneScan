@@ -31,8 +31,15 @@ jobs:
 
       - name: Build EXE with PyInstaller
         working-directory: ApneScan_Project
+        shell: pwsh
         run: |
-          python -m PyInstaller --noconfirm --clean --onefile --windowed --name "ApneScan" --icon apnescan.ico --add-data "apnescan.ico;." --add-data "apnescan_icon.png;." --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes --hidden-import twain --hidden-import PyQt5.QtMultimedia --hidden-import PyQt5.QtMultimediaWidgets --hidden-import PyQt5.QtNetwork --hidden-import qrcode --hidden-import qrcode.image.pil apnescan.py
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --name "ApneScan" --icon apnescan.ico --add-data "apnescan.ico;." --add-data "apnescan_icon.png;." --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes --hidden-import twain --hidden-import PyQt5.QtMultimedia --hidden-import PyQt5.QtMultimediaWidgets --hidden-import PyQt5.QtNetwork --hidden-import qrcode --hidden-import qrcode.image.pil apnescan.py
+          # (v280) ONEDIR — python312.dll + baaki DLL exe ke SAATH folder me
+          # rehti hain (runtime par _MEI temp me extract nahi hoti). Isliye
+          # antivirus/adhoori-copy wala 'Failed to load python312.dll' error
+          # kabhi nahi aata. Portable users ke liye poore folder ka ZIP.
+          New-Item -ItemType Directory -Force -Path "Output" | Out-Null
+          Compress-Archive -Path "dist\ApneScan\*" -DestinationPath "Output\ApneScan-Portable.zip" -Force
 
       # (v205) Tesseract ko installer ke SAATH bundle karo — user ko alag
       # install nahi karna padta; auto-rotate/OCR/naam-padhna turant chalta
@@ -85,8 +92,8 @@ jobs:
           tag_name: v${{ steps.ver.outputs.v }}
           name: ApneScan v${{ steps.ver.outputs.v }}
           files: |
-            ApneScan_Project/dist/ApneScan.exe
             ApneScan_Project/Output/ApneScan-Setup.exe
+            ApneScan_Project/Output/ApneScan-Portable.zip
             ApneScan_Project/Output/Tesseract-OCR.zip
           generate_release_notes: true
 
@@ -97,7 +104,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ApneScan-exe
-          path: ApneScan_Project/dist/ApneScan.exe
+          path: ApneScan_Project/Output/ApneScan-Portable.zip
           if-no-files-found: error
           retention-days: 1
 
