@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "280"
+VERSION = "281"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9142,48 +9142,49 @@ class ScannerWindow(QtWidgets.QMainWindow):
         count_lbl.setStyleSheet("font-weight:700;color:#4F46E5;margin-top:4px"); v.addWidget(count_lbl)
         exp_lbl = QtWidgets.QLabel("")
         exp_lbl.setStyleSheet("color:#94a3b8;font-size:11px"); v.addWidget(exp_lbl)
+        # (v281) Downloads-folder link — har aayi file yahin save hoti hai;
+        # click par folder khulta hai aur nayi file HIGHLIGHT (sabse upar) dikhti.
+        dl_lbl = QtWidgets.QLabel("")
+        dl_lbl.setTextFormat(QtCore.Qt.RichText)
+        dl_lbl.setOpenExternalLinks(False)
+        dl_lbl.setStyleSheet("font-size:12px;margin-top:4px")
+        dl_lbl.linkActivated.connect(lambda _h: self._open_downloads_select(
+            getattr(self, "_last_download", None)))
+        dl_lbl.hide(); v.addWidget(dl_lbl)
 
         self._phone_n = 0
+        self._last_download = None
         self._relay_left = int(sess.get("ttl") or 1800)
 
         _IMGX = (".jpg", ".jpeg", ".png", ".bmp", ".webp", ".heic", ".heif", ".tif", ".tiff")
 
         def on_file(path, name):
             low = str(name or path).lower()
-            added = 0
-            try:
-                if low.endswith(".pdf"):
-                    for pg in (pdf_to_images(path, self._tmpdir) or []):
-                        self._add_item_for_path(pg); added += 1
-                elif low.endswith(_IMGX):
-                    # (v211) photo aate hi scan-jaisi saaf (auto)
-                    self._add_item_for_path(self._clean_incoming_photo(path)); added = 1
-                else:
-                    # (v279) KOI AUR file (video/office/zip…) — scan-page nahi
-                    # banti; seedhe My Files (save-folder) me save ho jaati hai.
-                    dest = self._phone_save_other(path, os.path.basename(str(name or "file")))
-                    if dest:
-                        self._phone_n += 1
-                        count_lbl.setText(L("✅ '%s' computer par save ho gayi (My Files me)",
-                                            "✅ '%s' saved on the computer (in My Files)")
-                                          % os.path.basename(dest))
-                        try:
-                            QtWidgets.QApplication.beep()
-                        except Exception:
-                            pass
-                    return
-            except Exception:
-                status_lbl.setText(L("⚠ '%s' import nahi hui (format support nahi)",
-                                     "⚠ Could not import '%s' (unsupported format)") % (name or "file"))
-                return
-            if added:
-                self._phone_n += added
-                count_lbl.setText(L("✅ %d file/page aa gayi — aur bhej sakte ho",
-                                    "✅ %d file(s)/page(s) received — send more anytime") % self._phone_n)
+            # (v281) HAR aayi file ki ek copy Downloads folder me — turant.
+            dest = self._save_to_downloads(path, os.path.basename(str(name or "file")))
+            if dest:
+                self._last_download = dest
+                self._phone_n += 1
+                count_lbl.setText(L("✅ '%s' Downloads me save ho gayi (kul %d)",
+                                    "✅ '%s' saved to Downloads (total %d)")
+                                  % (os.path.basename(dest), self._phone_n))
+                dl_lbl.setText(
+                    '📂 <a href="#" style="color:#2563EB;font-weight:700;text-decoration:none;">%s</a>'
+                    % L("Downloads folder kholo (nayi file upar)", "Open Downloads (newest on top)"))
+                dl_lbl.show()
                 try:
                     QtWidgets.QApplication.beep()
                 except Exception:
                     pass
+            # image/PDF ko scan-page bhi banao (scan-from-phone feature)
+            try:
+                if low.endswith(".pdf"):
+                    for pg in (pdf_to_images(path, self._tmpdir) or []):
+                        self._add_item_for_path(pg)
+                elif low.endswith(_IMGX):
+                    self._add_item_for_path(self._clean_incoming_photo(path))
+            except Exception:
+                pass
 
         def on_info(st):
             try:
@@ -9270,6 +9271,46 @@ class ScannerWindow(QtWidgets.QMainWindow):
         poller.shutdown()
         if self._phone_n:
             self.status.showMessage(L("📱 %d file phone se aayi.", "📱 %d file(s) from phone.") % self._phone_n, 6000)
+
+    def _downloads_dir(self):
+        """(v281) Windows/Linux ka Downloads folder (na ho to ~ )."""
+        d = os.path.join(os.path.expanduser("~"), "Downloads")
+        try:
+            if not os.path.isdir(d):
+                os.makedirs(d, exist_ok=True)
+        except Exception:
+            d = os.path.expanduser("~")
+        return d
+
+    def _save_to_downloads(self, tmp_path, name):
+        """(v281) Phone se aayi file ki copy Downloads folder me — asli naam se
+        (takraaye to '1','2'…). Returns saved path ya None."""
+        try:
+            base = self._downloads_dir()
+            safe = re.sub(r'[<>:"/\\|?*]', "_", name or "file").strip() or "file"
+            dest = os.path.join(base, safe)
+            if hasattr(self, "_unique_fs_path"):
+                dest = self._unique_fs_path(dest)
+            shutil.copy2(tmp_path, dest)
+            return dest
+        except Exception:
+            return None
+
+    def _open_downloads_select(self, path=None):
+        """(v281) Downloads folder kholo; nayi file ho to use HIGHLIGHT karke
+        (Explorer /select — file dikh jaati hai, chahe kahin bhi ho)."""
+        d = self._downloads_dir()
+        try:
+            if path and os.path.isfile(path) and sys.platform.startswith("win"):
+                import subprocess
+                subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+                return
+        except Exception:
+            pass
+        try:
+            self._open_path(d)
+        except Exception:
+            pass
 
     def _phone_save_other(self, tmp_path, name):
         """(v279) Phone se aayi image/PDF ke alawa koi bhi file (video/office/
