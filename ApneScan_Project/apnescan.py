@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "281"
+VERSION = "282"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1054,6 +1054,9 @@ DEFAULT_OPTIONS = {
     "daily_jpeg_backup": True,
     "daily_jpeg_folder": os.path.join(os.path.expanduser("~"), "Documents", "ApneScan_DailyScans"),
     "scanner_method": "twain",   # "twain" ya "wia"
+    # (v282) WIA me UNCOMPRESSED transfer (koi JPEG-artifact nahi) = best quality.
+    # OFF karne par tez (JPEG) transfer. TWAIN/eSCL par asar nahi (wo uncompressed hi).
+    "scan_best_quality": True,
     # Phone se scan (internet): relay server — khaali karne par sirf local-WiFi mode
     "phone_relay_url": "https://status.apnesoft.com/phone_relay.php",
     "twain_file_xfer": False,    # experimental: continuous ADF feed (TWAIN file transfer)
@@ -1633,6 +1636,20 @@ def _common_caps(src, dpi, pixel_type, duplex):
     _try(lambda: src.set_capability(twain.ICAP_YRESOLUTION, twain.TWTY_FIX32, float(dpi)))
     pt = {"color": twain.TWPT_RGB, "gray": twain.TWPT_GRAY, "bw": twain.TWPT_BW}[pixel_type]
     _try(lambda: src.set_capability(twain.ICAP_PIXELTYPE, twain.TWTY_UINT16, pt))
+    # (v282) QUALITY caps — driver na maane to _try chupchaap chhod deta hai:
+    #  • UNITS = inches (dpi/extent sahi lage)
+    #  • poori BIT-DEPTH (color 24, gray 8) — halki depth se banding aati thi
+    #  • COMPRESSION = NONE — koi lossy (JPEG) nuksaan nahi (native uncompressed)
+    #  • BRIGHTNESS/CONTRAST = 0 (neutral) — driver ka apna auto-darken/light nahi;
+    #    tone hum baad me naps2_levels se sudharte hain (saaf + text crisp)
+    _try(lambda: src.set_capability(twain.ICAP_UNITS, twain.TWTY_UINT16, twain.TWUN_INCHES))
+    if pixel_type == "color":
+        _try(lambda: src.set_capability(twain.ICAP_BITDEPTH, twain.TWTY_UINT16, 24))
+    elif pixel_type == "gray":
+        _try(lambda: src.set_capability(twain.ICAP_BITDEPTH, twain.TWTY_UINT16, 8))
+    _try(lambda: src.set_capability(twain.ICAP_COMPRESSION, twain.TWTY_UINT16, twain.TWCP_NONE))
+    _try(lambda: src.set_capability(twain.ICAP_BRIGHTNESS, twain.TWTY_FIX32, 0.0))
+    _try(lambda: src.set_capability(twain.ICAP_CONTRAST, twain.TWTY_FIX32, 0.0))
     _try(lambda: src.set_capability(twain.CAP_FEEDERENABLED, twain.TWTY_BOOL, True))
     _try(lambda: src.set_capability(twain.CAP_AUTOFEED, twain.TWTY_BOOL, True))
     _try(lambda: src.set_capability(twain.CAP_AUTOSCAN, twain.TWTY_BOOL, True))
@@ -1775,16 +1792,9 @@ def _scan_native(hwnd, source_name, dpi, pixel_type, duplex, on_page=None, shoul
             except Exception:
                 pass
 
-        _try(lambda: src.set_capability(twain.ICAP_XRESOLUTION, twain.TWTY_FIX32, float(dpi)))
-        _try(lambda: src.set_capability(twain.ICAP_YRESOLUTION, twain.TWTY_FIX32, float(dpi)))
-        pt = {"color": twain.TWPT_RGB, "gray": twain.TWPT_GRAY, "bw": twain.TWPT_BW}[pixel_type]
-        _try(lambda: src.set_capability(twain.ICAP_PIXELTYPE, twain.TWTY_UINT16, pt))
-        # Continuous ADF feed: pull EVERY page in a single acquire (no per-page gap).
-        _try(lambda: src.set_capability(twain.CAP_FEEDERENABLED, twain.TWTY_BOOL, True))
-        _try(lambda: src.set_capability(twain.CAP_AUTOFEED, twain.TWTY_BOOL, True))
-        _try(lambda: src.set_capability(twain.CAP_AUTOSCAN, twain.TWTY_BOOL, True))
-        _try(lambda: src.set_capability(twain.CAP_XFERCOUNT, twain.TWTY_INT16, -1))
-        _try(lambda: src.set_capability(twain.CAP_DUPLEXENABLED, twain.TWTY_BOOL, bool(duplex)))
+        # (v282) resolution/pixel + QUALITY caps (uncompressed, poori bit-depth,
+        # neutral tone) + continuous ADF feed — sab ek jagah se.
+        _common_caps(src, dpi, pixel_type, duplex)
         _try(lambda: src.request_acquire(show_ui=False, modal_ui=False))
 
         while True:
@@ -1865,7 +1875,7 @@ def list_wia_sources():
 
 
 def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop=None,
-                   source="auto", page_size="auto"):
+                   source="auto", page_size="auto", best_quality=True):
     wia_scan_pages.last_duplex_value = getattr(wia_scan_pages, "last_duplex_value", None)
     """Scan via Windows WIA. Kept simple: no forced properties (some drivers
     throw otherwise). Runs inside a thread that has called CoInitialize."""
@@ -2023,16 +2033,20 @@ def wia_scan_pages(device_id, dpi, pixel_type, duplex, on_page=None, should_stop
     WIA_FMT_JPEG = "{B96B3CAE-0728-11D3-9D7B-0000F81EF32E}"   # device-compressed (chhota, TEZ)
 
     def _transfer_one(it):
-        # (v243) SPEED: JPEG me transfer sabse TEZ — device page ko khud JPEG
-        # compress karke bhejta hai (~1MB), jabki BMP poora uncompressed (~25MB
-        # at 150dpi colour) COM-layer se guzarta tha (isi se WIA dheema tha;
-        # NAPS2 bhi compressed/banded transfer karta hai). Colour/gray par JPEG
-        # try karo; driver na de to BMP; phir default. (B&W 1-bit JPEG nahi ho
-        # sakta -> seedha BMP, jo waise bhi chhota hai.)
+        # (v282) QUALITY vs SPEED:
+        #  best_quality=True  -> UNCOMPRESSED BMP pehle (koi JPEG-artifact nahi,
+        #    text crisp + rang saaf; thoda dheema/bada). JPEG sirf fallback.
+        #  best_quality=False -> (v243) JPEG pehle = sabse TEZ (chhota transfer),
+        #    BMP fallback. (B&W hamesha BMP — 1-bit JPEG hota hi nahi.)
         fmts = []
-        if pixel_type in ("color", "gray"):
-            fmts.append(WIA_FMT_JPEG)
-        fmts.append(WIA_FMT_BMP)
+        if best_quality:
+            fmts.append(WIA_FMT_BMP)
+            if pixel_type in ("color", "gray"):
+                fmts.append(WIA_FMT_JPEG)
+        else:
+            if pixel_type in ("color", "gray"):
+                fmts.append(WIA_FMT_JPEG)
+            fmts.append(WIA_FMT_BMP)
         for _fmt in fmts:
             try:
                 return it.Transfer(_fmt)
@@ -2986,7 +3000,8 @@ class ScanWorker(QtCore.QThread):
                                    self.pixel_type, self.duplex, _on_page,
                                    should_stop=self.isInterruptionRequested,
                                    source=self.opts.get("paper_source", "auto"),
-                                   page_size=self.opts.get("page_size", "auto"))
+                                   page_size=self.opts.get("page_size", "auto"),
+                                   best_quality=self.opts.get("scan_best_quality", True))
                 finally:
                     try:
                         _pythoncom.CoUninitialize()
@@ -3354,6 +3369,9 @@ class OptionsDialog(QtWidgets.QDialog):
         self.spin_custlen.setValue(int(self.opts.get("custom_page_mm", 600) or 600))
         self.spin_custlen.setSuffix(" mm")
         form.addRow(lblhelp("Custom page ki lambai:", 'हिन्दी: प्रोफ़ाइल में पेज साइज़ "लंबी पर्ची/custom" चुनने पर इतनी लंबी पट्टी स्कैन होगी (receipt/बही-खाता)।\nEnglish: Length used when the profile page size is "custom" (long receipts).'), self.spin_custlen)
+        self.chk_bestq = QtWidgets.QCheckBox("🎯 Best scan quality (uncompressed — WIA)")
+        self.chk_bestq.setChecked(bool(self.opts.get("scan_best_quality", True)))
+        form.addRow(chkrow(self.chk_bestq, 'हिन्दी: चालू (सुझाव): WIA स्कैनर से पेज बिना दबाव (uncompressed) आता है — कोई JPEG धब्बा नहीं, text/रंग सबसे साफ़ (थोड़ा धीमा/बड़ी फ़ाइल)। बंद करने पर तेज़ (JPEG) स्कैन। TWAIN/नेटवर्क स्कैन पर असर नहीं (वे पहले से uncompressed)।\nEnglish: ON (recommended): WIA scans transfer uncompressed — no JPEG artifacts, crispest text/colour (a bit slower/larger). OFF = faster JPEG transfer. No effect on TWAIN/network scans (already uncompressed).'))
         self.chk_filexfer = QtWidgets.QCheckBox("TWAIN continuous feed (experimental)")
         self.chk_filexfer.setChecked(bool(self.opts.get("twain_file_xfer")))
         form.addRow(chkrow(self.chk_filexfer, 'हिन्दी: चालू करने पर (सिर्फ़ TWAIN तरीके में): स्कैनर का feeder बिना रुके चलता रहेगा (file-transfer mode)। अगर स्कैनर समर्थन न करे तो ऐप खुद पुराने तरीके पर आ जाएगी।\nEnglish: ON (TWAIN method only): keeps the ADF feeding continuously via file-transfer mode; falls back to the normal path automatically if unsupported.'))
@@ -3517,6 +3535,7 @@ class OptionsDialog(QtWidgets.QDialog):
         o["clean_edges"] = self.chk_clean_edges.isChecked()
         o["split_two_page"] = self.chk_split2.isChecked()
         o["twain_file_xfer"] = self.chk_filexfer.isChecked()
+        o["scan_best_quality"] = self.chk_bestq.isChecked()
         o["auto_orient"] = self.chk_orient.isChecked()
         o["auto_orient_deskew"] = self.chk_orient_deskew.isChecked()
         o["auto_orient_mode"] = "fast" if self.cmb_orient_mode.currentIndex() == 1 else "accurate"
