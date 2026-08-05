@@ -69,6 +69,9 @@ function sess_destroy($t) {
     if (is_array($j) && !empty($j['files'])) {
         foreach ($j['files'] as $fm) { @unlink($DIR . '/' . basename($fm['p'])); }
     }
+    if (is_array($j) && !empty($j['pcfiles'])) {   // (v277) PC->phone files bhi hatao
+        foreach ($j['pcfiles'] as $fm) { @unlink($DIR . '/' . basename($fm['p'])); }
+    }
     @unlink($f);
 }
 
@@ -84,11 +87,14 @@ function gc() {
             if (is_array($s) && !empty($s['files'])) {
                 foreach ($s['files'] as $fm) { @unlink($DIR . '/' . basename($fm['p'])); }
             }
+            if (is_array($s) && !empty($s['pcfiles'])) {
+                foreach ($s['pcfiles'] as $fm) { @unlink($DIR . '/' . basename($fm['p'])); }
+            }
             @unlink($f);
         }
     }
-    // 3 ghante se purani koi bhi upload-file (safety net)
-    foreach ((array)@glob($DIR . '/f_*.bin') as $f) {
+    // 3 ghante se purani koi bhi upload-file (safety net) — dono taraf (f_/g_)
+    foreach (array_merge((array)@glob($DIR . '/f_*.bin'), (array)@glob($DIR . '/g_*.bin')) as $f) {
         if ($now - (int)@filemtime($f) > 3 * 3600) @unlink($f);
     }
 }
@@ -117,7 +123,8 @@ if ($api === 'create') {
     if (strlen($t) < 12 || strlen($k) < 32) jout(array('ok'=>0,'err'=>'bad token'), 400);
     if (is_file(sess_file($t))) jout(array('ok'=>0,'err'=>'exists'), 409);
     sess_save($t, array('created'=>time(), 'ttl'=>$ttl, 'kh'=>hash('sha256', $k),
-                        'files'=>array(), 'taken'=>0, 'seen'=>0, 'stopped'=>0));
+                        'files'=>array(), 'pcfiles'=>array(),
+                        'taken'=>0, 'seen'=>0, 'stopped'=>0));
     jout(array('ok'=>1, 'ttl'=>$ttl));
 }
 
@@ -200,6 +207,70 @@ if ($api === 'take') {
     exit;
 }
 
+// ================= API: pcsend (PC app -> phone, KEY zaroori) =================
+// PC bharosemand hai (KEY uske paas), isliye KOI BHI file-type bhej sakta hai.
+if ($api === 'pcsend') {
+    $t = clean_token(isset($_REQUEST['t']) ? $_REQUEST['t'] : '');
+    $k = clean_key(isset($_REQUEST['k']) ? $_REQUEST['k'] : '');
+    $s = sess_load($t);
+    if ($s === null) jout(array('ok'=>0,'err'=>'expired'), 410);
+    if (!hash_equals($s['kh'], hash('sha256', $k))) jout(array('ok'=>0,'err'=>'denied'), 403);
+    if (!isset($s['pcfiles']) || !is_array($s['pcfiles'])) $s['pcfiles'] = array();
+    if (count($s['pcfiles']) >= $MAX_FILES) jout(array('ok'=>0,'err'=>'too many files'), 413);
+    if (!isset($_FILES['file']) || !is_uploaded_file($_FILES['file']['tmp_name']))
+        jout(array('ok'=>0,'err'=>'no file'), 400);
+    $sz = intval($_FILES['file']['size']);
+    if ($sz <= 0 || $sz > $MAX_FILE) jout(array('ok'=>0,'err'=>'file too large'), 413);
+    $tot = 0; foreach ($s['pcfiles'] as $fm) $tot += intval($fm['s']);
+    if ($tot + $sz > $MAX_TOTAL) jout(array('ok'=>0,'err'=>'session full'), 413);
+    $name = preg_replace('/[^A-Za-z0-9._ ()-]/', '_', (string)$_FILES['file']['name']);
+    $name = substr($name !== '' ? $name : 'file', 0, 90);
+    $id = bin2hex(function_exists('random_bytes') ? random_bytes(8) : md5(uniqid('', true)));
+    $p = 'g_' . $t . '_' . $id . '.bin';   // g_ = PC->phone (f_ = phone->PC)
+    if (!@move_uploaded_file($_FILES['file']['tmp_name'], $DIR . '/' . $p))
+        jout(array('ok'=>0,'err'=>'server error'), 500);
+    $s['pcfiles'][] = array('id'=>$id, 'n'=>$name, 's'=>$sz, 'p'=>$p, 't'=>time());
+    $s['seen'] = time();
+    sess_save($t, $s);
+    jout(array('ok'=>1, 'id'=>$id, 'count'=>count($s['pcfiles'])));
+}
+
+// ================= API: pclist (phone — PC ki bheji files ki soochi) =========
+if ($api === 'pclist') {
+    $t = clean_token(isset($_REQUEST['t']) ? $_REQUEST['t'] : '');
+    $s = sess_load($t);
+    if ($s === null) jout(array('ok'=>0,'expired'=>1));
+    $out = array();
+    if (!empty($s['pcfiles'])) {
+        foreach ($s['pcfiles'] as $fm)
+            $out[] = array('id'=>$fm['id'], 'name'=>$fm['n'], 'size'=>intval($fm['s']));
+    }
+    jout(array('ok'=>1, 'files'=>$out));
+}
+
+// ================= API: pcget (phone — PC ki bheji file download) ============
+if ($api === 'pcget') {
+    $t = clean_token(isset($_REQUEST['t']) ? $_REQUEST['t'] : '');
+    $id = substr(preg_replace('/[^a-f0-9]/', '', (string)(isset($_REQUEST['id']) ? $_REQUEST['id'] : '')), 0, 32);
+    $s = sess_load($t);
+    if ($s === null) jout(array('ok'=>0,'err'=>'expired'), 410);
+    $found = null;
+    if (!empty($s['pcfiles'])) {
+        foreach ($s['pcfiles'] as $fm) { if ($fm['id'] === $id) { $found = $fm; break; } }
+    }
+    if ($found === null) jout(array('ok'=>0,'err'=>'not found'), 404);
+    $fp = $DIR . '/' . basename($found['p']);
+    if (!is_file($fp)) jout(array('ok'=>0,'err'=>'not found'), 404);
+    // phone ko download-attachment de do (server par rehne do — dubara chahiye
+    // to phir mile; session expire par apne aap delete).
+    $dl = preg_replace('/[^A-Za-z0-9._ ()-]/', '_', (string)$found['n']);
+    header('Content-Type: application/octet-stream');
+    header('Content-Length: ' . filesize($fp));
+    header('Content-Disposition: attachment; filename="' . $dl . '"');
+    readfile($fp);
+    exit;
+}
+
 // ================= API: stop (PC app) =================
 if ($api === 'stop') {
     $t = clean_token(isset($_REQUEST['t']) ? $_REQUEST['t'] : '');
@@ -267,6 +338,11 @@ h1{font-size:19px;margin:2px 0 4px;display:flex;align-items:center;gap:8px}
   <input type="file" id="fpdf" accept="application/pdf" multiple style="display:none">
   <input type="file" id="fany" accept=".jpg,.jpeg,.png,.webp,.heic,.pdf,.tif,.tiff" multiple style="display:none">
   <div id="list"></div>
+  <!-- (v277) Computer se aayi files — phone par download -->
+  <div id="frompc" style="display:none;margin-top:14px">
+    <div style="font-size:13.5px;font-weight:700;color:#9db4e0;margin:6px 2px">⬇️ Computer se aayi files</div>
+    <div id="pclist"></div>
+  </div>
   <div class="pc" id="pc"></div>
   <div class="exp" id="exp"></div>
   <div class="done" id="done"><div class="big">✅</div><b>Files Sent Successfully</b><br>
@@ -359,4 +435,32 @@ function poll(){
   x.send();
 }
 poll();
+// (v277) Computer se bheji files ki soochi — download buttons
+function fmtSize(n){ return n<1048576 ? Math.round(n/1024)+' KB' : (n/1048576).toFixed(1)+' MB'; }
+function pcpoll(){
+  if (!T) return;
+  var x = new XMLHttpRequest();
+  x.open('GET', '?api=pclist&t=' + T + '&_=' + Date.now());
+  x.onload = function(){
+    try{
+      var r = JSON.parse(x.responseText);
+      var box = document.getElementById('frompc'), L = document.getElementById('pclist');
+      if (r.ok && r.files && r.files.length){
+        box.style.display = 'block';
+        var h = '';
+        r.files.forEach(function(f){
+          h += '<div class="item"><div class="nm"><span>'+esc(f.name)+
+               '</span><a class="retry" style="text-decoration:none" href="?api=pcget&t='+T+
+               '&id='+encodeURIComponent(f.id)+'" download="'+esc(f.name)+'">⬇ Download</a></div>'+
+               '<div style="color:#93a4c3;font-size:11px;margin-top:3px">'+fmtSize(f.size)+'</div></div>';
+        });
+        L.innerHTML = h;
+      } else { box.style.display = 'none'; }
+    }catch(e){}
+    setTimeout(pcpoll, 5000);
+  };
+  x.onerror = function(){ setTimeout(pcpoll, 9000); };
+  x.send();
+}
+pcpoll();
 </script></body></html>

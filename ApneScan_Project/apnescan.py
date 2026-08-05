@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "276"
+VERSION = "277"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9199,6 +9199,41 @@ class ScannerWindow(QtWidgets.QMainWindow):
         poll_t = QtCore.QTimer(dlg); poll_t.timeout.connect(poller.poll); poll_t.start(3000)
         tick_t = QtCore.QTimer(dlg); tick_t.timeout.connect(_tick); tick_t.start(1000)
         _tick(); poller.poll()
+
+        # (v277) DO-TARFA: computer se phone ko bhi file bhejo (koi bhi file).
+        # Phone apne QR-page par "Computer se aayi files" me download kar lega.
+        sent_lbl = QtWidgets.QLabel("")
+        sent_lbl.setWordWrap(True)
+        sent_lbl.setStyleSheet("color:#0D9488;font-size:11.5px"); v.addWidget(sent_lbl)
+
+        def _send_to_phone():
+            files, _ = QtWidgets.QFileDialog.getOpenFileNames(
+                dlg, L("Phone ko bhejne ke liye file(s) chuno", "Choose file(s) to send to the phone"),
+                self._opts.get("save_folder", os.path.expanduser("~")), "All files (*.*)")
+            if not files:
+                return
+
+            def job():
+                ok = 0
+                for f in files:
+                    try:
+                        _relay.send_to_phone(base, sess["token"], sess["key"], f)
+                        ok += 1
+                    except Exception:
+                        pass
+                return ok
+
+            def done(n):
+                if isinstance(n, Exception):
+                    n = 0
+                sent_lbl.setText(L(
+                    "📤 %d file phone ko bhej di — phone ke page par '⬇️ Computer se aayi files' me download karo" % n,
+                    "📤 Sent %d file(s) to the phone — download under '⬇️ Files from computer' on the phone page" % n))
+            self._run_bg(job, done, L("Phone ko bhej rahe…", "Sending to the phone…"))
+
+        bsend = QtWidgets.QPushButton(L("📤 Computer se phone ko file bhejo",
+                                        "📤 Send a file to the phone"))
+        bsend.clicked.connect(_send_to_phone); v.addWidget(bsend)
 
         b = QtWidgets.QPushButton(L("Ho gaya (session band karo)", "Done (close session)"))
         b.clicked.connect(dlg.accept); v.addWidget(b)

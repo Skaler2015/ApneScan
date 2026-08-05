@@ -106,6 +106,31 @@ def take(base, token, key, file_id, name, dest_dir):
         raise
 
 
+def send_to_phone(base, token, key, filepath):
+    """(v277) PC se phone ko ek file bhejo — KEY zaroori. Server ke 'pcfiles'
+    bucket me jaati hai; phone QR-page se download karta hai. Returns server
+    JSON (ok/count). Koi bhi file type (PC bharosemand hai)."""
+    name = os.path.basename(filepath) or "file"
+    with open(filepath, "rb") as fh:
+        data = fh.read()
+    boundary = "----ApneScan" + secrets.token_hex(12)
+    head = ("--" + boundary + "\r\n"
+            'Content-Disposition: form-data; name="file"; filename="%s"\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n"
+            % name.replace('"', "_").replace("\r", " ").replace("\n", " "))
+    body = head.encode("utf-8") + data + ("\r\n--" + boundary + "--\r\n").encode("utf-8")
+    url = (base + "?api=pcsend&t=" + urllib.parse.quote(token)
+           + "&k=" + urllib.parse.quote(key))
+    req = urllib.request.Request(url, data=body, headers={
+        "User-Agent": "ApneScan-Relay",
+        "Content-Type": "multipart/form-data; boundary=" + boundary})
+    with _open(req, timeout=120) as r:
+        j = json.loads(r.read().decode("utf-8", "replace"))
+    if not j.get("ok"):
+        raise RuntimeError(j.get("err") or "send failed")
+    return j
+
+
 def stop(base, token, key):
     """Session band + server par bachi files delete. Kabhi exception nahi."""
     try:
