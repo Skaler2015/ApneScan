@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "283"
+VERSION = "284"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9112,11 +9112,6 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
 
         url = sess["url"]
-        # (v283) session ko YAAD rakho — expire hone tak My Files se bhi kitni bhi
-        # baar 'Phone ko bhejo' se files bhej sakte ho (naya QR banane ki zaroorat
-        # nahi; phone ek hi baar QR scan karega).
-        self._phone_sess = {"base": base, "token": sess["token"], "key": sess["key"],
-                            "expires": time.time() + int(sess.get("ttl") or 1800)}
         poller = RelayPoller(base, sess["token"], sess["key"], self._tmpdir, self)
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(L("📱 Phone se scan — kahin se bhi", "📱 Scan from phone — anywhere"))
@@ -9281,85 +9276,39 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self._opts.get("save_folder", os.path.expanduser("~")), "All files (*.*)")
             _do_send(files)
 
-        bsend = QtWidgets.QPushButton(L("📤 Computer se phone ko file(s) bhejo (kitni bhi baar)",
-                                        "📤 Send file(s) to the phone (as many as you like)"))
+        # (v284) SAAF FLOW — pehle QR (upar) phone se scan karo; PHIR yahan se
+        # jitni chaahe file(s) attach karke bhejo. Dialog khula rehne tak har
+        # attach turant phone par download ke liye pahunch jaati hai.
+        bsend = QtWidgets.QPushButton(L("➕ File attach karke phone ko bhejo",
+                                        "➕ Attach file(s) to send to the phone"))
+        bsend.setStyleSheet(
+            "QPushButton{background:#0D9488;color:#fff;font-weight:700;border:none;"
+            "border-radius:9px;padding:11px 14px;font-size:14px;}"
+            "QPushButton:hover{background:#0B7C72;}")
         bsend.clicked.connect(_send_to_phone); v.addWidget(bsend)
         note = QtWidgets.QLabel(L(
-            "Link chalu rehne tak — My Files me kisi file par right-click → '📱 Phone ko bhejo' se bhi bhej sakte ho (naya QR nahi banega).",
-            "While the link is active you can also send from My Files → right-click → '📱 Send to phone' (no new QR)."))
+            "Pehle upar wala QR phone se scan karo — phir jitni chaahe file(s) attach karo, sab phone par '⬇️ Computer se aayi files' me aa jayengi.",
+            "Scan the QR above on the phone first — then attach as many files as you like; all appear on the phone under 'Files from computer'."))
         note.setWordWrap(True); note.setStyleSheet("color:#94a3b8;font-size:10.5px"); v.addWidget(note)
 
-        # (v283) 'Ho gaya' par link CHALU rehti hai (expiry tak) — taaki baad me
-        # bhi bina naye QR ke files bhej sako. 'Link band karo' se abhi rok do.
-        self._phone_keep = True
-        brow = QtWidgets.QHBoxLayout()
-        bstop = QtWidgets.QPushButton(L("🛑 Link band karo", "🛑 Stop link now"))
-
-        def _stop_now():
-            self._phone_keep = False
-            dlg.accept()
-        bstop.clicked.connect(_stop_now)
-        bdone = QtWidgets.QPushButton(L("✅ Ho gaya (link chalu rahegi)", "✅ Done (keep link active)"))
-        bdone.clicked.connect(dlg.accept)
-        brow.addWidget(bstop); brow.addWidget(bdone, 1)
-        _bw = QtWidgets.QWidget(); _bw.setLayout(brow); v.addWidget(_bw)
-        # (v278) My Files -> right-click -> Phone ko bhejo: QR dikhte hi auto-send
+        b = QtWidgets.QPushButton(L("Ho gaya (band karo)", "Done (close)"))
+        b.clicked.connect(dlg.accept); v.addWidget(b)
+        # right-click 'Phone ko bhejo' se aayi ho to QR dikhte hi wo file bhej do
         if send_files:
             QtCore.QTimer.singleShot(300, lambda: _do_send(send_files))
         dlg.exec_()
         poll_t.stop(); tick_t.stop()
-        if getattr(self, "_phone_keep", True):
-            poller.stopped = True          # sirf polling band; session expiry tak CHALU
-        else:
-            poller.shutdown()              # session sach me band
-            self._phone_sess = None
+        poller.shutdown()
         if self._phone_n:
             self.status.showMessage(L("📱 %d file phone se aayi.", "📱 %d file(s) from phone.") % self._phone_n, 6000)
 
-    def _phone_session_alive(self):
-        """(v283) Abhi koi phone-link chalu (expire nahi hui) ho to uska dict do."""
-        s = getattr(self, "_phone_sess", None)
-        if s and time.time() < s.get("expires", 0):
-            return s
-        self._phone_sess = None
-        return None
-
-    def _phone_send_direct(self, files, sess):
-        """(v283) Bina naya QR banaye — chalu link par seedhe file(s) bhejo."""
-        files = [f for f in (files or []) if os.path.isfile(f)]
-        if not files:
-            return
-
-        def job():
-            ok = 0
-            for f in files:
-                try:
-                    _relay.send_to_phone(sess["base"], sess["token"], sess["key"], f)
-                    ok += 1
-                except Exception:
-                    pass
-            return ok
-
-        def done(n):
-            if isinstance(n, Exception):
-                n = 0
-            left = max(0, int(sess.get("expires", 0) - time.time())) // 60
-            self.status.showMessage(self.L(
-                "📤 %d file phone ko bhej di — phone par '⬇️ Computer se aayi files' me (link ~%d min tak chalu)" % (n, left),
-                "📤 Sent %d file(s) to phone — see 'Files from computer' (link active ~%d more min)" % (n, left)), 8000)
-        self._run_bg(job, done, self.L("Phone ko bhej rahe…", "Sending to the phone…"))
-
     def _send_files_to_phone(self, files):
-        """(v283) My Files -> 'Phone ko bhejo': link chalu ho to usi par bhejo
-        (naya QR nahi); warna naya QR-dialog kholo aur auto-send."""
+        """(v284) My Files -> 'Phone ko bhejo': QR-dialog kholo; QR scan hote hi
+        chuni file(s) phone ko bhej di jaati hain (phir aur bhi attach kar sakte)."""
         files = [f for f in (files or []) if os.path.isfile(f)]
         if not files:
             return
-        s = self._phone_session_alive()
-        if s:
-            self._phone_send_direct(files, s)
-        else:
-            self.phone_scan(send_files=files)
+        self.phone_scan(send_files=files)
 
     def _downloads_dir(self):
         """(v281) Windows/Linux ka Downloads folder (na ho to ~ )."""
