@@ -198,6 +198,8 @@ h1{font-size:20px;margin:2px 0 4px;display:flex;align-items:center;gap:8px}
 .btn:active{transform:scale(.985)}
 .btn.pri{background:linear-gradient(135deg,#22b8a8,#0d9488)}
 .btn.blue{background:linear-gradient(135deg,#2a78d6,#1f5fb0)}
+.qrwrap{text-align:center;margin:10px 0 6px}
+.qr{background:#fff;border-radius:14px;padding:10px;max-width:70%;height:auto}
 .code{font-size:34px;font-weight:800;letter-spacing:6px;text-align:center;color:#5eead4;margin:6px 0 2px}
 .linkbox{background:#0d1526;border:1px solid #22304d;border-radius:12px;padding:10px 12px;font-size:12px;
   color:#9db4e0;word-break:break-all;margin:8px 0}
@@ -221,7 +223,13 @@ h1{font-size:20px;margin:2px 0 4px;display:flex;align-items:center;gap:8px}
 
 <?php if ($valid) { ?>
   <div class="sub">Ye room DONO taraf khula hai — jo bhi file yahan daaloge wo doosre device par turant dikhegi (aur ulta bhi). Koi bhi file chalegi.</div>
-  <div style="text-align:center;color:#93a4c3;font-size:12px">Room code</div>
+  <div class="qrwrap">
+    <img class="qr" alt="QR" width="210" height="210"
+         onerror="this.parentNode.style.display='none'"
+         src="https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=0&data=<?php echo urlencode($base . '?r=' . $room); ?>">
+    <div style="color:#93a4c3;font-size:12px;margin-top:6px">📷 Doosre phone se ye QR scan karo</div>
+  </div>
+  <div style="text-align:center;color:#93a4c3;font-size:12px">…ya code daalo</div>
   <div class="code"><?php echo htmlspecialchars($room); ?></div>
   <div class="linkbox" id="lnk"><?php echo htmlspecialchars($base . '?r=' . $room); ?></div>
   <div class="row">
