@@ -2222,7 +2222,7 @@ if(window.Chart){
   Chart.defaults.elements.bar.borderSkipped=false;
 }
 function grad(ctx,hex){try{var c=ctx.chart.ctx,g=c.createLinearGradient(0,0,0,ctx.chart.height||160);g.addColorStop(0,hex+'55');g.addColorStop(1,hex+'05');return g;}catch(e){return hex+'22';}}
-var FEATLBL={ocr:'OCR (text)',compress:'Compress',merge:'Merge',split:'Split page',sign:'Signature',stamp:'Stamp',password:'Password',watermark:'Watermark',whatsapp:'WhatsApp share',email:'Email share',print:'Print',import:'Import',phoneimport:'Phone photo',idcard:'ID-card crop',rename:'Rename',donate:'Donate click',refer:'Share app',phonescan:'Phone scan',save:'PDF save',search:'File search'};
+var FEATLBL={ocr:'OCR (text)',compress:'Compress',merge:'Merge',split:'Split page',sign:'Signature',stamp:'Stamp',password:'Password',watermark:'Watermark',whatsapp:'WhatsApp share',email:'Email share',print:'Print',import:'Import',phoneimport:'Phone photo',idcard:'ID-card crop',rename:'Rename',donate:'Donate click',refer:'Share app',phonescan:'Phone scan',save:'PDF save',search:'File search',tag:'Tag lagaya',note:'Note likha',quicklook:'Quick-look',sendphone:'PC→Phone bheji'};
 
 // KPIs (icon + number + label)
 function kpi(ic,n,l,cls){return '<div class="kpi '+(cls||'')+'"><div class="ic">'+ic+'</div><div class="tx"><div class="n">'+n+'</div><div class="l">'+l+'</div></div></div>';}

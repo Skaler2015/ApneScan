@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "284"
+VERSION = "285"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9265,6 +9265,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
             def done(n):
                 if isinstance(n, Exception):
                     n = 0
+                if n:
+                    try:
+                        self._an_event("sendphone")   # (v286) admin analytics
+                    except Exception:
+                        pass
                 sent_lbl.setText(L(
                     "📤 %d file phone ko bhej di — phone par QR scan karke '⬇️ Computer se aayi files' me download karo" % n,
                     "📤 Sent %d file(s) — on the phone, scan the QR and download under '⬇️ Files from computer'" % n))
@@ -17402,6 +17407,10 @@ if the toggle is ticked).</p>
     def _quick_look(self, path):
         if not (path and os.path.isfile(path)):
             return
+        try:
+            self._an_event("quicklook")      # (v286) admin analytics
+        except Exception:
+            pass
         pm = None
         try:
             pm = self._render_file_pixmap(path)
@@ -17467,6 +17476,11 @@ if the toggle is ticked).</p>
         else:
             notes.pop(path, None)
         self._save_opts()
+        if text:
+            try:
+                self._an_event("note")           # (v286) admin analytics
+            except Exception:
+                pass
         self.status.showMessage(self.L("📝 Note save ho gaya", "📝 Note saved") if text
                                 else self.L("📝 Note hataya", "📝 Note removed"), 4000)
         # agar search-results khule hain to taaza dikhao
@@ -19775,6 +19789,10 @@ if the toggle is ticked).</p>
                 tags.pop(f, None)
         if lst:
             self._ensure_tag_colors(lst)
+            try:
+                self._an_event("tag")            # (v286) admin analytics
+            except Exception:
+                pass
         self._save_opts()
         self.status.showMessage(self.L("🏷 %d files par tag: %s" % (len(files), ", ".join(lst) or "(hataya)"),
                                        "🏷 Tagged %d files: %s" % (len(files), ", ".join(lst) or "(removed)")), 5000)
@@ -21604,6 +21622,11 @@ if the toggle is ticked).</p>
         else:
             tags.pop(src, None)
         self._save_opts()
+        if lst:
+            try:
+                self._an_event("tag")            # (v286) admin analytics
+            except Exception:
+                pass
         self.status.showMessage("Tags saved: %s" % (", ".join(lst) or "(removed)"), 5000)
 
     # (v271) tag palette — har tag ko ek pakka rang (dobara wahi tag = wahi rang)
