@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "282"
+VERSION = "283"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9112,6 +9112,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
 
         url = sess["url"]
+        # (v283) session ko YAAD rakho — expire hone tak My Files se bhi kitni bhi
+        # baar 'Phone ko bhejo' se files bhej sakte ho (naya QR banane ki zaroorat
+        # nahi; phone ek hi baar QR scan karega).
+        self._phone_sess = {"base": base, "token": sess["token"], "key": sess["key"],
+                            "expires": time.time() + int(sess.get("ttl") or 1800)}
         poller = RelayPoller(base, sess["token"], sess["key"], self._tmpdir, self)
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(L("📱 Phone se scan — kahin se bhi", "📱 Scan from phone — anywhere"))
@@ -9276,20 +9281,85 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self._opts.get("save_folder", os.path.expanduser("~")), "All files (*.*)")
             _do_send(files)
 
-        bsend = QtWidgets.QPushButton(L("📤 Computer se phone ko file bhejo",
-                                        "📤 Send a file to the phone"))
+        bsend = QtWidgets.QPushButton(L("📤 Computer se phone ko file(s) bhejo (kitni bhi baar)",
+                                        "📤 Send file(s) to the phone (as many as you like)"))
         bsend.clicked.connect(_send_to_phone); v.addWidget(bsend)
+        note = QtWidgets.QLabel(L(
+            "Link chalu rehne tak — My Files me kisi file par right-click → '📱 Phone ko bhejo' se bhi bhej sakte ho (naya QR nahi banega).",
+            "While the link is active you can also send from My Files → right-click → '📱 Send to phone' (no new QR)."))
+        note.setWordWrap(True); note.setStyleSheet("color:#94a3b8;font-size:10.5px"); v.addWidget(note)
 
-        b = QtWidgets.QPushButton(L("Ho gaya (session band karo)", "Done (close session)"))
-        b.clicked.connect(dlg.accept); v.addWidget(b)
+        # (v283) 'Ho gaya' par link CHALU rehti hai (expiry tak) — taaki baad me
+        # bhi bina naye QR ke files bhej sako. 'Link band karo' se abhi rok do.
+        self._phone_keep = True
+        brow = QtWidgets.QHBoxLayout()
+        bstop = QtWidgets.QPushButton(L("🛑 Link band karo", "🛑 Stop link now"))
+
+        def _stop_now():
+            self._phone_keep = False
+            dlg.accept()
+        bstop.clicked.connect(_stop_now)
+        bdone = QtWidgets.QPushButton(L("✅ Ho gaya (link chalu rahegi)", "✅ Done (keep link active)"))
+        bdone.clicked.connect(dlg.accept)
+        brow.addWidget(bstop); brow.addWidget(bdone, 1)
+        _bw = QtWidgets.QWidget(); _bw.setLayout(brow); v.addWidget(_bw)
         # (v278) My Files -> right-click -> Phone ko bhejo: QR dikhte hi auto-send
         if send_files:
             QtCore.QTimer.singleShot(300, lambda: _do_send(send_files))
         dlg.exec_()
         poll_t.stop(); tick_t.stop()
-        poller.shutdown()
+        if getattr(self, "_phone_keep", True):
+            poller.stopped = True          # sirf polling band; session expiry tak CHALU
+        else:
+            poller.shutdown()              # session sach me band
+            self._phone_sess = None
         if self._phone_n:
             self.status.showMessage(L("📱 %d file phone se aayi.", "📱 %d file(s) from phone.") % self._phone_n, 6000)
+
+    def _phone_session_alive(self):
+        """(v283) Abhi koi phone-link chalu (expire nahi hui) ho to uska dict do."""
+        s = getattr(self, "_phone_sess", None)
+        if s and time.time() < s.get("expires", 0):
+            return s
+        self._phone_sess = None
+        return None
+
+    def _phone_send_direct(self, files, sess):
+        """(v283) Bina naya QR banaye — chalu link par seedhe file(s) bhejo."""
+        files = [f for f in (files or []) if os.path.isfile(f)]
+        if not files:
+            return
+
+        def job():
+            ok = 0
+            for f in files:
+                try:
+                    _relay.send_to_phone(sess["base"], sess["token"], sess["key"], f)
+                    ok += 1
+                except Exception:
+                    pass
+            return ok
+
+        def done(n):
+            if isinstance(n, Exception):
+                n = 0
+            left = max(0, int(sess.get("expires", 0) - time.time())) // 60
+            self.status.showMessage(self.L(
+                "📤 %d file phone ko bhej di — phone par '⬇️ Computer se aayi files' me (link ~%d min tak chalu)" % (n, left),
+                "📤 Sent %d file(s) to phone — see 'Files from computer' (link active ~%d more min)" % (n, left)), 8000)
+        self._run_bg(job, done, self.L("Phone ko bhej rahe…", "Sending to the phone…"))
+
+    def _send_files_to_phone(self, files):
+        """(v283) My Files -> 'Phone ko bhejo': link chalu ho to usi par bhejo
+        (naya QR nahi); warna naya QR-dialog kholo aur auto-send."""
+        files = [f for f in (files or []) if os.path.isfile(f)]
+        if not files:
+            return
+        s = self._phone_session_alive()
+        if s:
+            self._phone_send_direct(files, s)
+        else:
+            self.phone_scan(send_files=files)
 
     def _downloads_dir(self):
         """(v281) Windows/Linux ka Downloads folder (na ho to ~ )."""
@@ -17833,7 +17903,7 @@ if the toggle is ticked).</p>
                            lambda: self._bulk_share(sel_files))
             menu.addAction("📱 " + self.L("%d files phone ko bhejo" % len(sel_files),
                                           "Send %d files to phone" % len(sel_files)),
-                           lambda: self.phone_scan(send_files=sel_files))
+                           lambda: self._send_files_to_phone(sel_files))
             menu.addAction("🏷 " + self.L("%d files par tag…" % len(sel_files),
                                           "Tag %d files…" % len(sel_files)),
                            lambda: self._bulk_tag(sel_files))
@@ -17926,7 +17996,7 @@ if the toggle is ticked).</p>
                                         else self.L("Note lagao…", "Add note…")),
                                lambda: self._edit_note(path))
                 menu.addAction("📱 " + self.L("Phone ko bhejo", "Send to phone"),
-                               lambda: self.phone_scan(send_files=[path]))
+                               lambda: self._send_files_to_phone([path]))
                 menu.addAction(self.L("🖨 Print", "🖨 Print"), lambda: self._print_library_file(path))
                 menu.addSeparator()
                 menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
@@ -17987,7 +18057,7 @@ if the toggle is ticked).</p>
                            lambda: self._bulk_share(files))
             menu.addAction("📱 " + self.L("%d files phone ko bhejo" % len(files),
                                           "Send %d files to phone" % len(files)),
-                           lambda: self.phone_scan(send_files=files))
+                           lambda: self._send_files_to_phone(files))
             menu.addAction("🏷 " + self.L("%d files par tag…" % len(files),
                                           "Tag %d files…" % len(files)),
                            lambda: self._bulk_tag(files))
@@ -18020,7 +18090,7 @@ if the toggle is ticked).</p>
                 menu.addAction("🗜 " + self.L("Compress…", "Compress…"),
                                lambda: self.compress_pdf_tool(path))
             menu.addAction("📱 " + self.L("Phone ko bhejo", "Send to phone"),
-                           lambda: self.phone_scan(send_files=[path]))
+                           lambda: self._send_files_to_phone([path]))
             menu.addAction("🏷 " + self.L("Tag lagao…", "Add tag…"), lambda: self.tag_pdf(path))
             menu.addAction("📝 " + (self.L("Note badlo…", "Edit note…") if self._file_note(path)
                                     else self.L("Note lagao…", "Add note…")),
