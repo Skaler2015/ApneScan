@@ -1370,11 +1370,61 @@ def ai_scan_quality(img):
     return issues
 
 
+def _is_colourful_card(img):
+    """(v286) Rangeen ID-card / asli photo (Aadhaar/PAN/licence/photo) hai kya?
+    Aisi image par document-jaisa shadow-flatten + colour-boost NAHI lagana —
+    warna glossy laminate ki chamak grunge/streaks/dhabbe ban jaati hai."""
+    if not HAS_NUMPY:
+        return False
+    try:
+        im = img.convert("RGB")
+        m = max(im.width, im.height)
+        if m > 420:
+            s = 420.0 / m
+            im = im.resize((max(1, int(im.width * s)), max(1, int(im.height * s))))
+        a = np.asarray(im, dtype=np.float32)
+        mx = a.max(axis=2); mn = a.min(axis=2)
+        sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1.0), 0.0)   # 0..1
+        # SAAF rang wale pixel ka hissa: text-document me ~0 (kaala-safed);
+        # ID-card/asli-photo (chehra, tiranga, hologram) me kaafi. Yahi pakka
+        # farak hai — mean saturation nahi (kyunki card ka background halka hota).
+        colour_frac = float((sat > 0.22).mean())
+        return colour_frac > 0.06
+    except Exception:
+        return False
+
+
+def clean_photo_gentle(img):
+    """(v286) Rangeen ID-card/photo ke liye HALKA saaf: EXIF seedha + size cap +
+    4-kone perspective — par shadow-flatten/strong-enhance NAHI (card apni asli
+    shakl me rahe, sirf seedha + halka crisp)."""
+    try:
+        img = ImageOps.exif_transpose(img)
+    except Exception:
+        pass
+    img = img.convert("RGB")
+    m = max(img.width, img.height)
+    if m > 2600:
+        s = 2600.0 / m
+        img = img.resize((max(1, int(img.width * s)), max(1, int(img.height * s))),
+                         Image.LANCZOS)
+    img = straighten_photo_page(img)         # perspective seedha (glossy bhi)
+    try:
+        img = ImageEnhance.Contrast(img).enhance(1.05)
+        img = ImageEnhance.Sharpness(img).enhance(1.10)
+    except Exception:
+        pass
+    return img
+
+
 def ai_photo_to_scan(img):
     """(v211) Photo → scan jaisa, EK click/apne aap: EXIF seedha + size cap +
     4-kone perspective + shadow flatten (clean_photo) + rang wapsi +
-    AI enhance + kinara-bachau denoise."""
+    AI enhance + kinara-bachau denoise.
+    (v286) Rangeen ID-card/photo par sirf HALKA saaf — grunge/streak se bacho."""
     try:
+        if _is_colourful_card(img):
+            return clean_photo_gentle(img).convert("RGB")
         im = clean_photo(img)
         im = ai_color_restore(im)
         im = ai_auto_enhance(im)
