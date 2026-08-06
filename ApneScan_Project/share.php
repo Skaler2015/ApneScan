@@ -19,6 +19,10 @@
 
 error_reporting(0);
 header('X-Content-Type-Options: nosniff');
+// (v285) apnescan.apnesoft.com/share (GitHub Pages) is tool ko IFRAME me dikhata
+// hai — isliye apne domain se framing allow karo (X-Frame-Options hata kar CSP).
+@header_remove('X-Frame-Options');
+header("Content-Security-Policy: frame-ancestors 'self' https://apnescan.apnesoft.com https://apnesoft.com https://*.apnesoft.com");
 
 $DIR       = __DIR__ . '/share_uploads';
 $MAX_FILE  = 200 * 1024 * 1024;   // ek file

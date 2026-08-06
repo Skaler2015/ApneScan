@@ -47,6 +47,8 @@ jobs:
             [ -e "$f" ] || continue
             sed "s/{{VERSION}}/v$VERSION/g" "$f" > "_site/$(basename "$f")"
           done
+          # Clean URL: apnescan.apnesoft.com/share -> web-share tool (iframe wrapper)
+          if [ -f _site/share.html ]; then mkdir -p _site/share && cp _site/share.html _site/share/index.html; fi
           cp ApneScan_Project/apnescan_logo.png _site/ 2>/dev/null || true
           cp ApneScan_Project/apnescan_logo.svg _site/ 2>/dev/null || true
           cp ApneScan_Project/apnescan_icon.png _site/ 2>/dev/null || true
