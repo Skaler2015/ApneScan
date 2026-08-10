@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "288"
+VERSION = "289"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -14540,6 +14540,12 @@ if the toggle is ticked).</p>
             "QToolButton:hover{border-color:#F59E0B;}")
         self.btn_save_search.clicked.connect(self._save_current_search)
         _srow.addWidget(self.btn_save_search)
+        # (v289) user request — search ke saath ke 📄 / 📂 / ★ button HATA diye
+        # (saaf look). Objects zinda hain (koi reference na toote); inside-text
+        # search band (btn checked=False), scope = current-folder default.
+        self.btn_search_text.hide()
+        self.btn_scope.hide()
+        self.btn_save_search.hide()
         self._files_srow = _srow
         fp.addLayout(_srow)
         # ✨ (v192) Filter CHIPS — mockup jaise (Fav/Recent/Today/All);
@@ -14583,6 +14589,11 @@ if the toggle is ticked).</p>
         _chrow.addWidget(_btag)
         _chrow.addStretch(1)
         fp.addLayout(_chrow)
+        # (v289) user request — poori CHIP row (Fav/Recent/Today/All/Tag) HATA di
+        # (saaf look). Filter "All" par hi rehta; objects zinda (reference safe).
+        for _cb in self._mf_chips.values():
+            _cb.hide()
+        _btag.hide()
         # (v250) SORT buttons — Naam / Date / Size. Ek click = us hisaab se sort
         # (upar se niche); dobara click = ulta (niche se upar). Chalu sort par
         # teer (↑/↓) dikhta hai. Pasand save rehti hai.
