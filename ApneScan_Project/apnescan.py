@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "293"
+VERSION = "294"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -24406,7 +24406,10 @@ if the toggle is ticked).</p>
                 w = chip_flow.takeAt(0)
                 if w and w.widget():
                     w.widget().deleteLater()
-            q = sug_search.text().strip()
+            # (v294) chips ab Current Name field se BHI filter hote hain — jaise
+            # "IN" likha to Invest/Investigation… turant dikhein. Alag "filter
+            # suggestions" box likha ho to wo priority leta hai.
+            q = sug_search.text().strip() or le.text().strip()
             names = []
             if lib is not None:
                 names = [it["name"] for it in lib.suggestions(q, limit=None)]
@@ -24435,6 +24438,8 @@ if the toggle is ticked).</p>
                 empt.setStyleSheet("color:#9AA0BC;font-size:11px;")
                 chip_flow.addWidget(empt)
         sug_search.textChanged.connect(lambda _t: (state.update(expanded=False), _rebuild_chips()))
+        # Current Name me type karte hi chips filter ho jayein (live)
+        le.textChanged.connect(lambda _t: (state.update(expanded=False), _rebuild_chips()))
         _rebuild_chips()
 
         # ---- remember + manage ----
