@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "287"
+VERSION = "288"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11823,6 +11823,25 @@ class ScannerWindow(QtWidgets.QMainWindow):
         return ""
 
     def eventFilter(self, obj, ev):
+        # (v288) TOP toolbar search ka live dropdown — keyboard control
+        if hasattr(self, "tb_search") and obj is self.tb_search:
+            sg = getattr(self, "_tb_sugg", None)
+            if ev.type() == QtCore.QEvent.KeyPress and sg is not None:
+                k = ev.key()
+                vis = sg.isVisible() and sg.count() > 0
+                if k == QtCore.Qt.Key_Down and vis:
+                    self._tb_sugg_nav = True
+                    sg.setCurrentRow(min(sg.currentRow() + 1, sg.count() - 1)
+                                     if sg.currentRow() >= 0 else 0)
+                    return True
+                if k == QtCore.Qt.Key_Up and vis:
+                    self._tb_sugg_nav = True
+                    sg.setCurrentRow(max(sg.currentRow() - 1, 0))
+                    return True
+                if k == QtCore.Qt.Key_Escape and vis:
+                    sg.hide(); return True
+            elif ev.type() == QtCore.QEvent.FocusOut and sg is not None:
+                QtCore.QTimer.singleShot(200, sg.hide)
         # (v276) Space = quick-look (badी झलक) — results/tree me chuni file
         if (ev.type() == QtCore.QEvent.KeyPress and ev.key() == QtCore.Qt.Key_Space
                 and (obj is getattr(self, "files_results", None)
@@ -13757,6 +13776,29 @@ if the toggle is ticked).</p>
         tb.addWidget(self.tb_search)
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+K"), self,
                             lambda: (self.tb_search.setFocus(), self.tb_search.selectAll()))
+        # (v288) TOP search ka apna LIVE dropdown — jaise hi type karo, matches
+        # seedhe isi box ke neeche aayein (side-panel me door nahi).
+        self._tb_sugg = QtWidgets.QListWidget(self)
+        self._tb_sugg.setWindowFlags(QtCore.Qt.Tool | QtCore.Qt.FramelessWindowHint
+                                     | QtCore.Qt.WindowStaysOnTopHint
+                                     | QtCore.Qt.NoDropShadowWindowHint)
+        self._tb_sugg.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)
+        self._tb_sugg.setFocusPolicy(QtCore.Qt.NoFocus)
+        self._tb_sugg.setUniformItemSizes(True)
+        self._tb_sugg.setStyleSheet(
+            "QListWidget{background:#fff;border:1px solid #C7D2FE;border-radius:8px;"
+            "outline:0;font-size:12px;padding:3px;}"
+            "QListWidget::item{padding:5px 7px;border-radius:5px;}"
+            "QListWidget::item:selected{background:#EEF2FF;color:#111827;}"
+            "QListWidget::item:hover{background:#F1F5F9;}")
+        self._tb_sugg.itemClicked.connect(self._tb_sugg_pick)
+        self._tb_sugg.hide()
+        self._tb_sugg_timer = QtCore.QTimer(self)
+        self._tb_sugg_timer.setSingleShot(True)
+        self._tb_sugg_timer.setInterval(25)
+        self._tb_sugg_timer.timeout.connect(self._update_tb_suggest)
+        self.tb_search.installEventFilter(self)     # ↓ ↑ Enter Esc dropdown
+        self.tb_search.returnPressed.connect(self._tb_search_enter)
         tb.addSpacing(8)
         self.tb_devchip = QtWidgets.QLabel("")
         self.tb_devchip.hide()
@@ -15592,13 +15634,92 @@ if the toggle is ticked).</p>
             pass
 
     def _tb_search_changed(self, txt):
-        """Toolbar ki search — My Files panel ki search me hi bhejta hai
-        (panel chhupa ho to dikha deta hai)."""
+        """(v288) Toolbar search — apna LIVE dropdown (isi box ke neeche)."""
         try:
-            if txt and hasattr(self, "files_panel") and not self.files_panel.isVisible():
+            self._tb_sugg_timer.start()
+        except Exception:
+            pass
+
+    def _update_tb_suggest(self):
+        """(v288) TOP search: jaise-jaise type karo, top matches box ke neeche."""
+        sg = getattr(self, "_tb_sugg", None)
+        if sg is None:
+            return
+        self._tb_sugg_nav = False
+        q = self.tb_search.text().strip().lower()
+        if len(q) < 1:
+            sg.hide(); return
+        SE = FileSearchEngine
+        try:
+            clean_q, _ex, _ph = self._parse_ops(q)
+            terms, filters = SE.parse_query(clean_q or q)
+        except Exception:
+            sg.hide(); return
+        scope = self._search_scope() if hasattr(self, "_search_scope") else self._files_root()
+        idx = getattr(self, "_files_index", None)
+        if idx is None or getattr(self, "_files_index_scope", None) != scope:
+            self._ensure_files_index_async(scope)     # ban jaate hi dobara
+            return
+        try:
+            res = self._search_index_entries(terms, filters, idx, limit=80)
+        except Exception:
+            sg.hide(); return
+        _icon = {".pdf": "📕", ".docx": "📘", ".doc": "📘", ".xlsx": "📗",
+                 ".xls": "📗", ".txt": "📄", ".png": "🖼", ".jpg": "🖼",
+                 ".jpeg": "🖼", ".tif": "🖼", ".tiff": "🖼"}
+        sg.clear(); shown = 0
+        for kind, p in res:
+            if shown >= 12:
+                break
+            base = os.path.basename(p) or p
+            ic = "📁" if kind == "dir" else _icon.get(os.path.splitext(p)[1].lower(), "🖼")
+            it = QtWidgets.QListWidgetItem("%s  %s" % (ic, base))
+            it.setData(QtCore.Qt.UserRole, p); it.setToolTip(p)
+            sg.addItem(it); shown += 1
+        if shown == 0:
+            sg.hide(); return
+        try:
+            gp = self.tb_search.mapToGlobal(QtCore.QPoint(0, self.tb_search.height() + 2))
+            h = min(shown, 9) * 30 + 8
+            sg.setGeometry(gp.x(), gp.y(), max(300, self.tb_search.width() + 60), h)
+        except Exception:
+            pass
+        sg.setCurrentRow(-1); sg.raise_(); sg.show()
+
+    def _tb_sugg_pick(self, it):
+        p = it.data(QtCore.Qt.UserRole) if it else None
+        try:
+            self._tb_sugg.hide()
+        except Exception:
+            pass
+        if not p:
+            return
+        if os.path.isdir(p):
+            try:
+                if hasattr(self, "files_panel") and not self.files_panel.isVisible():
+                    self.files_panel.setVisible(True)
+            except Exception:
+                pass
+            self._jump_to_folder(p)
+        else:
+            self._open_path(p)
+
+    def _tb_search_enter(self):
+        """Enter: chuna suggestion kholo; warna panel me poori list dikhao."""
+        sg = getattr(self, "_tb_sugg", None)
+        if (sg is not None and sg.isVisible() and getattr(self, "_tb_sugg_nav", False)
+                and sg.currentItem() is not None):
+            self._tb_sugg_pick(sg.currentItem())
+            return
+        if sg is not None:
+            sg.hide()
+        # poori list panel me — top text ko files_search me bhejo
+        try:
+            if hasattr(self, "files_panel") and not self.files_panel.isVisible():
                 self.files_panel.setVisible(True)
-            if hasattr(self, "files_search") and self.files_search.text() != txt:
-                self.files_search.setText(txt)
+            if hasattr(self, "files_search"):
+                self.files_search.setText(self.tb_search.text())
+                self._run_files_search()
         except Exception:
             pass
 
