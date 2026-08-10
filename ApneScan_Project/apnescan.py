@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "290"
+VERSION = "291"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -14799,7 +14799,7 @@ if the toggle is ticked).</p>
         fp.addWidget(self.files_results, 1)
         self._files_search_timer = QtCore.QTimer(self)
         self._files_search_timer.setSingleShot(True)
-        self._files_search_timer.setInterval(70)   # chhota debounce — turant lage
+        self._files_search_timer.setInterval(35)   # (v291) bahut chhota debounce — turant lage
         self._files_search_timer.timeout.connect(self._run_files_search)
         # (v290) INSTANT LIVE SIDEBAR SEARCH — jaise hi type karo (pehle akshar se),
         # matching files/folders SEEDHE isi sidebar-list me aa jate hain. Koi
@@ -14861,6 +14861,13 @@ if the toggle is ticked).</p>
             spl.addWidget(self.files_panel)
         if not self._opts.get("show_files_panel", True):
             self.files_panel.hide()
+        else:
+            # (v291) app khulte hi (panel dikh raha hai to) search-index thoda der
+            # baad background me garam kar do — pehli search bhi INSTANT rahe.
+            try:
+                QtCore.QTimer.singleShot(1200, self._prewarm_files_index)
+            except Exception:
+                pass
 
         # ---- UI #3: Preview panel (page click → badi jhalak + quick-edit) ----
         self.preview_panel = QtWidgets.QWidget()
@@ -18834,6 +18841,24 @@ if the toggle is ticked).</p>
             _search_engine.clear_cache()
         except Exception:
             pass
+        # (v291) index turant (background me) dobara garam kar do — taaki agli
+        # baar type karte hi results INSTANT aayein, pehle-keystroke par index
+        # banne ka intezaar na karna pade.
+        self._prewarm_files_index()
+
+    def _prewarm_files_index(self):
+        """(v291) Meri-Files search ka index BACKGROUND me pehle se taiyaar rakho
+        (panel khulte hi / folder badalte hi). Isse jab user search likhe to
+        index pehle se ready hota hai aur result turant dikhta hai — cold-build
+        ka intezaar nahi. Bilkul chup-chaap; UI kabhi nahi rukti."""
+        try:
+            if not hasattr(self, "files_tree"):
+                return
+            scope = self._search_scope()
+            if scope and os.path.isdir(scope):
+                self._ensure_files_index_async(scope)
+        except Exception:
+            pass
 
     _FILES_INDEX_TTL = 45      # seconds — stale-while-revalidate window
 
@@ -19027,7 +19052,9 @@ if the toggle is ticked).</p>
             ckey = "%s|%s" % (scope, q)
             res = _search_engine.cached(ckey)
             if res is None:
-                res = self._search_index_entries(terms, filters, idx)
+                # (v291) live-search me sirf top ~500 hi chahiye — sidebar itne se
+                # bhar jaata hai; isse hazaaron item render karke lag nahi hota.
+                res = self._search_index_entries(terms, filters, idx, limit=500)
                 res = self._apply_ops(res, ex_ops, ph_ops, False)   # (v275) operators
                 _search_engine.remember(ckey, res)
             SE.log(q, time.time() - t0, len(res))
@@ -20108,6 +20135,9 @@ if the toggle is ticked).</p>
                 QtCore.QTimer.singleShot(0, self.files_tree.scrollToTop)
             except Exception:
                 pass
+            # (v291) panel khulte hi search-index background me garam kar do —
+            # taaki pehla keystroke bhi INSTANT result de (cold-build ka wait nahi)
+            self._prewarm_files_index()
 
     def _fcnt(self, path):
         """(v192) Folder ke andar kitni files — card-view ke liye; cache ke
