@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "291"
+VERSION = "292"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1081,7 +1081,8 @@ DEFAULT_OPTIONS = {
     "pinned_files": [],          # panel ke 📌 pin ki hui files (upar dikhti hain)
     "files_grid": False,         # panel results grid (badi thumbnail) view
     "files_panel_root": "",      # panel me khola gaya doosra folder (khaali = save-folder)
-    "files_sort": "name_asc",    # panel ki list kis tarah sort ho (user pasand)
+    "files_sort": "name_asc",    # DEFAULT sort — jin folder ki apni pasand set nahi
+    "folder_sort": {},           # (v292) PER-FOLDER sort yaad: {folder_path: sort_key}
     "sidebar_stats": [],         # khaali = default set dikhega
     "name_append_number": False, # auto-naam me document number bhi jodo
     "name_append_date": False,   # auto-naam me date bhi jodo
@@ -14601,6 +14602,11 @@ if the toggle is ticked).</p>
                 "padding:6px 6px;font-size:11px;font-weight:700;color:#374151;}"
                 "QPushButton:checked{background:#0D9488;border-color:#0D9488;color:#fff;}"
                 "QPushButton:hover{border-color:#93C5FD;}")
+            b.setToolTip(self.L(
+                "%s se sort karo (dobara click = ulta).\n"
+                "यह पसंद सिर्फ़ इसी folder के लिए याद रहेगी — हर folder की अलग।" % label,
+                "Sort by %s (click again = reverse).\n"
+                "This choice is remembered for THIS folder only — each folder keeps its own." % label))
             b.clicked.connect(lambda _c=False, f=field: self._sort_toggle(f))
             self._sort_btns[field] = (b, label)
             _sortrow.addWidget(b, 1)      # stretch=1 -> teeno barabar space lete hain
@@ -17437,6 +17443,14 @@ if the toggle is ticked).</p>
     def _update_panel_nav(self):
         cur = self._panel_current_dir()
         base = self._files_root()
+        # (v292) naya folder khula — us folder ki apni sort-pasand apne aap lagao
+        # aur Naam/Date/Size button uske hisaab se dikhao (har folder alag).
+        if hasattr(self, "_sort_btns"):
+            try:
+                self._apply_files_sort()
+                self._refresh_sort_btns()
+            except Exception:
+                pass
         at_top = os.path.normpath(cur) == os.path.normpath(base)
         if hasattr(self, "btn_panel_back"):
             self.btn_panel_back.setEnabled(not at_top)
@@ -17685,10 +17699,27 @@ if the toggle is ticked).</p>
             grp.addAction(act)
         return menu
 
+    # ---- (v292) PER-FOLDER sort: har folder apni Naam/Date/Size pasand YAAD
+    # rakhta hai. Jis folder ki apni pasand set nahi, wo global default
+    # ("files_sort") use karta hai. Folder badalte hi uski pasand apne aap lagti. ----
+    def _cur_sort_key(self):
+        """Abhi khule folder ki sort-pasand — na set ho to global default."""
+        try:
+            fmap = self._opts.get("folder_sort") or {}
+            folder = self._panel_current_dir()
+            if folder:
+                k = fmap.get(os.path.normpath(folder))
+                if k:
+                    return k
+        except Exception:
+            pass
+        return self._opts.get("files_sort", "name_asc")
+
     def _sort_toggle(self, field):
         """(v250) Naam/Date/Size button click: pehli baar = us hisaab se sort;
-        us button par dobara click = ULTA (asc <-> desc)."""
-        cur = self._opts.get("files_sort", "name_asc")
+        us button par dobara click = ULTA (asc <-> desc). (v292) Sirf ISI folder
+        ki pasand badalti hai — baaki folder jaise the waise rahenge."""
+        cur = self._cur_sort_key()
         if cur == field + "_asc":
             new = field + "_desc"
         elif cur == field + "_desc":
@@ -17699,7 +17730,7 @@ if the toggle is ticked).</p>
         self._set_files_sort(new)
 
     def _refresh_sort_btns(self):
-        cur = self._opts.get("files_sort", "name_asc")
+        cur = self._cur_sort_key()
         for field, (b, label) in getattr(self, "_sort_btns", {}).items():
             arrow = ""
             if cur == field + "_asc":
@@ -17713,7 +17744,21 @@ if the toggle is ticked).</p>
                 pass
 
     def _set_files_sort(self, key):
-        self._opts["files_sort"] = key
+        # (v292) yeh pasand SIRF abhi khule folder ke liye yaad rakho (baaki
+        # folder par asar nahi). Jo folder abhi khula nahi/na mile to global default.
+        try:
+            folder = self._panel_current_dir()
+            if folder and os.path.isdir(folder):
+                fmap = self._opts.setdefault("folder_sort", {})
+                fmap[os.path.normpath(folder)] = key
+                # map ko bahut bada na hone do — purani entries chhaant do
+                if len(fmap) > 400:
+                    for _k in list(fmap.keys())[:len(fmap) - 400]:
+                        fmap.pop(_k, None)
+            else:
+                self._opts["files_sort"] = key      # base/unknown -> default badlo
+        except Exception:
+            self._opts["files_sort"] = key
         self._save_opts()
         self._apply_files_sort()
         try:
@@ -17722,7 +17767,7 @@ if the toggle is ticked).</p>
             pass
 
     def _apply_files_sort(self):
-        key = self._opts.get("files_sort", "name_asc")
+        key = self._cur_sort_key()
         col, order = 0, QtCore.Qt.AscendingOrder
         for k, _hi, _en, c, o in self.SORT_MODES:
             if k == key:
