@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "286"
+VERSION = "287"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -12539,9 +12539,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     if im.mode not in ("1", "L"):
                         im = im.convert("RGB")
                         try:
-                            # rang-heen page gray me — usi quality par kaafi
-                            # chhota; mohar/sign wala page colour hi rehta
-                            if not has_real_colour(im):
+                            # (v287) sirf tab gray karo jab user ne "Auto
+                            # colour-detect" ON kiya ho — warna colour scan colour
+                            # hi rahe (apne aap B&W/gray nahi).
+                            if self._opts.get("auto_colour") and not has_real_colour(im):
                                 im = im.convert("L")
                         except Exception:
                             pass
@@ -23978,10 +23979,10 @@ if the toggle is ticked).</p>
             if im.mode not in ("1", "L"):
                 im = im.convert("RGB")
                 try:
-                    # sirf SACH ME rang-heen page gray hota hai — chhoti
-                    # mohar/sign wala page COLOUR hi rehta hai (pixel-level
-                    # jaanch; purana average-metric mohar kha jaata tha)
-                    if not has_real_colour(im):
+                    # (v287) Colour page ko apne aap gray NAHI karte — sirf tab
+                    # jab user ne "Auto colour-detect" ON kiya ho. Warna colour
+                    # scan colour hi rehta (user ki shikayat: apne aap B&W ho raha).
+                    if self._opts.get("auto_colour") and not has_real_colour(im):
                         im = im.convert("L")
                 except Exception:
                     pass
