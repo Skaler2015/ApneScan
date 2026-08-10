@@ -245,7 +245,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "289"
+VERSION = "290"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -7840,7 +7840,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(mt, "📷 Scan from camera (webcam)…", self.scan_from_camera, "हिन्दी: स्कैनर न हो तो भी — webcam/USB कैमरा से document capture करके PDF बनाओ (फ़ोटो अपने-आप साफ़ होती है)।\nEnglish: No scanner? Capture documents with a webcam/USB camera (auto-cleaned).")
         self._ma(mt, "Phone photo to PDF (photo import)…", self.import_photos, "हिन्दी: फ़ोन से खींची document-फ़ोटो को साफ़ करके पेज बनाओ (परछाई हटाना, सीधा करना) — फिर PDF सेव करो।\nEnglish: Clean up phone photos of documents (remove shadows, straighten) and add them as pages.")
         self._ma(mt, "Split ID cards (from this page)…", self.split_id_cards, "हिन्दी: एक पेज पर 2-3 ID कार्ड स्कैन किए हैं? यह उन्हें अलग-अलग पेजों में काट देगा।\nEnglish: Scanned 2-3 ID cards on one page? This splits them into separate pages.")
-        self._ma(mt, "Search past PDFs…", self.search_pdfs, "हिन्दी: पुरानी सेव की हुई PDF ढूँढो (claim/नाम/tag से, या PDF के अंदर के टेक्स्ट से)।\nEnglish: Search your saved PDFs by name, tag or text content.", "Ctrl+F")
+        self._ma(mt, "Search past PDFs…", self.search_pdfs, "हिन्दी: पुरानी सेव की हुई PDF ढूँढो (claim/नाम/tag से, या PDF के अंदर के टेक्स्ट से)।\nEnglish: Search your saved PDFs by name, tag or text content.")
         self._ma(mt, "Build/refresh search index…", self.build_search_index, "हिन्दी: सारी PDF का टेक्स्ट एक बार पढ़कर index बना लो — फिर अंदर-के-टेक्स्ट वाली search तुरंत होगी।\nEnglish: Build a one-time text index so in-PDF search becomes instant.")
         self._ma(mt, "Add tag (to a PDF)…", self.tag_pdf, "हिन्दी: PDF पर अपने tags लगाओ (जैसे Aadhaar, School, बिजली-बिल) — बाद में tag से तुरंत ढूँढो।\nEnglish: Put your own tags on a PDF for quick finding later.")
         self._ma(mt, "Find by tag…", self.search_by_tag, "हिन्दी: लगाए हुए tag से फ़ाइलों की सूची देखो और खोलो।\nEnglish: List and open files by tag.")
@@ -11848,28 +11848,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
                      or obj is getattr(self, "files_tree", None))):
             self._quick_look_selected()
             return True
-        # (v270) My Files live-search dropdown — keyboard control
+        # (v290) My Files INSTANT search — keyboard sidebar-list ko control kare
+        # (koi dropdown nahi). ↑/↓ = result chuno, Esc = search saaf.
         if hasattr(self, "files_search") and obj is self.files_search:
-            sg = getattr(self, "_sugg", None)
-            if ev.type() == QtCore.QEvent.KeyPress and sg is not None:
+            if ev.type() == QtCore.QEvent.KeyPress:
                 k = ev.key()
-                vis = sg.isVisible() and sg.count() > 0
-                if k == QtCore.Qt.Key_Down and vis:
-                    self._sugg_nav = True
-                    sg.setCurrentRow(min(sg.currentRow() + 1, sg.count() - 1)
-                                     if sg.currentRow() >= 0 else 0)
+                if k in (QtCore.Qt.Key_Down, QtCore.Qt.Key_Up) \
+                        and self.files_results.isVisible() and self.files_results.count():
+                    self._move_results_selection(1 if k == QtCore.Qt.Key_Down else -1)
                     return True
-                if k == QtCore.Qt.Key_Up and vis:
-                    self._sugg_nav = True
-                    sg.setCurrentRow(max(sg.currentRow() - 1, 0))
+                if k == QtCore.Qt.Key_Escape and self.files_search.text():
+                    self.files_search.clear()
                     return True
-                if k == QtCore.Qt.Key_Escape and vis:
-                    sg.hide()
-                    return True
-            elif ev.type() == QtCore.QEvent.FocusIn and sg is not None:
-                QtCore.QTimer.singleShot(0, self._show_recent_searches)  # khaali box -> recents
-            elif ev.type() == QtCore.QEvent.FocusOut and sg is not None:
-                QtCore.QTimer.singleShot(200, sg.hide)   # click land hone do, phir chhupao
         if obj is self.list.viewport():
             if ev.type() == QtCore.QEvent.Resize:
                 self._empty_lbl.setGeometry(self.list.viewport().rect())
@@ -14809,35 +14799,18 @@ if the toggle is ticked).</p>
         fp.addWidget(self.files_results, 1)
         self._files_search_timer = QtCore.QTimer(self)
         self._files_search_timer.setSingleShot(True)
-        self._files_search_timer.setInterval(60)   # index memory me — lagbhag turant
+        self._files_search_timer.setInterval(70)   # chhota debounce — turant lage
         self._files_search_timer.timeout.connect(self._run_files_search)
-        # (v270) LIVE DROPDOWN — pehle akshar se hi, jaise-jaise type karo, milte
-        # matches search box ke NEECHE ek dropdown me turant dikhte hain (Google
-        # suggestions jaisa). Click/Enter par file khul jaati / folder me chale
-        # jao. Folder-tree peeche dikhta rehta hai; poori list Enter par.
-        self._sugg = QtWidgets.QListWidget(self.files_panel)
-        self._sugg.setWindowFlags(QtCore.Qt.Tool | QtCore.Qt.FramelessWindowHint
-                                  | QtCore.Qt.WindowStaysOnTopHint
-                                  | QtCore.Qt.NoDropShadowWindowHint)
-        self._sugg.setAttribute(QtCore.Qt.WA_ShowWithoutActivating, True)  # focus box me rahe
-        self._sugg.setFocusPolicy(QtCore.Qt.NoFocus)
-        self._sugg.setMouseTracking(True)
-        self._sugg.setUniformItemSizes(True)
-        self._sugg.setStyleSheet(
-            "QListWidget{background:#fff;border:1px solid #C7D2FE;border-radius:8px;"
-            "outline:0;font-size:12px;padding:3px;}"
-            "QListWidget::item{padding:5px 7px;border-radius:5px;}"
-            "QListWidget::item:selected{background:#EEF2FF;color:#111827;}"
-            "QListWidget::item:hover{background:#F1F5F9;}")
-        self._sugg.itemClicked.connect(self._files_sugg_pick)
-        self._sugg.hide()
-        self._sugg_timer = QtCore.QTimer(self)
-        self._sugg_timer.setSingleShot(True)
-        self._sugg_timer.setInterval(25)                 # bahut tez — har keystroke
-        self._sugg_timer.timeout.connect(self._update_files_suggest)
-        self.files_search.textChanged.connect(lambda _t: self._sugg_timer.start())
-        self.files_search.returnPressed.connect(self._files_search_enter)
-        self.files_search.installEventFilter(self)       # ↓ ↑ Esc Enter dropdown ke liye
+        # (v290) INSTANT LIVE SIDEBAR SEARCH — jaise hi type karo (pehle akshar se),
+        # matching files/folders SEEDHE isi sidebar-list me aa jate hain. Koi
+        # dropdown/popup/"Indexing…" nahi. Box khaali karte hi normal list wapas.
+        self._sugg = None                            # (v290) purana dropdown hataya
+        self.files_search.textChanged.connect(lambda _t: self._files_search_timer.start())
+        self.files_search.returnPressed.connect(self._files_search_open_selected)
+        self.files_search.installEventFilter(self)   # ↑ ↓ Enter Esc = list control
+        # (v290) Ctrl+F => seedha is live sidebar-search par focus (panel bند ho to
+        # khol kar), aur pehle se likha text select — turant naya search likho.
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, self._focus_files_search)
         self._rebuild_fav_bar()
         _row = QtWidgets.QHBoxLayout()
         _bopen = QtWidgets.QPushButton(self.L("📂 Kholo", "📂 Open"))
@@ -18603,6 +18576,52 @@ if the toggle is ticked).</p>
         else:
             self._open_path(p)
 
+    def _focus_files_search(self):
+        """(v290) Ctrl+F — Meri Files panel (band ho to) kholo aur seedha live
+        sidebar-search box par focus; pehle se likha text select ho jaye."""
+        try:
+            fp = getattr(self, "files_panel", None)
+            if fp is not None and not fp.isVisible():
+                self.toggle_files_panel()
+        except Exception:
+            pass
+        try:
+            self.files_search.setFocus(QtCore.Qt.ShortcutFocusReason)
+            self.files_search.selectAll()
+        except Exception:
+            pass
+
+    def _move_results_selection(self, step):
+        """(v290) Search-box me ↑/↓ — sidebar-list me agla/pichhla ASLI result
+        chuno (header/khaali items skip). Focus search-box me hi rehta hai."""
+        lw = self.files_results
+        n = lw.count()
+        if not n:
+            return
+        r = lw.currentRow()
+        r = 0 if r < 0 else r + step
+        while 0 <= r < n:
+            it = lw.item(r)
+            if it and (it.flags() & QtCore.Qt.ItemIsSelectable) and it.data(QtCore.Qt.UserRole):
+                lw.setCurrentRow(r)
+                lw.scrollToItem(it)
+                return
+            r += step
+
+    def _files_search_open_selected(self):
+        """(v290) Enter: chuna result kholo; koi na chuna ho to pehla result."""
+        lw = self.files_results
+        it = lw.currentItem()
+        if it is None or not it.data(QtCore.Qt.UserRole):
+            it = None
+            for i in range(lw.count()):
+                c = lw.item(i)
+                if c and c.data(QtCore.Qt.UserRole):
+                    it = c
+                    break
+        if it is not None and it.data(QtCore.Qt.UserRole):
+            self._files_result_activated(it)
+
     def _on_result_clicked(self, it):
         """Search-result par EK click: document ho to uska preview panel me
         dikhao (PDF ka pehla page / image seedha). Folder par kuch nahi."""
@@ -18874,11 +18893,11 @@ if the toggle is ticked).</p>
                 _search_engine.clear_cache()
             except Exception:
                 pass
-            # index aate hi agar search-box me abhi bhi kuch likha hai to
-            # (v270) live dropdown turant taaza karo
+            # (v290) index ban gaya — agar search-box me abhi bhi kuch likha hai
+            # to results turant sidebar-list me dikha do (progressive; blank nahi).
             try:
                 if len(self.files_search.text().strip()) >= 1:
-                    self._update_files_suggest()
+                    self._run_files_search()
             except Exception:
                 pass
         self._run_bg_quiet(lambda: self._build_files_index(scope), _done)
@@ -18967,7 +18986,8 @@ if the toggle is ticked).</p>
         q = self.files_search.text().strip().lower()
         self._search_snippets = {}          # (v272) purane snippet saaf; sirf
         #                                     inside-text search inko bharta hai
-        if len(q) < 2:
+        # (v290) INSTANT: pehle akshar se hi search. Khaali box -> normal list.
+        if len(q) < 1:
             self.files_results.hide()
             self.files_tree.show()
             self.files_results._hl_terms = None
@@ -18995,13 +19015,10 @@ if the toggle is ticked).</p>
         if not search_text:
             idx = getattr(self, "_files_index", None)
             if idx is None or getattr(self, "_files_index_scope", None) != scope:
-                # index abhi nahi bana — background me banwao, tab tak "…" dikhao
+                # (v290) index abhi nahi bana — CHUP-CHAAP background me banao.
+                # Koi "Indexing…" nahi, sidebar blank nahi (jo dikh raha hai wahi
+                # dikhta rahe). Index aate hi results khud aa jate hain (_done).
                 self._ensure_files_index_async(scope)
-                self.files_results.clear()
-                _w = QtWidgets.QListWidgetItem(self.L("⏳ Taiyaari…", "⏳ Indexing…"))
-                _w.setFlags(QtCore.Qt.NoItemFlags)
-                self.files_results.addItem(_w)
-                self.files_tree.hide(); self.files_results.show()
                 return
             # AUTO-REFRESH: index TTL paar kar gaya? purane se abhi jawab do,
             # background me naya banao (naya aate hi results khud refresh).
@@ -19401,8 +19418,13 @@ if the toggle is ticked).</p>
                     s.setToolTip(p)
                     self.files_results.addItem(s)
         if not order:
-            it = QtWidgets.QListWidgetItem(self.L("(kuch nahi mila)", "(nothing found)"))
+            # (v290) saaf empty-state (blank sidebar nahi)
+            it = QtWidgets.QListWidgetItem(
+                self.L("\n🔍\n\nKoi file/folder nahi mila\nkoi doosra shabd aajmao\n",
+                       "\n🔍\n\nNo matching files or folders\nTry a different search term\n"))
             it.setFlags(QtCore.Qt.NoItemFlags)
+            it.setTextAlignment(QtCore.Qt.AlignHCenter)
+            it.setForeground(QtGui.QColor("#94A3B8"))
             self.files_results.addItem(it)
         self.files_tree.hide()
         self.files_results.show()
