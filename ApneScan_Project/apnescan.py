@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "294"
+VERSION = "295"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -24376,71 +24376,47 @@ if the toggle is ticked).</p>
         body.addLayout(right, 1)
         cv.addLayout(body)
 
-        # ---- suggested names (instant, local) ----
-        sug_head = QtWidgets.QHBoxLayout()
-        sug_head.addWidget(self._mklbl(L("✨ Sujhaye naam", "✨ Suggested Names"), "rnlab"))
-        sug_head.addStretch(1)
-        sug_search = QtWidgets.QLineEdit(); sug_search.setObjectName("rnsearch")
-        sug_search.setPlaceholderText("🔍 " + L("sujhaav dhoondo", "filter suggestions"))
-        sug_search.setFixedWidth(180)
-        sug_head.addWidget(sug_search)
-        cv.addLayout(sug_head)
+        # ---- suggestions: LIVE DROPDOWN attached to the Current Name field ----
+        # (v295) User request — sujhaav niche chips me nahi, seedhe Current Name
+        # ke SAATH dropdown me aayein: type karo → matching naam dropdown me,
+        # ↑/↓ se chuno, Enter se seedha save. (local, turant, koi indexing nahi.)
+        cv.addWidget(self._mklbl(
+            L("✨ Type karo → sujhaav dropdown me; ↑/↓ se chuno, Enter se save",
+              "✨ Type to see suggestions in the dropdown; ↑/↓ to pick, Enter to save"),
+            "rnlab"))
+        comp_model = QtCore.QStringListModel(dlg)
+        completer = QtWidgets.QCompleter(comp_model, le)
+        completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
+        completer.setCompletionMode(QtWidgets.QCompleter.PopupCompletion)
+        try:
+            completer.setFilterMode(QtCore.Qt.MatchContains)   # beech-ka-tukda bhi
+        except Exception:
+            pass
+        completer.setMaxVisibleItems(8)
+        le.setCompleter(completer)
+        try:
+            completer.popup().setStyleSheet(
+                "QListView{border:1px solid #D6CFFB;border-radius:9px;background:#fff;"
+                "outline:0;padding:4px;font-size:13px;color:#1F2340;}"
+                "QListView::item{padding:7px 11px;border-radius:6px;}"
+                "QListView::item:selected{background:#EEF2FF;color:#4A3FB0;}")
+        except Exception:
+            pass
 
-        chip_scroll = QtWidgets.QScrollArea()
-        chip_scroll.setWidgetResizable(True)
-        chip_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
-        chip_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-        chip_scroll.setMinimumHeight(52); chip_scroll.setMaximumHeight(120)
-        chip_host = QtWidgets.QWidget()
-        chip_flow = FlowLayout(chip_host, margin=2, spacing=7)
-        chip_scroll.setWidget(chip_host)
-        cv.addWidget(chip_scroll)
-        state = {"expanded": False}
-
-        def _set_name(nm):
-            le.setText(nm); le.setFocus()
-            le.setCursorPosition(len(nm))
-
-        def _rebuild_chips():
-            while chip_flow.count():
-                w = chip_flow.takeAt(0)
-                if w and w.widget():
-                    w.widget().deleteLater()
-            # (v294) chips ab Current Name field se BHI filter hote hain — jaise
-            # "IN" likha to Invest/Investigation… turant dikhein. Alag "filter
-            # suggestions" box likha ho to wo priority leta hai.
-            q = sug_search.text().strip() or le.text().strip()
-            names = []
+        def _rebuild_suggest():
             if lib is not None:
-                names = [it["name"] for it in lib.suggestions(q, limit=None)]
+                nms = [it["name"] for it in lib.all(active_only=True)]
             else:
-                names = [n for n in self._name_history()
-                         if not q or q.lower() in n.lower()]
-            limit = 10
-            show = names if (state["expanded"] or len(names) <= limit) else names[:limit]
-            for nm in show:
-                b = QtWidgets.QPushButton(nm); b.setObjectName("chip")
-                b.setCursor(QtCore.Qt.PointingHandCursor)
-                b.clicked.connect(lambda _c=False, n=nm: _set_name(n))
-                chip_flow.addWidget(b)
-            if not state["expanded"] and len(names) > limit:
-                more = QtWidgets.QPushButton(
-                    L("+%d aur…" % (len(names) - limit), "More (+%d)…" % (len(names) - limit)))
-                more.setObjectName("chipmore"); more.setCursor(QtCore.Qt.PointingHandCursor)
+                nms = [n for n in self._name_history() if isinstance(n, str)]
+            comp_model.setStringList(nms)
+        _rebuild_suggest()
 
-                def _expand():
-                    state["expanded"] = True; _rebuild_chips()
-                more.clicked.connect(_expand)
-                chip_flow.addWidget(more)
-            if not show:
-                empt = QtWidgets.QLabel(L("koi sujhaav nahi — apna naam type karo",
-                                          "no suggestions — just type your name"))
-                empt.setStyleSheet("color:#9AA0BC;font-size:11px;")
-                chip_flow.addWidget(empt)
-        sug_search.textChanged.connect(lambda _t: (state.update(expanded=False), _rebuild_chips()))
-        # Current Name me type karte hi chips filter ho jayein (live)
-        le.textChanged.connect(lambda _t: (state.update(expanded=False), _rebuild_chips()))
-        _rebuild_chips()
+        def _pick_and_save(text):
+            # ↑/↓ se chun kar Enter (ya click) — naam bhar do aur seedha rename
+            le.setText(text)
+            le.setCursorPosition(len(text))
+            QtCore.QTimer.singleShot(0, lambda: brename.isEnabled() and dlg.accept())
+        completer.activated[str].connect(_pick_and_save)
 
         # ---- remember + manage ----
         rem = QtWidgets.QCheckBox(L("Is naam ko aage ke liye yaad rakho",
@@ -24457,7 +24433,7 @@ if the toggle is ticked).</p>
         bmanage.setToolTip(L("Sujhav-naam jodo / badlo / hatao",
                              "Add / edit / remove suggested names"))
         bmanage.clicked.connect(lambda: (dlg.hide(), self.manage_suggested_names(),
-                                         dlg.show(), _rebuild_chips()))
+                                         dlg.show(), _rebuild_suggest()))
         foot.addWidget(bmanage)
         if multi:
             bbulk = QtWidgets.QPushButton(L("Har page ka alag naam…", "Different name per page…"))
