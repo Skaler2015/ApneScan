@@ -62,6 +62,11 @@ from apnescan_lib.naming_engine import (
     _ni_detect_type, _ni_extract_person, _ni_default_style, _ni_learn_style,
     _ni_generate, _ni_learn_corrections,
 )
+# Suggested-name library — scalable data model for the redesigned Rename system.
+from apnescan_lib.naming import (
+    NameLibrary, DEFAULT_CATEGORIES, TEMPLATE_VARS, expand_template,
+    clean_custom_name, invalid_name_reason, WIN_FORBIDDEN,
+)
 # Document fingerprint engine (text/image/barcode signatures for AI Memory).
 # Only the helpers DocMemory calls directly are imported back.
 from apnescan_lib.fingerprint import (
@@ -245,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "292"
+VERSION = "293"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2637,6 +2642,78 @@ LABEL_COLORS = {
 
 
 # OCR text-recognition helpers moved to apnescan_lib/ocr_text.py (imported at top).
+
+
+class FlowLayout(QtWidgets.QLayout):
+    """A left-to-right wrapping layout (the classic Qt example). Used by the
+    redesigned Rename dialog so suggestion chips wrap to the next line instead
+    of clipping — keeps the dialog responsive at any width."""
+
+    def __init__(self, parent=None, margin=0, spacing=6):
+        super().__init__(parent)
+        if parent is not None:
+            self.setContentsMargins(margin, margin, margin, margin)
+        self.setSpacing(spacing)
+        self._items = []
+
+    def __del__(self):
+        while self.count():
+            self.takeAt(0)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, i):
+        return self._items[i] if 0 <= i < len(self._items) else None
+
+    def takeAt(self, i):
+        return self._items.pop(i) if 0 <= i < len(self._items) else None
+
+    def expandingDirections(self):
+        return QtCore.Qt.Orientations(QtCore.Qt.Orientation(0))
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QtCore.QRect(0, 0, width, 0), True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QtCore.QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        size += QtCore.QSize(m.left() + m.right(), m.top() + m.bottom())
+        return size
+
+    def _do_layout(self, rect, test_only):
+        x, y = rect.x(), rect.y()
+        line_h = 0
+        space = self.spacing()
+        for item in self._items:
+            w = item.sizeHint().width()
+            h = item.sizeHint().height()
+            nx = x + w
+            if nx - rect.x() > rect.width() and line_h > 0:
+                x = rect.x()
+                y = y + line_h + space
+                nx = x + w
+                line_h = 0
+            if not test_only:
+                item.setGeometry(QtCore.QRect(QtCore.QPoint(x, y), item.sizeHint()))
+            x = nx + space
+            line_h = max(line_h, h)
+        return y + line_h - rect.y()
 
 
 class NameWorker(QtCore.QThread):
@@ -7508,6 +7585,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.resize(1220, 820)
         self._tmpdir = tempfile.mkdtemp(prefix="nobledoc_")
         self._config = load_config()
+        # (v293) Suggested-name library — scalable local-first data model behind
+        # the redesigned Rename system. Loads at startup into memory (migrates the
+        # old name_history list, mirrors it back for backward-compat). No network.
+        try:
+            self._namelib = NameLibrary(self._config, lambda: save_config(self._config))
+        except Exception:
+            self._namelib = None
         self._profiles = self._config.get("profiles", [])
         # HD scan (v155, one-time): purani profiles 150/200 dpi par chal rahi
         # thin — sabko 300 dpi (HD) par le aao. User baad me kabhi bhi Settings
@@ -15419,6 +15503,8 @@ if the toggle is ticked).</p>
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Y"), self, self._hist_redo_do)   # redo (alt)
         # (v251) Ctrl+Shift+A = chune pages par AI Auto (everything) ek click
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+A"), self, self._ai_auto_selected)
+        # (v293) Ctrl+Shift+R = chune pages ka naam badlo (bulk rename)
+        QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+Shift+R"), self, self._rename_selected_pages)
         # Tesseract check ko startup par BACKGROUND me warm kar do (ye tesseract.exe
         # subprocess chalata hai ~1-2s) — taaki baad me koi bhi kaam (rename, scan)
         # is check par UI thread par ATKE nahi.
@@ -22547,14 +22633,30 @@ if the toggle is ticked).</p>
         if self.list.count() == 0:
             return
         item = self.list.itemAt(pos)
-        if item is not None:
-            self.list.setCurrentItem(item)      # saare actions ISI page par lagein
+        # (v293) MULTI-SELECT preserve: agar right-click kiya item pehle se chune
+        # hue set ka hissa hai to selection mat todo (bulk-rename ho sake); warna
+        # usi item ko current bana do.
+        if item is not None and item not in self.list.selectedItems():
+            self.list.setCurrentItem(item)
+        elif item is not None:
+            self.list.setCurrentItem(item, QtCore.QItemSelectionModel.NoUpdate)
         row = self.list.row(item) if item is not None else -1
+        nsel = len(self.list.selectedItems())
         L = self.L
         m = QtWidgets.QMenu(self)
 
         # ---- Basic ----
-        m.addAction("\u270f\ufe0f " + L("Naam badlo", "Rename"), self.rename_current_page)
+        m.addAction("\u270f\ufe0f " + L("Naam badlo (F2)", "Rename (F2)"), self.rename_current_page)
+        if nsel > 1:
+            m.addAction("\u270f\ufe0f " + L("Chune %d pages ka naam badlo" % nsel,
+                                            "Rename %d selected pages" % nsel),
+                        self._rename_selected_pages)
+        m.addAction("\u2728 " + L("Sujhaya naam lagao\u2026", "Use suggested name\u2026"),
+                    self._use_suggested_name_current)
+        m.addAction("\u2795 " + L("Sujhaav me jodo", "Add to suggested names"),
+                    self._add_current_to_suggestions)
+        m.addAction("\u21a9 " + L("Rename wapas (undo)", "Undo last rename"),
+                    self._undo_last_rename)
         m.addAction("\u270f\ufe0f " + L("Yahin naam badlo (inline)", "Rename here (inline)"),
                     self._inline_rename_current)
         m.addAction("\ud83d\udccb " + L("Nakal (duplicate)", "Duplicate"), self.duplicate_current_page)
@@ -23604,6 +23706,14 @@ if the toggle is ticked).</p>
         name = (name or "").strip()
         if not name:
             return
+        # (v293) library authoritative — usage bump + mirror name_history apne aap
+        lib = getattr(self, "_namelib", None)
+        if lib is not None:
+            try:
+                lib.bump_usage(name)
+                return
+            except Exception:
+                pass
         h = [x for x in self._name_history()
              if isinstance(x, str) and x.strip().lower() != name.lower()]
         h.insert(0, name)                       # sabse naya sabse upar
@@ -23687,146 +23797,933 @@ if the toggle is ticked).</p>
         return val, ok
 
     def _manage_name_history(self):
-        """(v253) Rename ke SUGGESTION naam (name_history) ko manage karo —
-        dhoondo, badlo, hatao, ya sab saaf. Yahi naam '⚙ Manage names' se khulte."""
+        """Back-compat entry point — now opens the redesigned Manage Suggested
+        Names panel (kept so old '⚙ Manage names' callers keep working)."""
+        return self.manage_suggested_names()
+
+    def _ncat_color(self, cat):
+        return {
+            "Medical": ("#EEF2FF", "#3730A3"),
+            "ECHS": ("#ECFDF5", "#065F46"),
+            "Financial": ("#FEF3C7", "#92400E"),
+            "General": ("#F3F4F6", "#374151"),
+            "Custom": ("#F5F3FF", "#5B21B6"),
+        }.get(cat, ("#F4F2FF", "#4A3FB0"))
+
+    def manage_suggested_names(self):
+        """(v293) Redesigned Manage Suggested Names — a professional management
+        panel: instant local search, category filter, a Name/Category/Usage
+        table with edit/delete, Frequently & Recently used, Add-new form,
+        drag-to-reorder priority, import/export. All local; no indexing."""
+        lib = getattr(self, "_namelib", None)
+        if lib is None:
+            return
+        L = self.L
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle(self.L("Suggestion naam manage", "Manage suggested names"))
-        dlg.resize(430, 480)
+        dlg.setWindowTitle(L("Sujhaye naam manage", "Manage Suggested Names"))
+        dlg.resize(720, 600)
+        dlg.setStyleSheet(
+            "QDialog{background:#FbFbFe;}"
+            "#mtitle{font-size:16px;font-weight:800;color:#1F2340;}"
+            "#msub{font-size:11.5px;color:#7A80A0;}"
+            "#sect{font-size:10.5px;font-weight:800;color:#8A8FB0;letter-spacing:1px;}"
+            "QLineEdit,QComboBox{border:1px solid #D7DAE6;border-radius:9px;padding:7px 10px;"
+            "font-size:12.5px;background:#fff;}"
+            "QLineEdit:focus{border-color:#6A5AE0;}"
+            "QTableWidget{border:1px solid #E7E4F7;border-radius:10px;background:#fff;gridline-color:#F1F0F8;}"
+            "QHeaderView::section{background:#F4F2FF;color:#4A3FB0;font-weight:700;"
+            "border:none;padding:7px;font-size:11.5px;}"
+            "#chip{background:#F4F2FF;border:1px solid #E1DCF8;border-radius:13px;"
+            "padding:5px 11px;font-size:11.5px;color:#4A3FB0;font-weight:600;}"
+            "#chip:hover{background:#E7E1FF;border-color:#6A5AE0;}")
         v = QtWidgets.QVBoxLayout(dlg)
-        v.addWidget(QtWidgets.QLabel(self.L(
-            "Ye wahi naam hain jo Rename me sujhav aate hain.\nChuno aur hatao/badlo.",
-            "These are the names suggested when renaming.\nSelect to remove / edit.")))
-        search = QtWidgets.QLineEdit(); search.setPlaceholderText("🔍 " + self.L("dhoondo", "search"))
-        v.addWidget(search)
-        lw = QtWidgets.QListWidget()
-        lw.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
-        v.addWidget(lw, 1)
+        v.setContentsMargins(18, 16, 18, 16); v.setSpacing(11)
+
+        # header
+        hb = QtWidgets.QHBoxLayout()
+        htxt = QtWidgets.QVBoxLayout(); htxt.setSpacing(1)
+        htxt.addWidget(self._mklbl(L("Sujhaye naam manage", "Manage Suggested Names"), "mtitle"))
+        htxt.addWidget(self._mklbl(L(
+            "Rename ke waqt ApneScan jo naam sujhata hai — unhe banao aur vyavasthit karo.",
+            "Create and organize the names ApneScan suggests while renaming documents."), "msub"))
+        hb.addLayout(htxt, 1)
+        v.addLayout(hb)
+
+        # search + category filter
+        fr = QtWidgets.QHBoxLayout()
+        search = QtWidgets.QLineEdit(); search.setPlaceholderText("🔍 " + L("naam dhoondo…", "Search names…"))
+        catf = QtWidgets.QComboBox()
+        catf.addItem(L("Sab categories", "All Categories"))
+        for c in lib.categories():
+            catf.addItem(c)
+        catf.setFixedWidth(170)
+        fr.addWidget(search, 1); fr.addWidget(catf)
+        v.addLayout(fr)
+
+        # frequently / recently used (collapsible-ish chips)
+        fu_wrap = QtWidgets.QVBoxLayout(); fu_wrap.setSpacing(4)
+        fu_head = QtWidgets.QHBoxLayout()
+        fu_head.addWidget(self._mklbl(L("AKSAR ISTEMAAL", "FREQUENTLY USED"), "sect"))
+        fu_head.addStretch(1)
+        fu_wrap.addLayout(fu_head)
+        fu_host = QtWidgets.QWidget(); fu_flow = FlowLayout(fu_host, spacing=6)
+        fu_wrap.addWidget(fu_host)
+        ru_head = QtWidgets.QLabel(L("HAAL HI ME", "RECENTLY USED")); ru_head.setObjectName("sect")
+        ru_host = QtWidgets.QWidget(); ru_flow = FlowLayout(ru_host, spacing=6)
+        fu_wrap.addWidget(ru_head); fu_wrap.addWidget(ru_host)
+        v.addLayout(fu_wrap)
+
+        # table
+        tbl = QtWidgets.QTableWidget(0, 4)
+        tbl.setHorizontalHeaderLabels([L("Naam", "Name"), L("Category", "Category"),
+                                       L("Istemaal", "Usage"), L("Actions", "Actions")])
+        tbl.verticalHeader().setVisible(False)
+        tbl.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        tbl.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        tbl.setColumnWidth(0, 250); tbl.setColumnWidth(1, 140); tbl.setColumnWidth(2, 80)
+        tbl.horizontalHeader().setStretchLastSection(True)
+        # drag-to-reorder priority
+        tbl.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
+        tbl.setDragDropOverwriteMode(False)
+        tbl.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        v.addWidget(tbl, 1)
+        cnt = QtWidgets.QLabel(""); cnt.setStyleSheet("color:#7A80A0;font-size:11px;")
+        v.addWidget(cnt)
+
+        def _chipbtn(name, on_click):
+            b = QtWidgets.QPushButton(name); b.setObjectName("chip")
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.clicked.connect(lambda _c=False, n=name: on_click(n))
+            return b
+
+        def _refresh():
+            q = search.text().strip()
+            cat = None if catf.currentIndex() == 0 else catf.currentText()
+            rows = lib.search(q, category=cat, active_only=False)
+            tbl.blockSignals(True)
+            tbl.setRowCount(0)
+            for it in rows:
+                r = tbl.rowCount(); tbl.insertRow(r)
+                nm = QtWidgets.QTableWidgetItem(("☰  " if not q else "") + it["name"])
+                nm.setData(QtCore.Qt.UserRole, it["id"])
+                if not it["isActive"]:
+                    nm.setForeground(QtGui.QColor("#B0B4C8"))
+                tbl.setItem(r, 0, nm)
+                cc = QtWidgets.QTableWidgetItem(it.get("category") or "General")
+                bg, fg = self._ncat_color(it.get("category") or "General")
+                cc.setForeground(QtGui.QColor(fg))
+                tbl.setItem(r, 1, cc)
+                uc = QtWidgets.QTableWidgetItem(str(it["usageCount"]))
+                uc.setTextAlignment(QtCore.Qt.AlignCenter)
+                tbl.setItem(r, 2, uc)
+                # actions cell
+                cell = QtWidgets.QWidget(); ch = QtWidgets.QHBoxLayout(cell)
+                ch.setContentsMargins(4, 2, 4, 2); ch.setSpacing(4)
+                be = QtWidgets.QPushButton("✏"); be.setFixedSize(26, 24)
+                be.setToolTip(L("Badlo", "Edit")); be.setCursor(QtCore.Qt.PointingHandCursor)
+                be.clicked.connect(lambda _c=False, nid=it["id"]: _edit(nid))
+                bd = QtWidgets.QPushButton("🗑"); bd.setFixedSize(26, 24)
+                bd.setToolTip(L("Hatao", "Delete")); bd.setCursor(QtCore.Qt.PointingHandCursor)
+                bd.clicked.connect(lambda _c=False, nid=it["id"], nm2=it["name"]: _delete(nid, nm2))
+                ch.addWidget(be); ch.addWidget(bd); ch.addStretch(1)
+                tbl.setCellWidget(r, 3, cell)
+            tbl.blockSignals(False)
+            cnt.setText(L("%d naam" % len(rows), "%d names" % len(rows)))
+            # freq / recent chips
+            for flow in (fu_flow, ru_flow):
+                while flow.count():
+                    w = flow.takeAt(0)
+                    if w and w.widget():
+                        w.widget().deleteLater()
+            for it in lib.frequently_used(10):
+                fu_flow.addWidget(_chipbtn(it["name"], lambda n: (search.setText(n))))
+            for it in lib.recently_used(10):
+                ru_flow.addWidget(_chipbtn(it["name"], lambda n: (search.setText(n))))
+
+        def _commit_order():
+            """After a drag, read the visible order and persist priorities."""
+            ids = []
+            for r in range(tbl.rowCount()):
+                it0 = tbl.item(r, 0)
+                if it0 and it0.data(QtCore.Qt.UserRole):
+                    ids.append(it0.data(QtCore.Qt.UserRole))
+            if ids:
+                lib.set_order(ids)
+
+        def _edit(nid):
+            rec = lib.by_id(nid)
+            if rec is None:
+                return
+            if self._name_edit_form(dlg, lib, rec):
+                _refresh_cats(); _refresh()
+
+        def _delete(nid, name):
+            box = QtWidgets.QMessageBox(dlg)
+            box.setIcon(QtWidgets.QMessageBox.Warning)
+            box.setWindowTitle(L('Naam hatao', 'Delete name'))
+            box.setText(L('"%s" hataayein?' % name, 'Delete "%s"?' % name))
+            box.setInformativeText(L("Ye naam aapke sujhaye naamon se hat jayega.",
+                                     "This name will be removed from your suggested names."))
+            bd = box.addButton(L("Hatao", "Delete"), QtWidgets.QMessageBox.DestructiveRole)
+            box.addButton(L("Cancel", "Cancel"), QtWidgets.QMessageBox.RejectRole)
+            box.exec_()
+            if box.clickedButton() is bd:
+                lib.delete(nid); _refresh()
+
+        def _add():
+            if self._name_edit_form(dlg, lib, None):
+                _refresh_cats(); search.setText(""); catf.setCurrentIndex(0); _refresh()
+
+        def _refresh_cats():
+            cur = catf.currentText()
+            catf.blockSignals(True)
+            catf.clear(); catf.addItem(L("Sab categories", "All Categories"))
+            for c in lib.categories():
+                catf.addItem(c)
+            i = catf.findText(cur)
+            catf.setCurrentIndex(i if i >= 0 else 0)
+            catf.blockSignals(False)
+
+        def _export():
+            f, _ = QtWidgets.QFileDialog.getSaveFileName(
+                dlg, L("Library export karo", "Export library"),
+                "ApneScan_Naming_Library.json", "JSON (*.json)")
+            if not f:
+                return
+            try:
+                with open(f, "w", encoding="utf-8") as fh:
+                    json.dump(lib.export_data(), fh, ensure_ascii=False, indent=2)
+                self._toast(L("✓ Export ho gaya", "✓ Library exported"))
+            except Exception as e:
+                self._warn(str(e))
+
+        def _import():
+            f, _ = QtWidgets.QFileDialog.getOpenFileName(
+                dlg, L("Library import karo", "Import library"), "", "JSON (*.json)")
+            if not f:
+                return
+            try:
+                with open(f, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+            except Exception as e:
+                self._warn(L("File nahi padh paye: %s", "Could not read file: %s") % e); return
+            ok, payload = lib.validate_import(data)
+            if not ok:
+                self._warn(L("Ye sahi library file nahi: %s", "Not a valid library file: %s") % payload)
+                return
+            box = QtWidgets.QMessageBox(dlg)
+            box.setWindowTitle(L("Import", "Import"))
+            box.setText(L("%d naam mile. Kaise import karein?" % len(payload),
+                          "%d names found. How should they be imported?" % len(payload)))
+            bm = box.addButton(L("Merge (jodo)", "Merge"), QtWidgets.QMessageBox.AcceptRole)
+            br = box.addButton(L("Replace (badlo)", "Replace"), QtWidgets.QMessageBox.DestructiveRole)
+            box.addButton(L("Cancel", "Cancel"), QtWidgets.QMessageBox.RejectRole)
+            box.exec_()
+            mode = "merge" if box.clickedButton() is bm else ("replace" if box.clickedButton() is br else None)
+            if not mode:
+                return
+            a, u, err = lib.import_data(data, mode)
+            if err:
+                self._warn(err); return
+            _refresh_cats(); _refresh()
+            self._toast(L("✓ %d naye, %d update" % (a, u), "✓ %d added, %d updated" % (a, u)))
+
+        search.textChanged.connect(lambda _t: _refresh())
+        catf.currentIndexChanged.connect(lambda _i: _refresh())
+        tbl.itemDoubleClicked.connect(
+            lambda it: _edit(tbl.item(it.row(), 0).data(QtCore.Qt.UserRole)))
+        try:
+            tbl.model().rowsMoved.connect(lambda *a: _commit_order())
+        except Exception:
+            pass
+
+        # footer buttons
+        foot = QtWidgets.QHBoxLayout()
+        badd = QtWidgets.QPushButton("➕ " + L("Naya jodo", "Add New")); badd.setObjectName("primary")
+        badd.setCursor(QtCore.Qt.PointingHandCursor); badd.clicked.connect(_add)
+        bimp = QtWidgets.QPushButton("⬇ " + L("Import", "Import")); bimp.setObjectName("ghost")
+        bimp.clicked.connect(_import)
+        bexp = QtWidgets.QPushButton("⬆ " + L("Export", "Export")); bexp.setObjectName("ghost")
+        bexp.clicked.connect(_export)
+        foot.addWidget(badd); foot.addWidget(bimp); foot.addWidget(bexp)
+        foot.addStretch(1)
+        # numbering-format setting (duplicate/multi-page pages -> Name_01 / Name-01)
+        foot.addWidget(QtWidgets.QLabel(L("Number:", "Numbering:")))
+        numc = QtWidgets.QComboBox(); numc.setFixedWidth(96)
+        numc.addItem("Name_01", "_"); numc.addItem("Name-01", "-")
+        numc.setCurrentIndex(1 if self._rename_number_sep() == "-" else 0)
+        numc.setToolTip(L("Ek jaise naam par apne aap number kaise lage",
+                          "How duplicate/same names are auto-numbered"))
+
+        def _numchg(_i):
+            self._opts["rename_number_sep"] = numc.currentData()
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+        numc.currentIndexChanged.connect(_numchg)
+        foot.addWidget(numc)
+        bclose = QtWidgets.QPushButton(L("Band", "Close")); bclose.setObjectName("ghost")
+        bclose.clicked.connect(dlg.accept)
+        foot.addWidget(bclose)
+        v.addLayout(foot)
+
+        _refresh()
+        dlg.exec_()
+
+    def _name_edit_form(self, parent, lib, rec):
+        """Compact Add/Edit form for a suggested name. rec=None => add.
+        Returns True if saved. Never creates duplicates."""
+        L = self.L
+        is_edit = rec is not None
+        dlg = QtWidgets.QDialog(parent)
+        dlg.setWindowTitle(L("Naam badlo", "Edit name") if is_edit else L("Naya naam", "Add new name"))
+        dlg.resize(400, 0)
+        v = QtWidgets.QVBoxLayout(dlg); v.setSpacing(9)
+        v.addWidget(self._mklbl(L("Naam", "Name")))
+        e_name = QtWidgets.QLineEdit(rec["name"] if is_edit else "")
+        e_name.setMaxLength(int(self._opts.get("rename_max_len", 50) or 50))
+        v.addWidget(e_name)
+        v.addWidget(self._mklbl(L("Category", "Category")))
+        e_cat = QtWidgets.QComboBox(); e_cat.setEditable(True)
+        cats = lib.categories()
+        for c in cats:
+            e_cat.addItem(c)
+        e_cat.setCurrentText(rec["category"] if is_edit else "Medical")
+        v.addWidget(e_cat)
+        v.addWidget(self._mklbl(L("Keyword (optional)", "Keyword (optional)")))
+        e_kw = QtWidgets.QLineEdit(rec.get("keyword", "") if is_edit else "")
+        e_kw.setPlaceholderText(L("jaise: referral", "e.g. referral"))
+        v.addWidget(e_kw)
+        e_active = None; e_prio = None
+        if is_edit:
+            e_active = QtWidgets.QCheckBox(L("Sujhaav me active", "Active in suggestions"))
+            e_active.setChecked(bool(rec.get("isActive", True)))
+            v.addWidget(e_active)
+            prow = QtWidgets.QHBoxLayout()
+            prow.addWidget(self._mklbl(L("Priority", "Priority")))
+            e_prio = QtWidgets.QSpinBox(); e_prio.setRange(0, 9999)
+            e_prio.setValue(int(rec.get("priority") or 0))
+            e_prio.setToolTip(L("Chhota = upar (0 = auto)", "Smaller = higher (0 = auto)"))
+            prow.addWidget(e_prio); prow.addStretch(1)
+            v.addLayout(prow)
+        errl = QtWidgets.QLabel(""); errl.setStyleSheet("color:#DC2626;font-size:11px;")
+        v.addWidget(errl)
+        bb = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Save | QtWidgets.QDialogButtonBox.Cancel)
+        v.addWidget(bb)
+
+        def _ok():
+            nm = clean_custom_name(e_name.text(), max_len=0)
+            if not nm:
+                errl.setText(L("Naam likho", "Please enter a name")); return
+            other = lib._find(nm)
+            if other is not None and (not is_edit or other["id"] != rec["id"]):
+                errl.setText(L("Ye naam pehle se hai", "This name already exists")); return
+            cat = (e_cat.currentText() or "General").strip() or "General"
+            kw = e_kw.text().strip()
+            if is_edit:
+                lib.edit(rec["id"], name=nm, category=cat, keyword=kw,
+                         isActive=e_active.isChecked(),
+                         priority=e_prio.value())
+            else:
+                lib.add(nm, category=cat, keyword=kw, source="user")
+            dlg.accept()
+        bb.accepted.connect(_ok); bb.rejected.connect(dlg.reject)
+        e_name.setFocus(); e_name.selectAll()
+        return dlg.exec_() == QtWidgets.QDialog.Accepted
+
+    # ======================================================================
+    #  (v293) REDESIGNED RENAME SYSTEM — premium Rename Page dialog, smart
+    #  suggestion chips (instant, local-first), custom-name validation,
+    #  multi-page + auto-numbering, remember-for-future, history + undo.
+    #  Data lives in the scalable NameLibrary (self._namelib). No network.
+    # ======================================================================
+    def rename_current_page(self):
+        """F2 / menu — Rename the current page (or all selected pages) with the
+        new Rename Page dialog."""
+        sel = self.list.selectedItems()
+        if len(sel) > 1:
+            return self._rename_page_dialog(list(sel))
+        it = self.list.currentItem() or (sel or [None])[0]
+        if it is None:
+            self._warn(self.L("Pehle koi page chuno.", "Select a page first.")); return
+        self._rename_page_dialog([it])
+
+    def _rename_selected_pages(self):
+        """Right-click 'Rename Selected Pages' — always the multi-page flow."""
+        sel = self.list.selectedItems()
+        if not sel and self.list.currentItem():
+            sel = [self.list.currentItem()]
+        if not sel:
+            self._warn(self.L("Pehle kuch pages chuno.", "Select some pages first.")); return
+        self._rename_page_dialog(list(sel))
+
+    def _rename_number_sep(self):
+        s = self._opts.get("rename_number_sep", "_")
+        return "-" if s == "-" else "_"
+
+    def _number_names(self, base, count, sep=None):
+        """base -> [base] for 1 page, else [base_01, base_02, …] (configurable sep)."""
+        if count <= 1:
+            return [base]
+        sep = sep or self._rename_number_sep()
+        return ["%s%s%02d" % (base, sep, i + 1) for i in range(count)]
+
+    def _apply_page_learn(self, item, name):
+        """Silent learning after a remembered rename (shape + OCR text + AI memory)."""
+        p = item.data(QtCore.Qt.UserRole)
+        try:
+            self._store_visual_name(p, name)      # shape (no OCR needed)
+        except Exception:
+            pass
+        try:
+            self._learn_name(p, name)             # printed-text signature (bg OCR)
+        except Exception:
+            pass
+        try:
+            self._ai_learn_page_rename(p, name)   # AI document memory
+        except Exception:
+            pass
+
+    def _apply_page_name(self, item, name, remember=True, learn=True):
+        """Set a page's title (+ thumbnail label), remember it, record history."""
+        nm = underscore_name(name)
+        if not nm:
+            return None
+        old = item.data(TITLE_ROLE) or ""
+        item.setData(TITLE_ROLE, nm)
+        item.setText(nm)
+        if remember and learn:
+            self._apply_page_learn(item, nm)
+        try:
+            lib = getattr(self, "_namelib", None)
+            if lib is not None:
+                page = item.data(QtCore.Qt.UserRole) or ""
+                lib.add_history(old, nm, page=os.path.basename(str(page)),
+                                doc=os.path.basename(self._opts.get("save_folder", "") or ""))
+        except Exception:
+            pass
+        return nm
+
+    def _toast(self, msg, kind="ok"):
+        """Subtle, non-blocking success/info feedback that floats over the
+        window and fades on its own — no modal confirmation for normal renames."""
+        try:
+            lbl = QtWidgets.QLabel(msg, self)
+            palette = {"ok": ("#ECFDF5", "#065F46", "#A7F3D0"),
+                       "info": ("#EEF2FF", "#3730A3", "#C7D2FE"),
+                       "warn": ("#FEF3C7", "#92400E", "#FDE68A")}
+            bg, fg, bd = palette.get(kind, palette["ok"])
+            lbl.setStyleSheet(
+                "background:%s;color:%s;border:1px solid %s;border-radius:11px;"
+                "padding:9px 18px;font-size:12.5px;font-weight:700;" % (bg, fg, bd))
+            lbl.adjustSize()
+            eff = QtWidgets.QGraphicsOpacityEffect(lbl)
+            lbl.setGraphicsEffect(eff)
+            lbl.move(max(12, (self.width() - lbl.width()) // 2),
+                     self.height() - lbl.height() - 64)
+            lbl.show(); lbl.raise_()
+            anim = QtCore.QPropertyAnimation(eff, b"opacity", lbl)
+            anim.setDuration(280); anim.setStartValue(0.0); anim.setEndValue(1.0)
+            anim.start()
+            self._toast_anim = anim
+            QtCore.QTimer.singleShot(1800, lbl.deleteLater)
+        except Exception:
+            try:
+                self.status.showMessage(msg, 3000)
+            except Exception:
+                pass
+
+    def _rename_page_dialog(self, items):
+        """The redesigned, premium 'Rename Page' dialog (single or multi-page).
+        Matches ApneScan's purple design language; instant local suggestions;
+        no indexing/loading; validation + counter; remember-for-future."""
+        if not items:
+            return
+        cur_item = self.list.currentItem()
+        primary = cur_item if cur_item in items else items[0]
+        multi = len(items) > 1
+        total = self.list.count()
+        try:
+            pno = self.list.row(primary) + 1
+        except Exception:
+            pno = 1
+        cur = primary.data(TITLE_ROLE) or ""
+        if not cur or re.match(r"^page[ _]?\d*$", cur.strip(), re.I):
+            try:
+                _s = self._visual_name_for_path(primary.data(QtCore.Qt.UserRole))
+                if _s:
+                    cur = _s
+            except Exception:
+                pass
+        lib = getattr(self, "_namelib", None)
+        L = self.L
+        MAXLEN = int(self._opts.get("rename_max_len", 50) or 50)
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.FramelessWindowHint)
+        dlg.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+        dlg.setModal(True)
+        root = QtWidgets.QVBoxLayout(dlg)
+        root.setContentsMargins(16, 16, 16, 16)
+        card = QtWidgets.QFrame(dlg)
+        card.setObjectName("rncard")
+        card.setStyleSheet(
+            "#rncard{background:#ffffff;border:1px solid #E7E4F7;border-radius:16px;}"
+            "#rntitle{font-size:15px;font-weight:800;color:#1F2340;}"
+            "#rnlab{font-size:10.5px;font-weight:800;color:#8A8FB0;letter-spacing:1px;}"
+            "#rncount{font-size:10.5px;color:#9AA0BC;}"
+            "#rnerr{font-size:11px;color:#DC2626;}"
+            "#rnbanner{background:#EFECFF;border:1px solid #D6CFFB;border-radius:10px;"
+            "color:#5B4BD6;font-size:11.5px;font-weight:600;padding:7px 11px;}"
+            "QLineEdit{border:1px solid #D7DAE6;border-radius:10px;padding:9px 11px;"
+            "font-size:13px;background:#FbFbFe;}"
+            "QLineEdit:focus{border-color:#6A5AE0;background:#fff;}"
+            "#rnsearch{border:1px solid #E3E1F0;border-radius:9px;padding:6px 10px;"
+            "font-size:12px;background:#F7F7FC;}"
+            "#chip{background:#F4F2FF;border:1px solid #E1DCF8;border-radius:14px;"
+            "padding:6px 12px;font-size:12px;color:#4A3FB0;font-weight:600;}"
+            "#chip:hover{background:#E7E1FF;border-color:#6A5AE0;}"
+            "#chipmore{background:#fff;border:1px dashed #C7C2E8;border-radius:14px;"
+            "padding:6px 12px;font-size:12px;color:#6A5AE0;font-weight:700;}"
+            "#rnclose{border:none;background:transparent;font-size:16px;color:#9AA0BC;}"
+            "#rnclose:hover{color:#DC2626;}")
+        sh = QtWidgets.QGraphicsDropShadowEffect(card)
+        sh.setBlurRadius(34); sh.setColor(QtGui.QColor(60, 50, 120, 60))
+        sh.setOffset(0, 8); card.setGraphicsEffect(sh)
+        root.addWidget(card)
+        cv = QtWidgets.QVBoxLayout(card)
+        cv.setContentsMargins(20, 16, 20, 18); cv.setSpacing(13)
+
+        # ---- header (icon + title + close) — draggable ----
+        hdr = QtWidgets.QHBoxLayout()
+        ic = QtWidgets.QLabel("📄"); ic.setStyleSheet("font-size:19px;")
+        ttl = QtWidgets.QLabel(L("Naam badlo", "Rename Page")); ttl.setObjectName("rntitle")
+        btn_x = QtWidgets.QPushButton("✕"); btn_x.setObjectName("rnclose")
+        btn_x.setCursor(QtCore.Qt.PointingHandCursor); btn_x.setFixedSize(28, 28)
+        btn_x.setToolTip(L("Band karo (Esc)", "Close (Esc)"))
+        btn_x.clicked.connect(dlg.reject)
+        hdr.addWidget(ic); hdr.addSpacing(4); hdr.addWidget(ttl)
+        hdr.addStretch(1); hdr.addWidget(btn_x)
+        cv.addLayout(hdr)
+        # drag the frameless dialog by its header
+        _drag = {"p": None}
+
+        def _hpress(e):
+            if e.button() == QtCore.Qt.LeftButton:
+                _drag["p"] = e.globalPos() - dlg.frameGeometry().topLeft()
+                e.accept()
+
+        def _hmove(e):
+            if _drag["p"] is not None and (e.buttons() & QtCore.Qt.LeftButton):
+                dlg.move(e.globalPos() - _drag["p"]); e.accept()
+        for w in (ttl, ic):
+            w.mousePressEvent = _hpress
+            w.mouseMoveEvent = _hmove
+
+        if multi:
+            ban = QtWidgets.QLabel(
+                L("%d pages chune — yahi naam sabhi par lagega (apne aap number: Name%s01, Name%s02…)"
+                  % (len(items), self._rename_number_sep(), self._rename_number_sep()),
+                  "%d pages selected — this name applies to all (auto-numbered: Name%s01, Name%s02…)"
+                  % (len(items), self._rename_number_sep(), self._rename_number_sep())))
+            ban.setObjectName("rnbanner"); ban.setWordWrap(True)
+            cv.addWidget(ban)
+
+        # ---- body: thumbnail (left) + name field (right) ----
+        body = QtWidgets.QHBoxLayout(); body.setSpacing(16)
+        thumbcol = QtWidgets.QVBoxLayout(); thumbcol.setSpacing(6)
+        thumb = QtWidgets.QLabel()
+        thumb.setFixedSize(118, 150)
+        thumb.setAlignment(QtCore.Qt.AlignCenter)
+        thumb.setStyleSheet("border:1px solid #E5E7F0;border-radius:10px;background:#F7F7FC;")
+        try:
+            pm = self._make_thumb(primary.data(QtCore.Qt.UserRole))
+            if pm and not pm.isNull():
+                thumb.setPixmap(pm.scaled(112, 144, QtCore.Qt.KeepAspectRatio,
+                                          QtCore.Qt.SmoothTransformation))
+        except Exception:
+            pass
+        cap = QtWidgets.QLabel(L("Page %d / %d" % (pno, total),
+                                 "Page %d of %d" % (pno, total)))
+        cap.setAlignment(QtCore.Qt.AlignCenter)
+        cap.setStyleSheet("color:#6B7280;font-size:11px;font-weight:600;")
+        thumbcol.addWidget(thumb); thumbcol.addWidget(cap); thumbcol.addStretch(1)
+        body.addLayout(thumbcol)
+
+        right = QtWidgets.QVBoxLayout(); right.setSpacing(5)
+        right.addWidget(self._mklbl(L("MAUJOODA NAAM", "CURRENT NAME"), "rnlab"))
+        le = QtWidgets.QLineEdit(cur)
+        le.setMaxLength(MAXLEN)
+        le.setClearButtonEnabled(True)
+        le.setPlaceholderText(L("Naam type karo ya sujhav chuno…",
+                                "Type a name or pick a suggestion…"))
+        try:
+            _pen = self.style().standardIcon(QtWidgets.QStyle.SP_FileDialogDetailedView)
+            _act = le.addAction(_pen, QtWidgets.QLineEdit.TrailingPosition)
+            _act.setToolTip(L("Naam badlo", "Edit name"))
+            _act.triggered.connect(lambda: (le.setFocus(), le.selectAll()))
+        except Exception:
+            pass
+        right.addWidget(le)
+        crow = QtWidgets.QHBoxLayout()
+        err = QtWidgets.QLabel(""); err.setObjectName("rnerr")
+        cnt = QtWidgets.QLabel("0 / %d" % MAXLEN); cnt.setObjectName("rncount")
+        crow.addWidget(err, 1); crow.addWidget(cnt)
+        right.addLayout(crow)
+        right.addStretch(1)
+        body.addLayout(right, 1)
+        cv.addLayout(body)
+
+        # ---- suggested names (instant, local) ----
+        sug_head = QtWidgets.QHBoxLayout()
+        sug_head.addWidget(self._mklbl(L("✨ Sujhaye naam", "✨ Suggested Names"), "rnlab"))
+        sug_head.addStretch(1)
+        sug_search = QtWidgets.QLineEdit(); sug_search.setObjectName("rnsearch")
+        sug_search.setPlaceholderText("🔍 " + L("sujhaav dhoondo", "filter suggestions"))
+        sug_search.setFixedWidth(180)
+        sug_head.addWidget(sug_search)
+        cv.addLayout(sug_head)
+
+        chip_scroll = QtWidgets.QScrollArea()
+        chip_scroll.setWidgetResizable(True)
+        chip_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        chip_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        chip_scroll.setMinimumHeight(52); chip_scroll.setMaximumHeight(120)
+        chip_host = QtWidgets.QWidget()
+        chip_flow = FlowLayout(chip_host, margin=2, spacing=7)
+        chip_scroll.setWidget(chip_host)
+        cv.addWidget(chip_scroll)
+        state = {"expanded": False}
+
+        def _set_name(nm):
+            le.setText(nm); le.setFocus()
+            le.setCursorPosition(len(nm))
+
+        def _rebuild_chips():
+            while chip_flow.count():
+                w = chip_flow.takeAt(0)
+                if w and w.widget():
+                    w.widget().deleteLater()
+            q = sug_search.text().strip()
+            names = []
+            if lib is not None:
+                names = [it["name"] for it in lib.suggestions(q, limit=None)]
+            else:
+                names = [n for n in self._name_history()
+                         if not q or q.lower() in n.lower()]
+            limit = 10
+            show = names if (state["expanded"] or len(names) <= limit) else names[:limit]
+            for nm in show:
+                b = QtWidgets.QPushButton(nm); b.setObjectName("chip")
+                b.setCursor(QtCore.Qt.PointingHandCursor)
+                b.clicked.connect(lambda _c=False, n=nm: _set_name(n))
+                chip_flow.addWidget(b)
+            if not state["expanded"] and len(names) > limit:
+                more = QtWidgets.QPushButton(
+                    L("+%d aur…" % (len(names) - limit), "More (+%d)…" % (len(names) - limit)))
+                more.setObjectName("chipmore"); more.setCursor(QtCore.Qt.PointingHandCursor)
+
+                def _expand():
+                    state["expanded"] = True; _rebuild_chips()
+                more.clicked.connect(_expand)
+                chip_flow.addWidget(more)
+            if not show:
+                empt = QtWidgets.QLabel(L("koi sujhaav nahi — apna naam type karo",
+                                          "no suggestions — just type your name"))
+                empt.setStyleSheet("color:#9AA0BC;font-size:11px;")
+                chip_flow.addWidget(empt)
+        sug_search.textChanged.connect(lambda _t: (state.update(expanded=False), _rebuild_chips()))
+        _rebuild_chips()
+
+        # ---- remember + manage ----
+        rem = QtWidgets.QCheckBox(L("Is naam ko aage ke liye yaad rakho",
+                                    "Remember this name for future"))
+        rem.setChecked(bool(self._opts.get("rename_remember", True)))
+        rem.setToolTip(L("ApneScan aise hi documents ke liye ye naam apne aap sujhayega.",
+                         "ApneScan will suggest this name automatically for similar documents."))
+        cv.addWidget(rem)
+
+        # ---- footer actions ----
+        foot = QtWidgets.QHBoxLayout()
+        bmanage = QtWidgets.QPushButton("⚙ " + L("Naam manage", "Manage names"))
+        bmanage.setObjectName("ghost"); bmanage.setCursor(QtCore.Qt.PointingHandCursor)
+        bmanage.setToolTip(L("Sujhav-naam jodo / badlo / hatao",
+                             "Add / edit / remove suggested names"))
+        bmanage.clicked.connect(lambda: (dlg.hide(), self.manage_suggested_names(),
+                                         dlg.show(), _rebuild_chips()))
+        foot.addWidget(bmanage)
+        if multi:
+            bbulk = QtWidgets.QPushButton(L("Har page ka alag naam…", "Different name per page…"))
+            bbulk.setObjectName("ghost"); bbulk.setCursor(QtCore.Qt.PointingHandCursor)
+            bbulk.clicked.connect(lambda: (dlg.done(2)))
+            foot.addWidget(bbulk)
+        foot.addStretch(1)
+        bcancel = QtWidgets.QPushButton(L("Cancel", "Cancel")); bcancel.setObjectName("ghost")
+        bcancel.setCursor(QtCore.Qt.PointingHandCursor)
+        bcancel.clicked.connect(dlg.reject)
+        brename = QtWidgets.QPushButton(L("Naam badlo", "Rename")); brename.setObjectName("primary")
+        brename.setCursor(QtCore.Qt.PointingHandCursor); brename.setDefault(True)
+        brename.setToolTip(L("Enter", "Enter"))
+        brename.clicked.connect(dlg.accept)
+        foot.addWidget(bcancel); foot.addWidget(brename)
+        cv.addLayout(foot)
+
+        # ---- live validation + counter ----
+        def _validate():
+            raw = le.text()
+            cnt.setText("%d / %d" % (len(raw), MAXLEN))
+            reason = invalid_name_reason(raw, max_len=MAXLEN)
+            if reason is None:
+                err.setText(""); brename.setEnabled(True); return
+            if reason == "empty":
+                err.setText("")           # empty: just disable, no scary message
+            elif reason.startswith("badchars"):
+                err.setText(L("Naam me ye chinh nahi ho sakte:  %s" % WIN_FORBIDDEN,
+                              "A name can't contain:  %s" % WIN_FORBIDDEN))
+            elif reason == "toolong":
+                err.setText(L("Naam bahut lamba (max %d)" % MAXLEN,
+                              "Name is too long (max %d)" % MAXLEN))
+            else:
+                err.setText("")
+            brename.setEnabled(bool(clean_custom_name(raw, max_len=MAXLEN)))
+        le.textChanged.connect(_validate)
+        le.returnPressed.connect(lambda: brename.isEnabled() and dlg.accept())
+        _validate()
+        QtWidgets.QShortcut(QtGui.QKeySequence("Esc"), dlg, dlg.reject)
+
+        dlg.resize(560, 0)
+        le.setFocus(); le.selectAll()
+        rc = dlg.exec_()
+        remember = bool(rem.isChecked())
+        if self._opts.get("rename_remember", True) != remember:
+            self._opts["rename_remember"] = remember
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+        self._rename_remember_last = remember
+
+        if rc == 2:            # "Different name per page…"
+            return self._bulk_rename_pages_dialog(items)
+        if rc != QtWidgets.QDialog.Accepted:
+            return
+        base = clean_custom_name(le.text(), max_len=MAXLEN)
+        if not base:
+            return
+        names = self._number_names(base, len(items))
+        for it, nm in zip(items, names):
+            self._apply_page_name(it, nm, remember=remember,
+                                  learn=(it is primary))   # heavy learn once
+        if remember and lib is not None:
+            try:
+                cat = None
+                lib.bump_usage(base, category=cat)
+            except Exception:
+                pass
+        elif remember:
+            self._remember_name(base)
+        try:
+            self._an_event("rename")
+        except Exception:
+            pass
+        if multi:
+            self._toast(L("✓ %d pages ka naam badal gaya" % len(items),
+                          "✓ %d pages renamed" % len(items)))
+        else:
+            self._toast(L("✓ Page ka naam badal gaya", "✓ Page renamed successfully"))
+
+    def _bulk_rename_pages_dialog(self, items):
+        """Per-page bulk rename — a compact table, one editable name per page,
+        plus an optional naming template applied to every row at once."""
+        L = self.L
+        lib = getattr(self, "_namelib", None)
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(L("Har page ka naam", "Rename selected pages"))
+        dlg.resize(560, 480)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.addWidget(QtWidgets.QLabel(L(
+            "Har page ka apna naam likho. Khaali chhoda to us page ka naam nahi badlega.",
+            "Give each page its own name. Leave a row blank to keep that page's name.")))
+        # template row
+        trow = QtWidgets.QHBoxLayout()
+        tpl = QtWidgets.QLineEdit()
+        tpl.setPlaceholderText("{FolderName}_{DocumentType}_{PageNo}")
+        tpl.setToolTip(L("Variables: %s", "Variables: %s") % ", ".join("{%s}" % v for v in TEMPLATE_VARS))
+        bt = QtWidgets.QPushButton(L("Template lagao", "Apply template"))
+        trow.addWidget(QtWidgets.QLabel("🧩")); trow.addWidget(tpl, 1); trow.addWidget(bt)
+        v.addLayout(trow)
+
+        tbl = QtWidgets.QTableWidget(len(items), 2)
+        tbl.setHorizontalHeaderLabels([L("Page", "Page"), L("Naya naam", "New name")])
+        tbl.verticalHeader().setVisible(False)
+        tbl.horizontalHeader().setStretchLastSection(True)
+        tbl.setColumnWidth(0, 120)
+        tbl.setEditTriggers(QtWidgets.QAbstractItemView.AllEditTriggers)
+        for r, it in enumerate(items):
+            try:
+                pn = self.list.row(it) + 1
+            except Exception:
+                pn = r + 1
+            c0 = QtWidgets.QTableWidgetItem(L("Page %d" % pn, "Page %d" % pn))
+            c0.setFlags(QtCore.Qt.ItemIsEnabled)
+            tbl.setItem(r, 0, c0)
+            tbl.setItem(r, 1, QtWidgets.QTableWidgetItem(it.data(TITLE_ROLE) or ""))
+        v.addWidget(tbl, 1)
+
+        def _apply_tpl():
+            t = tpl.text().strip()
+            if not t:
+                return
+            total = self.list.count()
+            fol = os.path.basename(self._opts.get("save_folder", "") or "") or "Document"
+            for r, it in enumerate(items):
+                try:
+                    pn = self.list.row(it) + 1
+                except Exception:
+                    pn = r + 1
+                ctx = {"PageNo": "%02d" % pn, "TotalPages": "%02d" % total,
+                       "FolderName": fol, "Date": time.strftime("%d-%m-%Y"),
+                       "Time": time.strftime("%H-%M"), "DocumentType": "",
+                       "Category": "", "PatientName": "", "DoctorName": ""}
+                tbl.item(r, 1).setText(expand_template(t, ctx))
+        bt.clicked.connect(_apply_tpl)
+
+        bb = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept); bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        remember = bool(self._opts.get("rename_remember", True))
+        done = 0
+        for r, it in enumerate(items):
+            nm = clean_custom_name(tbl.item(r, 1).text() if tbl.item(r, 1) else "", max_len=0)
+            if not nm:
+                continue
+            self._apply_page_name(it, nm, remember=remember, learn=True)
+            if remember and lib is not None:
+                try:
+                    lib.bump_usage(nm)
+                except Exception:
+                    pass
+            done += 1
+        if done:
+            try:
+                self._an_event("rename")
+            except Exception:
+                pass
+            self._toast(L("✓ %d pages ka naam badla" % done, "✓ %d pages renamed" % done))
+
+    def _undo_last_rename(self):
+        """Undo the most recent page rename (from rename history)."""
+        lib = getattr(self, "_namelib", None)
+        if lib is None:
+            return
+        h = lib.history(limit=1)
+        if not h:
+            self._toast(self.L("Undo ke liye kuch nahi", "Nothing to undo"), "info"); return
+        rec = h[0]
+        old = rec.get("old") or ""
+        pagebn = rec.get("page") or ""
+        target = None
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            p = it.data(QtCore.Qt.UserRole)
+            if pagebn and os.path.basename(str(p)) == pagebn:
+                target = it; break
+        if target is None:
+            self._toast(self.L("Wo page ab yahan nahi", "That page is no longer here"), "warn"); return
+        target.setData(TITLE_ROLE, old)
+        target.setText(old)
+        lib.pop_history()
+        self._toast(self.L("↩ Naam wapas: %s" % (old or "—"),
+                           "↩ Rename undone: %s" % (old or "—")), "info")
+
+    def _mklbl(self, text, objname=None):
+        lbl = QtWidgets.QLabel(text)
+        if objname:
+            lbl.setObjectName(objname)
+        return lbl
+
+    def _use_suggested_name_current(self):
+        """Right-click 'Use suggested name…' — a tiny instant-search picker of
+        library names; the chosen one is applied to the selected page(s)."""
+        sel = self.list.selectedItems() or ([self.list.currentItem()]
+                                            if self.list.currentItem() else [])
+        if not sel:
+            self._warn(self.L("Pehle koi page chuno.", "Select a page first.")); return
+        lib = getattr(self, "_namelib", None)
+        names = ([it["name"] for it in lib.all(active_only=True)] if lib
+                 else self._name_history())
+        if not names:
+            self._warn(self.L("Abhi koi sujhaya naam nahi. Pehle 'Sujhaav me jodo'.",
+                              "No suggested names yet. Add some first.")); return
+        L = self.L
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(L("Sujhaya naam chuno", "Use suggested name"))
+        dlg.resize(340, 420)
+        v = QtWidgets.QVBoxLayout(dlg)
+        s = QtWidgets.QLineEdit(); s.setPlaceholderText("🔍 " + L("dhoondo", "search"))
+        v.addWidget(s)
+        lw = QtWidgets.QListWidget(); v.addWidget(lw, 1)
 
         def _fill():
             lw.clear()
-            q = search.text().strip().lower()
-            for nm in self._name_history():
-                if q and q not in nm.lower():
-                    continue
-                lw.addItem(nm)
+            q = s.text().strip().lower()
+            src = ([it["name"] for it in lib.search(s.text(), active_only=True)]
+                   if lib else [n for n in names if q in n.lower()])
+            for n in src:
+                lw.addItem(n)
+            if lw.count():
+                lw.setCurrentRow(0)
         _fill()
-        search.textChanged.connect(_fill)
-        cnt = QtWidgets.QLabel(""); cnt.setStyleSheet("color:#6B7280;font-size:11px;")
-        v.addWidget(cnt)
+        s.textChanged.connect(_fill)
 
-        def _save(newlist):
-            self._config["name_history"] = newlist
-            try:
-                save_config(self._config)
-            except Exception:
-                pass
-            _fill()
-
-        def _remove_sel():
-            names = {i.text() for i in lw.selectedItems()}
-            if not names:
-                return
-            _save([n for n in self._name_history() if n not in names])
-
-        def _edit_sel():
+        def _apply():
             it = lw.currentItem()
             if not it:
                 return
-            nn, ok = QtWidgets.QInputDialog.getText(
-                dlg, self.L("Naam badlo", "Edit name"),
-                self.L("Naya naam:", "New name:"), text=it.text())
-            nn = (nn or "").strip()
-            if ok and nn:
-                _save([nn if n == it.text() else n for n in self._name_history()])
-
-        def _clear_all():
-            if QtWidgets.QMessageBox.question(
-                    dlg, self.L("Sab hatao", "Clear all"),
-                    self.L("Saare suggestion naam hata dein?",
-                           "Remove ALL suggested names?"),
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                    QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes:
-                _save([])
-        lw.itemDoubleClicked.connect(lambda _i: _edit_sel())
-
-        def _add_new():
-            nn, ok = QtWidgets.QInputDialog.getText(
-                dlg, self.L("Naam jodo", "Add name"),
-                self.L("Naya suggestion naam:", "New suggested name:"))
-            nn = (nn or "").strip()
-            if not ok or not nn:
-                return
-            h = [x for x in self._name_history() if x.strip().lower() != nn.lower()]
-            _save([nn] + h)          # naya naam sabse upar
-            search.setText("")       # taaki naya dikh jaye
-
-        row = QtWidgets.QHBoxLayout()
-        for t, fn in ((self.L("➕ Jodo", "➕ Add"), _add_new),
-                      (self.L("🗑 Hatao", "🗑 Remove"), _remove_sel),
-                      (self.L("✏ Badlo", "✏ Edit"), _edit_sel),
-                      (self.L("Sab hatao", "Clear all"), _clear_all)):
-            b = QtWidgets.QPushButton(t); b.clicked.connect(fn); row.addWidget(b)
-        row.addStretch(1)
-        bc = QtWidgets.QPushButton(self.L("Band", "Close")); bc.clicked.connect(dlg.accept)
-        row.addWidget(bc)
-        v.addLayout(row)
+            base = it.text()
+            names2 = self._number_names(base, len(sel))
+            for pg, nm in zip(sel, names2):
+                self._apply_page_name(pg, nm, remember=True, learn=(pg is sel[0]))
+            if lib:
+                try:
+                    lib.bump_usage(base)
+                except Exception:
+                    pass
+            self._toast(L("✓ Naam lag gaya", "✓ Name applied"))
+            dlg.accept()
+        lw.itemDoubleClicked.connect(lambda _i: _apply())
+        s.returnPressed.connect(_apply)
+        bb = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bb.accepted.connect(_apply); bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+        s.setFocus()
         dlg.exec_()
 
-    def rename_current_page(self):
-        # If SEVERAL pages are selected, rename them ALL to the same name at once.
-        sel = self.list.selectedItems()
-        if len(sel) > 1:
-            cur = sel[0].data(TITLE_ROLE) or ""
-            name, ok = self._ask_name(
-                "Rename %d pages" % len(sel),
-                "One name for all %d selected pages:" % len(sel), cur)
-            if not ok:
-                return
-            name = underscore_name(name)
-            if not name:
-                return
-            _remember = getattr(self, "_rename_remember_last", True)   # (v254) autosave toggle
-            for it in sel:
-                it.setData(TITLE_ROLE, name)
-                it.setText(name)
-                if _remember:
-                    self._store_visual_name(it.data(QtCore.Qt.UserRole), name)   # har page ki shakl yaad
-            if _remember:
-                self._learn_name(sel[0].data(QtCore.Qt.UserRole), name)
-                self._ai_learn_page_rename(sel[0].data(QtCore.Qt.UserRole), name)   # AI memory (silent)
-            self.status.showMessage("Renamed %d pages to '%s'" % (len(sel), name), 4000)
+    def _add_current_to_suggestions(self):
+        """Right-click 'Add to suggested names' — put this page's name (or a
+        typed one) into the suggestion library without renaming anything."""
+        it = self.list.currentItem() or (self.list.selectedItems() or [None])[0]
+        cur = (it.data(TITLE_ROLE) if it else "") or ""
+        if cur and re.match(r"^page[ _]?\d*$", cur.strip(), re.I):
+            cur = ""
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Sujhaav me jodo", "Add to suggested names"),
+            self.L("Naam:", "Name:"), text=cur)
+        name = clean_custom_name(name or "", max_len=0)
+        if not ok or not name:
             return
-        it = self.list.currentItem() or (sel or [None])[0]
-        if it is None:
-            self._warn("Select a page first."); return
-        cur = it.data(TITLE_ROLE) or ""
-        # (v200) naam khaali/generic ("Page 3") ho to SMART sujhaav pehle se
-        # bhara milta hai — shakl-yaaddasht se (offline, turant); pasand na
-        # aaye to bas type karke badal do
-        if not cur or re.match(r"^page[ _]?\d*$", cur.strip(), re.I):
-            try:
-                _sug = self._visual_name_for_path(it.data(QtCore.Qt.UserRole))
-                if _sug:
-                    cur = _sug
-            except Exception:
-                pass
-        name, ok = self._ask_name("Rename", "Name for this page:", cur)
-        if not ok:
-            return
-        name = underscore_name(name)
-        if not name:
-            return
-        it.setData(TITLE_ROLE, name)
-        it.setText(name)
-        # (v254) LEARN sirf tab jab rename dialog me "autosave" (yaad rakho) ON ho.
-        # OFF ho to naam laga diya, par shakl/text/AI-memory me kuch nahi seekha.
-        if getattr(self, "_rename_remember_last", True):
-            # (a) SHAKL se (design/rang/type) — OCR nahi chahiye, handwritten par bhi
-            self._store_visual_name(it.data(QtCore.Qt.UserRole), name)
-            # (b) TEXT se (OCR) — chhapa hua document ho to
-            self._learn_name(it.data(QtCore.Qt.UserRole), name)
-            # (c) AI Document Memory — agar yeh document pehchana gaya tha to naya naam seekho
-            self._ai_learn_page_rename(it.data(QtCore.Qt.UserRole), name)
+        lib = getattr(self, "_namelib", None)
+        if lib is not None:
+            lib.add(name, source="user")
+        else:
+            self._remember_name(name)
+        self._toast(self.L("✓ Sujhaav me jud gaya", "✓ Added to suggestions"))
 
     def _learn_name(self, path, name):
         """Rename ka OCR-learning ab BACKGROUND me hota hai — pehle yahi OCR
