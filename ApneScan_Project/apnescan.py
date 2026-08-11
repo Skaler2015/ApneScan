@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "296"
+VERSION = "297"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2714,6 +2714,20 @@ class FlowLayout(QtWidgets.QLayout):
             x = nx + space
             line_h = max(line_h, h)
         return y + line_h - rect.y()
+
+
+class TallItemDelegate(QtWidgets.QStyledItemDelegate):
+    """Force a comfortable row height in a list/popup so text never clips at
+    the bottom (used by the Rename dialog's suggestion dropdown)."""
+
+    def __init__(self, parent=None, height=32):
+        super().__init__(parent)
+        self._h = height
+
+    def sizeHint(self, opt, idx):
+        s = super().sizeHint(opt, idx)
+        s.setHeight(max(self._h, s.height()))
+        return s
 
 
 class NameWorker(QtCore.QThread):
@@ -24377,10 +24391,18 @@ if the toggle is ticked).</p>
         completer.setMaxVisibleItems(8)
         le.setCompleter(completer)
         try:
-            completer.popup().setStyleSheet(
+            _pop = completer.popup()
+            # (v297) naam kabhi CUT na ho — har row ko poori height do (delegate se,
+            # kyunki stylesheet min-height completer-popup me reliably nahi lagti).
+            _pop.setUniformItemSizes(False)
+            _pop.setSpacing(1)
+            _pop.setItemDelegate(TallItemDelegate(_pop, height=32))
+            _pf = _pop.font(); _pf.setPointSizeF(11.0); _pop.setFont(_pf)
+            _pop.setStyleSheet(
                 "QListView{border:1px solid #D6CFFB;border-radius:9px;background:#fff;"
-                "outline:0;padding:4px;font-size:13px;color:#1F2340;}"
-                "QListView::item{padding:7px 11px;border-radius:6px;}"
+                "outline:0;padding:5px;color:#1F2340;}"
+                "QListView::item{min-height:30px;padding:6px 12px;margin:1px 0;"
+                "border-radius:7px;}"
                 "QListView::item:selected{background:#EEF2FF;color:#4A3FB0;}")
         except Exception:
             pass
