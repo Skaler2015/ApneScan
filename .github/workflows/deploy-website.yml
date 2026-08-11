@@ -1,7 +1,11 @@
 name: Deploy Website
 
-# Software me koi bhi update push hote hi website apne aap update ho jaati hai
-# (version number website par code se nikaal kar daala jata hai).
+# Website ab HOSTINGER par apne aap publish hoti hai:
+#   apnescan.apnesoft.com  ->  /domains/apnesoft.com/public_html/apnescan
+# Jaise hi website ki koi file (ya app version) push hoti hai, GitHub Action
+# build karke FTP se seedha Hostinger ke us folder me upload kar deti hai —
+# koi manual upload nahi. (App ka version website ke code se nikaal kar daala
+# jata hai, taaki version.txt/download hamesha sahi rahein.)
 on:
   workflow_dispatch:
   push:
@@ -18,20 +22,15 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-  actions: read   # exe artifact download karne ke liye
+  actions: read   # exe/release download karne ke liye
 
 concurrency:
-  group: pages
+  group: deploy-website
   cancel-in-progress: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -53,8 +52,6 @@ jobs:
           cp ApneScan_Project/apnescan_logo.svg _site/ 2>/dev/null || true
           cp ApneScan_Project/apnescan_icon.png _site/ 2>/dev/null || true
           cp ApneScan_Project/ApneScan_Guide.pdf _site/ 2>/dev/null || true
-          # Custom subdomain (Hostinger DNS: CNAME apnescan -> skaler2015.github.io)
-          echo "apnescan.apnesoft.com" > _site/CNAME
           # App ka in-app update-check isi file se naya version pehchanta hai
           echo "v$VERSION" > _site/version.txt
           # SEO/GEO/AEO/LLMO files: robots.txt (AI crawlers allowed), llms.txt,
@@ -83,23 +80,16 @@ jobs:
             echo '</urlset>'
           } > _site/sitemap.xml
 
-      # EXE ko seedha website par rakho — "Download" button click karte hi
-      # apnescan.apnesoft.com/ApneScan.exe se download shuru ho jata hai.
-      # Pehle ISI commit ki exe build ka intezaar karte hain (taaki website
-      # aur exe hamesha same version hon); na mile to branch ki sabse nayi
-      # successful build ki exe use hoti hai.
-      - name: Download ApneScan.exe (GitHub Release) into site
+      # EXE + portable ZIP ko seedha website par rakho — "Download" button click
+      # karte hi apnescan.apnesoft.com/ApneScan-Setup.exe se download shuru ho.
+      # Isi version ka release banne ka intezaar (build parallel me chalti hai);
+      # na mile to branch ki sabse nayi release use hoti hai (site kabhi khaali na ho).
+      - name: Download ApneScan installer (GitHub Release) into site
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Website ka download exe ab GitHub RELEASE se aata hai (artifact nahi) —
-          # Release quota-free + version-matched hai. Isi version ka release banne
-          # ka intezaar karte hain (build parallel me chal rahi hoti hai).
           V=$(grep -m1 -oP 'VERSION = "\K[0-9]+' ApneScan_Project/apnescan.py)
           echo "Chahiye version: v$V"
-          # (v280) onedir: installer (.exe) + portable folder ka ZIP publish hote
-          # hain; standalone ApneScan.exe ab nahi (usko chalane ke liye _internal
-          # folder chahiye). Website: main = Setup.exe, portable = Portable.zip.
           for i in $(seq 1 30); do
             if gh release download "v$V" -R "$GITHUB_REPOSITORY" \
                  -p "ApneScan-Setup.exe" -p "ApneScan-Portable.zip" -D _site/ --clobber 2>/dev/null; then
@@ -107,15 +97,12 @@ jobs:
             fi
             echo "Release v$V abhi ban raha hai... intezaar ($i/30)"; sleep 20
           done
-          # Na mile to sabse nayi release se (taaki website kabhi khaali na ho)
           if [ ! -f _site/ApneScan-Setup.exe ]; then
             echo "v$V na mila — latest release se le rahe hain"
             gh release download -R "$GITHUB_REPOSITORY" \
               -p "ApneScan-Setup.exe" -p "ApneScan-Portable.zip" -D _site/ --clobber || true
           fi
           # ---- ASLI download data website me daalo (size, SHA-256, date) ----
-          # Fake "~15 MB" jaisi ginti nahi — jo exe deploy ho rahi hai usi ke
-          # asli numbers har page me inject hote hain.
           SETUPMB="?" ; SHA="checksum unavailable" ; RDATE=$(date -u +"%d %b %Y")
           if [ -f _site/ApneScan-Setup.exe ]; then
             SETUPMB=$(awk "BEGIN{printf \"%.1f\", $(stat -c%s _site/ApneScan-Setup.exe)/1048576}")
@@ -129,16 +116,26 @@ jobs:
           done
           ls -la _site/
 
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
+      # ---- HOSTINGER par FTP se upload ----
+      # Sirf badli hui files chadhti hain (incremental) — .ftp-deploy-sync-state.json
+      # se track hota hai, isliye badi exe har baar dobara upload nahi hoti.
+      # Zaroori GitHub Secrets (Settings > Secrets and variables > Actions):
+      #   FTP_SERVER    = Hostinger FTP hostname (jaise ftp.apnesoft.com ya IP)
+      #   FTP_USERNAME  = FTP username
+      #   FTP_PASSWORD  = FTP password
+      # server-dir = subdomain ka folder (Hostinger FTP home ke andar).
+      - name: Deploy to Hostinger (apnescan.apnesoft.com) via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
-          enablement: true
-
-      - name: Upload site
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          local-dir: ./_site/
+          server-dir: ${{ vars.FTP_REMOTE_DIR || 'domains/apnesoft.com/public_html/apnescan/' }}
+          dangerous-clean-slate: false
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/.DS_Store

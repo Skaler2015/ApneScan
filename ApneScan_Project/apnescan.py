@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "295"
+VERSION = "296"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -24047,22 +24047,6 @@ if the toggle is ticked).</p>
         bexp.clicked.connect(_export)
         foot.addWidget(badd); foot.addWidget(bimp); foot.addWidget(bexp)
         foot.addStretch(1)
-        # numbering-format setting (duplicate/multi-page pages -> Name_01 / Name-01)
-        foot.addWidget(QtWidgets.QLabel(L("Number:", "Numbering:")))
-        numc = QtWidgets.QComboBox(); numc.setFixedWidth(96)
-        numc.addItem("Name_01", "_"); numc.addItem("Name-01", "-")
-        numc.setCurrentIndex(1 if self._rename_number_sep() == "-" else 0)
-        numc.setToolTip(L("Ek jaise naam par apne aap number kaise lage",
-                          "How duplicate/same names are auto-numbered"))
-
-        def _numchg(_i):
-            self._opts["rename_number_sep"] = numc.currentData()
-            try:
-                self._save_opts()
-            except Exception:
-                pass
-        numc.currentIndexChanged.connect(_numchg)
-        foot.addWidget(numc)
         bclose = QtWidgets.QPushButton(L("Band", "Close")); bclose.setObjectName("ghost")
         bclose.clicked.connect(dlg.accept)
         foot.addWidget(bclose)
@@ -24324,10 +24308,8 @@ if the toggle is ticked).</p>
 
         if multi:
             ban = QtWidgets.QLabel(
-                L("%d pages chune — yahi naam sabhi par lagega (apne aap number: Name%s01, Name%s02…)"
-                  % (len(items), self._rename_number_sep(), self._rename_number_sep()),
-                  "%d pages selected — this name applies to all (auto-numbered: Name%s01, Name%s02…)"
-                  % (len(items), self._rename_number_sep(), self._rename_number_sep())))
+                L("%d pages chune — yahi EK hi naam SAB par lagega." % len(items),
+                  "%d pages selected — this exact name is applied to all of them." % len(items)))
             ban.setObjectName("rnbanner"); ban.setWordWrap(True)
             cv.addWidget(ban)
 
@@ -24493,9 +24475,11 @@ if the toggle is ticked).</p>
         base = clean_custom_name(le.text(), max_len=MAXLEN)
         if not base:
             return
-        names = self._number_names(base, len(items))
-        for it, nm in zip(items, names):
-            self._apply_page_name(it, nm, remember=remember,
+        # (v296) User request — chune hue SAB pages ko BILKUL wahi EK naam do
+        # (koi _01/_02 number nahi). Har page ka alag naam chahiye to "Har page
+        # ka alag naam…" (bulk) use karo.
+        for it in items:
+            self._apply_page_name(it, base, remember=remember,
                                   learn=(it is primary))   # heavy learn once
         if remember and lib is not None:
             try:
@@ -24667,9 +24651,9 @@ if the toggle is ticked).</p>
             if not it:
                 return
             base = it.text()
-            names2 = self._number_names(base, len(sel))
-            for pg, nm in zip(sel, names2):
-                self._apply_page_name(pg, nm, remember=True, learn=(pg is sel[0]))
+            # (v296) sab chune pages ko EK hi naam (koi _01/_02 number nahi)
+            for pg in sel:
+                self._apply_page_name(pg, base, remember=True, learn=(pg is sel[0]))
             if lib:
                 try:
                     lib.bump_usage(base)
