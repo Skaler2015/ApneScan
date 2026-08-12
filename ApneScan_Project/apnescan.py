@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "303"
+VERSION = "304"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -12047,6 +12047,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 and (ev.modifiers() & QtCore.Qt.ControlModifier)):
             self._pv_do_zoom(1.2 if ev.angleDelta().y() > 0 else 0.83)
             return True
+        # (v304) Filmstrip: Ctrl+scroll = thumbnails chhote/bade
+        if (hasattr(self, "pv_strip") and obj is self.pv_strip.viewport()
+                and ev.type() == QtCore.QEvent.Wheel
+                and (ev.modifiers() & QtCore.Qt.ControlModifier)):
+            self._apply_pv_strip_size(self._pv_strip_h + (16 if ev.angleDelta().y() > 0 else -16))
+            return True
         # Loupe (kaanch): preview image par maus le jao to zoom-jhalak
         if (getattr(self, "_pv_loupe_on", False) and hasattr(self, "pv_img")
                 and obj is self.pv_img):
@@ -15174,18 +15180,43 @@ if the toggle is ticked).</p>
         self.pv_info2 = self.pv_info
 
         # ---- Filmstrip: sabhi pages ki chhoti jhalak (click = wo page) ----
+        # (v304) upar ek DRAG HANDLE — maus se pakad kar oopar/niche kheencho to
+        # patti (aur thumbnails) chhoti/badi ho jaati hai; size yaad rehta hai.
+        self._pv_strip_handle = QtWidgets.QFrame()
+        self._pv_strip_handle.setFixedHeight(9)
+        self._pv_strip_handle.setCursor(QtCore.Qt.SizeVerCursor)
+        self._pv_strip_handle.setToolTip(self.L(
+            "Pakad kar oopar/niche kheencho — page-patti chhoti/badi karo",
+            "Drag up/down to resize the page strip"))
+        self._pv_strip_handle.setStyleSheet(
+            "QFrame{background:transparent;border:none;}"
+            "QFrame:hover{background:#EEF2FF;border-radius:4px;}")
+        _hh = QtWidgets.QHBoxLayout(self._pv_strip_handle)
+        _hh.setContentsMargins(0, 0, 0, 0)
+        _grip = QtWidgets.QLabel("⋯⋯⋯")
+        _grip.setAlignment(QtCore.Qt.AlignCenter)
+        _grip.setStyleSheet("color:#9AA0BC;font-size:11px;font-weight:800;")
+        _hh.addWidget(_grip)
+        self._pv_strip_handle.mousePressEvent = self._pv_strip_handle_press
+        self._pv_strip_handle.mouseMoveEvent = self._pv_strip_handle_move
+        self._pv_strip_handle.mouseReleaseEvent = self._pv_strip_handle_release
+        self._pv_strip_handle.mouseDoubleClickEvent = lambda _e: self._apply_pv_strip_size(60)
+        pv.addWidget(self._pv_strip_handle)
+
         self.pv_strip = QtWidgets.QListWidget()
         self.pv_strip.setViewMode(QtWidgets.QListView.IconMode)
         self.pv_strip.setFlow(QtWidgets.QListView.LeftToRight)
         self.pv_strip.setWrapping(False); self.pv_strip.setMovement(QtWidgets.QListView.Static)
-        self.pv_strip.setFixedHeight(60); self.pv_strip.setIconSize(QtCore.QSize(38, 48))
+        self._pv_strip_h = int(self._opts.get("pv_strip_h", 60) or 60)
         self.pv_strip.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
         self.pv_strip.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.pv_strip.setStyleSheet("QListWidget{border:1px solid #e2e8f0;border-radius:6px;"
                                     "background:#fff;}QListWidget::item:selected{"
                                     "background:#e0f2f1;border:1px solid #4F46E5;border-radius:4px;}")
         self.pv_strip.itemClicked.connect(self._pv_strip_click)
+        self.pv_strip.viewport().installEventFilter(self)   # Ctrl+scroll = zoom
         pv.addWidget(self.pv_strip)
+        self._apply_pv_strip_size(self._pv_strip_h, rebuild=False)
 
         # ---- Ek hi "Open editor" button — saare edit tools ab naye
         #      document editor me hain (double-click ya isse khulta hai). ----
@@ -20992,6 +21023,57 @@ if the toggle is ticked).</p>
         if isinstance(r, int) and 0 <= r < self.list.count():
             self.list.setCurrentRow(r)
 
+    # ---- (v304) filmstrip ko maus se chhota/bada karo ----
+    def _apply_pv_strip_size(self, h, rebuild=True, save=True):
+        """Filmstrip ki height (aur thumbnail size) set karo. rebuild=True par
+        thumbnails naye size par crisp banate hain; save=True par yaad rakhte."""
+        try:
+            h = max(46, min(300, int(h)))
+        except Exception:
+            h = 60
+        self._pv_strip_h = h
+        try:
+            self.pv_strip.setFixedHeight(h)
+            ih = max(30, h - 16)                 # icon height
+            iw = max(24, int(ih * 0.75))         # portrait pages
+            self.pv_strip.setIconSize(QtCore.QSize(iw, ih))
+            self.pv_strip.setGridSize(QtCore.QSize(iw + 16, h - 2))
+        except Exception:
+            pass
+        if save:
+            self._opts["pv_strip_h"] = h
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+        if rebuild:
+            try:
+                if getattr(self, "_pv_showing_file", None) and getattr(self, "_pv_page_offsets", None):
+                    self._pv_fill_pdf_strip(self._pv_page_offsets)
+                else:
+                    self._pv_build_filmstrip()
+            except Exception:
+                pass
+
+    def _pv_strip_handle_press(self, e):
+        if e.button() == QtCore.Qt.LeftButton:
+            self._pv_strip_drag = (e.globalY(), self._pv_strip_h)
+            e.accept()
+
+    def _pv_strip_handle_move(self, e):
+        d = getattr(self, "_pv_strip_drag", None)
+        if d and (e.buttons() & QtCore.Qt.LeftButton):
+            start_y, start_h = d
+            delta = start_y - e.globalY()        # oopar kheencho = badi
+            self._apply_pv_strip_size(start_h + delta, rebuild=False, save=False)
+            e.accept()
+
+    def _pv_strip_handle_release(self, e):
+        if getattr(self, "_pv_strip_drag", None) is not None:
+            self._pv_strip_drag = None
+            self._apply_pv_strip_size(self._pv_strip_h, rebuild=True, save=True)
+            e.accept()
+
     def _pv_fill_pdf_strip(self, offsets):
         """(v303) Previewed PDF ke SAARE pages ko filmstrip me 1,2,3… dikhao —
         har thumb lambi preview-image se cut karke banti hai (PDF dobara nahi
@@ -21013,7 +21095,9 @@ if the toggle is ticked).</p>
                 if y1 - y0 < 4:
                     y1 = min(H, y0 + 4)
                 crop = pm.copy(0, y0, W, y1 - y0)
-                icon = crop.scaled(38, 48, QtCore.Qt.KeepAspectRatio,
+                _isz = self.pv_strip.iconSize()
+                _iw = max(24, _isz.width()); _ih = max(30, _isz.height())
+                icon = crop.scaled(_iw, _ih, QtCore.Qt.KeepAspectRatio,
                                    QtCore.Qt.SmoothTransformation)
                 it = QtWidgets.QListWidgetItem(QtGui.QIcon(icon), str(i + 1))
                 it.setData(QtCore.Qt.UserRole, ("pdfpage", frac))
