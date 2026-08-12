@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "299"
+VERSION = "300"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -19072,9 +19072,17 @@ if the toggle is ticked).</p>
         """scope ke andar sabhi folder+file ka index. Har entry:
         (kind, full, name_lower, rel_lower, norm, compact, ext, size, mtime).
         norm/compact EK hi baar banate hain — har keystroke par sirf scoring.
-        size/mtime se '>1mb' / 'today' jaise filter turant lagte hain."""
+
+        (v300) SPEED: index banate waqt ab har file par os.stat NAHI karte —
+        yahi 883-folder jaise bade folder me 4-5 second laga deta tha (Windows +
+        antivirus par har file ka metadata padhna mehnga hai). Naam-search ko
+        size/mtime chahiye hi nahi. size/mtime = None rakhte hain; sirf tab (aur
+        sirf ussi file par) stat karte hain jab user 'today'/'>1mb' jaisa filter
+        likhe (_search_index_entries me lazy stat). Isse index ab bijli-tez banta
+        hai aur pehla akshar likhte hi natije aa jaate hain."""
         SE = FileSearchEngine
         idx = []
+        exts = self._FILE_EXTS
         try:
             for dp, dns, fn in os.walk(scope):
                 for d in dns:
@@ -19082,20 +19090,15 @@ if the toggle is ticked).</p>
                     n = SE.norm(d)
                     idx.append(("dir", full, d.lower(),
                                 os.path.relpath(full, scope).lower(),
-                                n, SE.compact(n), "", 0, 0))
+                                n, SE.compact(n), "", None, None))
                 for f in fn:
-                    if f.lower().endswith(self._FILE_EXTS):
+                    if f.lower().endswith(exts):
                         full = os.path.join(dp, f)
-                        rel = os.path.relpath(full, scope)
                         n = SE.norm(f)
-                        try:
-                            st = os.stat(full)
-                            size, mtime = st.st_size, st.st_mtime
-                        except Exception:
-                            size, mtime = 0, 0
-                        idx.append(("file", full, f.lower(), rel.lower(),
+                        idx.append(("file", full, f.lower(),
+                                    os.path.relpath(full, scope).lower(),
                                     n, SE.compact(n),
-                                    os.path.splitext(f)[1].lower(), size, mtime))
+                                    os.path.splitext(f)[1].lower(), None, None))
                 if len(idx) >= 120000:
                     break
         except Exception:
@@ -19169,6 +19172,14 @@ if the toggle is ticked).</p>
                     dir_hits.append(((1, 1, 4, 4 * len(terms), len(norm), norm),
                                      name, full))
                 continue
+            # (v300) size/mtime index me nahi rakhe (speed) — sirf tab (aur ussi
+            # file par) stat karo jab query me date/size filter ho.
+            if size is None and (filters.get("size") or filters.get("days")):
+                try:
+                    st = os.stat(full)
+                    size, mtime = st.st_size, st.st_mtime
+                except Exception:
+                    pass
             if not SE.passes_filters(filters, ext, size, mtime):
                 continue
             if not terms:                # pure filter query ('pdf', 'today', '>1mb')
@@ -19564,6 +19575,10 @@ if the toggle is ticked).</p>
             order.sort(key=lambda f: os.path.basename(f).lower())
         n_dir = len(order)
         n_file = sum(len(v) for v in groups.values())
+        # (v300) SPEED: bahut saare result par har file ka size (os.path.getsize)
+        # nikaalna har keystroke ko slow kar deta hai. Isliye size sirf tab dikhao
+        # jab result kam hon (narrow ho gaye); bade result-set me size chhodo.
+        _show_sizes = n_file <= 80
         if grid:
             self.files_results.setViewMode(QtWidgets.QListView.IconMode)
             self.files_results.setIconSize(QtCore.QSize(96, 124))
@@ -19616,13 +19631,16 @@ if the toggle is ticked).</p>
                     it.setSizeHint(QtCore.QSize(108, 150))
                     grid_files.append((self.files_results.count(), p))
                 else:
-                    # (v274) file ke aage size bhi dikhe (kitni MB/KB)
-                    try:
-                        _b = os.path.getsize(p)
-                        _sz = ("  ·  %d KB" % round(_b / 1024.0)) if _b < 1048576 \
-                            else ("  ·  %.1f MB" % (_b / 1048576.0))
-                    except Exception:
-                        _sz = ""
+                    # (v274) file ke aage size bhi dikhe (kitni MB/KB) — (v300)
+                    # sirf jab result kam hon, warna har keystroke slow ho jata hai
+                    _sz = ""
+                    if _show_sizes:
+                        try:
+                            _b = os.path.getsize(p)
+                            _sz = ("  ·  %d KB" % round(_b / 1024.0)) if _b < 1048576 \
+                                else ("  ·  %.1f MB" % (_b / 1048576.0))
+                        except Exception:
+                            _sz = ""
                     it = QtWidgets.QListWidgetItem("      " + pin + _icon.get(ext, "🖼")
                                                    + "  " + os.path.basename(p) + _sz)
                 _note = self._file_note(p)       # (v275) file ka note (agar hai)
