@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "298"
+VERSION = "299"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -23993,12 +23993,19 @@ if the toggle is ticked).</p>
                 tbl.setItem(r, 2, uc)
                 # actions cell
                 cell = QtWidgets.QWidget(); ch = QtWidgets.QHBoxLayout(cell)
-                ch.setContentsMargins(4, 2, 4, 2); ch.setSpacing(4)
-                be = QtWidgets.QPushButton("✏"); be.setFixedSize(26, 24)
-                be.setToolTip(L("Badlo", "Edit")); be.setCursor(QtCore.Qt.PointingHandCursor)
+                ch.setContentsMargins(4, 2, 4, 2); ch.setSpacing(6)
+                # (v299) text buttons — emoji icons kuch systems par khaali dikhte the
+                be = QtWidgets.QPushButton(L("Badlo", "Edit")); be.setFixedHeight(24)
+                be.setCursor(QtCore.Qt.PointingHandCursor)
+                be.setStyleSheet("QPushButton{border:1px solid #D6CFFB;border-radius:6px;"
+                                 "padding:2px 10px;color:#5B4BD6;font-size:11px;font-weight:600;"
+                                 "background:#F5F3FF;}QPushButton:hover{background:#E7E1FF;}")
                 be.clicked.connect(lambda _c=False, nid=it["id"]: _edit(nid))
-                bd = QtWidgets.QPushButton("🗑"); bd.setFixedSize(26, 24)
-                bd.setToolTip(L("Hatao", "Delete")); bd.setCursor(QtCore.Qt.PointingHandCursor)
+                bd = QtWidgets.QPushButton(L("Hatao", "Delete")); bd.setFixedHeight(24)
+                bd.setCursor(QtCore.Qt.PointingHandCursor)
+                bd.setStyleSheet("QPushButton{border:1px solid #FBD5D5;border-radius:6px;"
+                                 "padding:2px 10px;color:#DC2626;font-size:11px;font-weight:600;"
+                                 "background:#FEF2F2;}QPushButton:hover{background:#FEE2E2;}")
                 bd.clicked.connect(lambda _c=False, nid=it["id"], nm2=it["name"]: _delete(nid, nm2))
                 ch.addWidget(be); ch.addWidget(bd); ch.addStretch(1)
                 tbl.setCellWidget(r, 3, cell)
@@ -24571,10 +24578,14 @@ if the toggle is ticked).</p>
         for it in items:
             self._apply_page_name(it, base, remember=remember,
                                   learn=(it is primary))   # heavy learn once
-        if remember and lib is not None:
+        # (v299) USAGE COUNT hamesha badhe — naam istemaal hua to count hua,
+        # chahe "Remember" tick ho ya nahi. Jo naam pehle se library me hai wo
+        # HAMESHA count hota hai; naya naam sirf tab jodte hain jab Remember ON ho
+        # (warna ek-baar ke naam suggestions me bhar na jayein).
+        if lib is not None:
             try:
-                cat = None
-                lib.bump_usage(base, category=cat)
+                if remember or lib._find(base) is not None:
+                    lib.bump_usage(base)
             except Exception:
                 pass
         elif remember:
