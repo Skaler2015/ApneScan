@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "301"
+VERSION = "302"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8049,6 +8049,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, "📊 Stats server URL…", self.set_stats_url, "हिन्दी: worldwide-ginti का server URL (जैसे आपका PHP: https://apnesoftware.com/stats.php)। खाली छोड़ने पर default।\nEnglish: The worldwide-stats server URL (e.g. your PHP: https://apnesoftware.com/stats.php). Empty = default.")
         self._ma(ms, "👤 Analytics me naam…", self.set_user_name, "हिन्दी: Analytics में आपका नाम/clinic — ताकि किसने कितने scan किए, नाम के साथ दिखे।\nEnglish: Your name/clinic for analytics — so scans show per name.")
         self._ma(ms, "🔤 OCR bhashaayein…", self.choose_ocr_langs, "हिन्दी: OCR किन भाषाओं में पढ़े चुनो (Hindi, English, Gujarati, Marathi, Tamil आदि)। ज़्यादा भाषा = थोड़ा धीमा।\nEnglish: Choose which languages OCR should read (Hindi, English, Gujarati, Marathi, Tamil, …). More languages = a bit slower.")
+        self._ma(ms, "🌐 Handwriting OCR key (OCR.space)…", self.set_ocrspace_key, "हिन्दी: डॉक्टर की हाथ-लिखी को बेहतर पढ़ने वाले online OCR (OCR.space) का free API key डालो — रोज़ 500 free। खाली छोड़ने पर सीमित demo key चलेगी। (यह सिर्फ़ '🌐 Online' दबाने पर, आपकी मर्ज़ी से चलता है।)\nEnglish: Set the free OCR.space API key for better online handwriting OCR (500/day free). Empty = limited demo key. Used only when you press '🌐 Online'.")
         self._ma(ms, "🧠 Document Memory / Auto-naam…", self.ai_memory_settings, "हिन्दी: document याद रखने + auto-नाम/folder सुझाव की settings — threshold, auto-save, learning, export/import, optimize। सब offline, आपके PC पर।\nEnglish: Document-memory & auto-name/folder settings — threshold, auto-save, learning, export/import, optimise. All offline, on your PC.")
         self._ma(ms, "💬 Send feedback / rating…", self.send_feedback, "हिन्दी: App को rating दो और अपनी राय भेजो — सीधे developer तक पहुँचेगी।\nEnglish: Rate the app and send feedback — reaches the developer directly.")
         self._ma(ms, "Keyboard Shortcuts…", self.show_shortcuts, "हिन्दी: कीबोर्ड के shortcuts की सूची देखो।\nEnglish: View keyboard shortcuts.")
@@ -23119,37 +23120,168 @@ if the toggle is ticked).</p>
         except Exception:
             pass
         self._run_bg(lambda: self._ocr_handwriting_text(path),
-                     self._show_handwriting_result,
+                     lambda t: self._show_handwriting_result(t, path),
                      self.L("Haath-likhi padh rahe hain…", "Reading handwriting…"))
 
-    def _show_handwriting_result(self, txt):
+    # ---- (v302) ONLINE handwriting OCR — OCR.space (opt-in, per-page consent) ----
+    def _ocrspace_key(self):
+        return (self._opts.get("ocrspace_key") or "").strip() or "helloworld"
+
+    def set_ocrspace_key(self):
+        """OCR.space ka free API key set karo (behtar/reliable online handwriting
+        OCR ke liye). Khali = free demo key 'helloworld' (bahut seemit)."""
+        cur = self._opts.get("ocrspace_key", "")
+        key, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("OCR.space API key", "OCR.space API key"),
+            self.L("Free key ocr.space/ocrapi se lo (roz 500 free).\nKhali chhodo to demo key (seemit) chalegi:",
+                   "Get a free key at ocr.space/ocrapi (500/day free).\nLeave empty to use the limited demo key:"),
+            text=cur)
+        if ok:
+            self._opts["ocrspace_key"] = (key or "").strip()
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+            self.status.showMessage(self.L("OCR.space key save ho gayi.", "OCR.space key saved."), 4000)
+
+    def _ocr_handwriting_online(self, path):
+        """OCR.space (online) se handwriting padho — Tesseract se kaafi behtar
+        (cursive bhi). Page image ek size-limited JPEG bana kar bheji jaati hai
+        (free tier <1MB). OCREngine 2 = handwriting-friendly. Text lautata hai."""
+        import urllib.request as U
+        import urllib.parse as P
+        import base64
+        import json as J
+        with Image.open(path) as _im:
+            im = _im.convert("RGB")
+        try:
+            im = deskew(im)
+        except Exception:
+            pass
+        w, h = im.size
+        m = max(w, h)
+        if m > 2000:                          # thoda chhota — free tier size cap
+            f = 2000.0 / m
+            im = im.resize((int(w * f), int(h * f)), Image.LANCZOS)
+        buf = io.BytesIO(); q = 72
+        im.save(buf, "JPEG", quality=q)
+        while buf.tell() > 950000 and q > 35:   # <1MB free limit
+            q -= 12; buf = io.BytesIO(); im.save(buf, "JPEG", quality=q)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        data = P.urlencode({
+            "apikey": self._ocrspace_key(),
+            "base64Image": "data:image/jpeg;base64," + b64,
+            "OCREngine": "2",                 # 2 = handwriting-friendly
+            "scale": "true",
+            "detectOrientation": "true",
+            "isTable": "false",
+            "language": "eng",
+        }).encode("utf-8")
+        req = U.Request("https://api.ocr.space/parse/image", data=data,
+                        headers={"User-Agent": "ApneScan"})
+        with U.urlopen(req, timeout=45) as r:
+            res = J.loads(r.read().decode("utf-8", "ignore"))
+        if res.get("IsErroredOnProcessing"):
+            msg = res.get("ErrorMessage")
+            if isinstance(msg, list):
+                msg = " ".join(str(x) for x in msg)
+            raise RuntimeError(msg or "OCR.space error")
+        parts = res.get("ParsedResults") or []
+        return "\n".join((p.get("ParsedText") or "") for p in parts).strip()
+
+    def _show_handwriting_result(self, txt, path=None):
         if isinstance(txt, Exception):
             txt = ""
         L = self.L
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle(L("Haath-likhi ka text (best-effort)", "Handwriting text (best-effort)"))
-        dlg.resize(580, 620)
+        dlg.setWindowTitle(L("Haath-likhi ka text", "Handwriting text"))
+        dlg.resize(600, 640)
         v = QtWidgets.QVBoxLayout(dlg)
         tip = QtWidgets.QLabel(L(
-            "⚠ Handwriting best-effort hai — saaf likhawat behtar padhti hai, "
-            "ganda/tirchа cursive nahi. Padha hua text niche sudhaar bhi sakte ho.",
-            "⚠ Handwriting is best-effort — neat writing reads better than messy "
-            "cursive. You can correct the text below."))
+            "⚠ Yeh OFFLINE (Tesseract) result hai — saaf likhawat behtar, ganda "
+            "cursive nahi. Doctor ki cursive ke liye niche '🌐 Online' dabao "
+            "(zyada sahi; page image OCR.space ko jayegi).",
+            "⚠ This is the OFFLINE (Tesseract) result — neat writing reads better, "
+            "messy cursive doesn't. For a doctor's cursive press '🌐 Online' below "
+            "(much better; the page image is sent to OCR.space)."))
         tip.setWordWrap(True)
         tip.setStyleSheet("color:#92400E;background:#FEF3C7;border:1px solid #FDE68A;"
                           "border-radius:8px;padding:8px 10px;font-size:11.5px;")
         v.addWidget(tip)
         te = QtWidgets.QPlainTextEdit(); te.setPlainText(txt or "")
         if not (txt or "").strip():
-            te.setPlaceholderText(L("Kuch padha nahi ja saka — page saaf/seedha ho to dobara try karo.",
-                                    "Nothing could be read — try again with a clearer/straighter page."))
+            te.setPlaceholderText(L("Offline kuch nahi padha — '🌐 Online' try karo.",
+                                    "Offline read nothing — try '🌐 Online'."))
         v.addWidget(te)
-        h = QtWidgets.QHBoxLayout(); h.addStretch(1)
+        h = QtWidgets.QHBoxLayout()
+        b_online = QtWidgets.QPushButton(L("🌐 Online (behtar padho)", "🌐 Online (better)"))
+        b_online.setObjectName("primary"); b_online.setCursor(QtCore.Qt.PointingHandCursor)
+        b_online.setToolTip(L("Page image OCR.space (online) ko bhejkar behtar padho",
+                              "Send the page image to OCR.space (online) for a better read"))
+        if not path:
+            b_online.setEnabled(False)
+
+        def _go_online():
+            if not self._confirm_online_ocr():
+                return
+            b_online.setEnabled(False)
+            b_online.setText(L("… online padh rahe …", "… reading online …"))
+
+            def _done(res):
+                b_online.setEnabled(True)
+                b_online.setText(L("🌐 Online (dobara)", "🌐 Online (again)"))
+                if isinstance(res, Exception):
+                    self._warn(L("Online OCR nahi ho paya:\n%s\n(apna free OCR.space key "
+                                 "Settings me daalo — demo key seemit hai)",
+                                 "Online OCR failed:\n%s\n(set your free OCR.space key in "
+                                 "Settings — the demo key is very limited)") % res)
+                    return
+                if (res or "").strip():
+                    te.setPlainText(res)
+                    tip.setText(L("✓ Online (OCR.space) se padha — cursive bhi kaafi behtar. "
+                                  "Zaroorat ho to niche sudhaar lo.",
+                                  "✓ Read via OCR.space (online) — much better on cursive. "
+                                  "Correct below if needed."))
+                    tip.setStyleSheet("color:#065F46;background:#ECFDF5;border:1px solid #A7F3D0;"
+                                      "border-radius:8px;padding:8px 10px;font-size:11.5px;")
+                else:
+                    self._warn(L("Online se bhi kuch nahi padha ja saka.",
+                                 "Online couldn't read anything either."))
+            try:
+                self._an_event("ocr_hand_online")
+            except Exception:
+                pass
+            self._run_bg_quiet(lambda: self._ocr_handwriting_online(path), _done)
+        b_online.clicked.connect(_go_online)
+        h.addWidget(b_online)
+        h.addStretch(1)
         bc = QtWidgets.QPushButton(L("Copy", "Copy"))
         bc.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(te.toPlainText()))
         bx = QtWidgets.QPushButton(L("Band karo", "Close")); bx.clicked.connect(dlg.accept)
         h.addWidget(bc); h.addWidget(bx); v.addLayout(h)
         dlg.exec_()
+
+    def _confirm_online_ocr(self):
+        """Ek-baar (per session) privacy confirm — page image online jaayegi."""
+        if getattr(self, "_ocr_online_ok", False):
+            return True
+        L = self.L
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Question)
+        box.setWindowTitle(L("Online OCR", "Online OCR"))
+        box.setText(L("Behtar handwriting ke liye is page ki IMAGE OCR.space "
+                      "(online service) ko bheji jaayegi.",
+                      "To read handwriting better, this page's IMAGE will be sent to "
+                      "OCR.space (an online service)."))
+        box.setInformativeText(L("Yeh sirf handwriting-OCR ke liye hai. Aage badhein?",
+                                 "This is only for handwriting OCR. Proceed?"))
+        yes = box.addButton(L("Haan, bhejo", "Yes, send"), QtWidgets.QMessageBox.AcceptRole)
+        box.addButton(L("Nahi", "No"), QtWidgets.QMessageBox.RejectRole)
+        box.exec_()
+        if box.clickedButton() is yes:
+            self._ocr_online_ok = True
+            return True
+        return False
 
     def _share_current_pages(self, how):
         """Abhi ke pages ki ek PDF banakar WhatsApp/Email se bhejo \u2014 wahi jo
