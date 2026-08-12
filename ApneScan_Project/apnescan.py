@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "302"
+VERSION = "303"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -18904,11 +18904,13 @@ if the toggle is ticked).</p>
     def _render_pdf_all_pages_qimage(self, path, cap=30, zoom=1.3):
         """PDF ke SAARE pages (cap tak) ko ek lambi image me jodo — user neeche
         scroll karke sab dekh sake. QImage/QPainter background thread me safe
-        hai, isliye UI kabhi atkegi nahi. (qimage, total_pages) lautata hai."""
+        hai, isliye UI kabhi atkegi nahi. Lautata hai (qimage, total_pages,
+        offsets) — offsets = har page ke top ka HISSA (0..1) lambi image me,
+        taaki filmstrip par click karke us page tak scroll ho jaye."""
         try:
             doc = fitz.open(path)
         except Exception:
-            return None, 0
+            return None, 0, []
         total = doc.page_count
         n = min(total, cap)
         imgs = []
@@ -18923,20 +18925,22 @@ if the toggle is ticked).</p>
                 pass
         doc.close()
         if not imgs:
-            return None, total
+            return None, total, []
         gap = 14
         total_h = sum(im.height() for im in imgs) + gap * (len(imgs) + 1)
         canvas = QtGui.QImage(maxw, total_h, QtGui.QImage.Format_RGB888)
         canvas.fill(QtGui.QColor("#e5e7eb"))     # halka grey — pages ke beech gap dikhe
         p = QtGui.QPainter(canvas)
         y = gap
+        offsets = []
         for im in imgs:
+            offsets.append(y / float(total_h))   # is page ka top (fraction)
             x = (maxw - im.width()) // 2
             p.fillRect(x, y, im.width(), im.height(), QtGui.QColor("#ffffff"))
             p.drawImage(x, y, im)
             y += im.height() + gap
         p.end()
-        return canvas, total
+        return canvas, total, offsets
 
     def _pv_file_date(self, path):
         """File ki modified date/time — complete info me dikhane ke liye."""
@@ -18991,11 +18995,18 @@ if the toggle is ticked).</p>
             def done(res):
                 if getattr(self, "_pv_file_path", None) != path:
                     return                    # tab tak user ne doosri file chun li
-                qi, total = (res if isinstance(res, tuple) else (None, 0))
+                if isinstance(res, tuple):
+                    qi = res[0] if len(res) > 0 else None
+                    total = res[1] if len(res) > 1 else 0
+                    offsets = res[2] if len(res) > 2 else []
+                else:
+                    qi, total, offsets = None, 0, []
                 if qi is None or qi.isNull():
                     self.pv_img.clear(); self._pv_pm = None
                     self.pv_title.setText(self.L("👁 Preview nahi bana", "👁 No preview"))
                     self.pv_info.setText(name); self.pv_text.setPlainText("")
+                    self._pv_showing_file = None
+                    self._pv_build_filmstrip()
                     return
                 self._pv_pm = QtGui.QPixmap.fromImage(qi)
                 self._pv_zoom = 1.0
@@ -19004,6 +19015,11 @@ if the toggle is ticked).</p>
                                       % (name, total, self.L("page", "pages"), capd))
                 self._pv_render()
                 QtCore.QTimer.singleShot(30, self._pv_render)
+                # (v303) filmstrip me is PDF ke SAARE pages 1,2,3… dikhao;
+                # kisi par click = us page tak preview scroll ho jaye
+                self._pv_showing_file = path
+                self._pv_page_offsets = offsets
+                self._pv_fill_pdf_strip(offsets)
                 self.pv_info.setText(
                     "<b>%s</b><br>🗂 PDF · 📄 %d %s<br>💾 %s<br>📅 %s<br>"
                     "<span style='color:#94a3b8'>%s</span>"
@@ -19013,7 +19029,13 @@ if the toggle is ticked).</p>
             self._run_bg_quiet(job, done)
             return
 
-        # Image / single -> seedha
+        # Image / single -> seedha (ek hi page — filmstrip saaf)
+        self._pv_showing_file = path
+        self._pv_page_offsets = []
+        try:
+            self.pv_strip.clear()
+        except Exception:
+            pass
         pm = self._render_file_pixmap(path)
         if pm is None:
             self.pv_img.clear(); self._pv_pm = None
@@ -20470,6 +20492,9 @@ if the toggle is ticked).</p>
     def _update_preview_panel(self):
         if not getattr(self, "preview_panel", None) or not self.preview_panel.isVisible():
             return
+        # (v303) ab hum SCANNED working-set page dikha rahe hain — saved-file
+        # preview mode chhod do taaki filmstrip working-set (scanned) pages se bane
+        self._pv_showing_file = None
         # filmstrip me current page highlight rakho
         try:
             if hasattr(self, "pv_strip"):
@@ -20955,11 +20980,62 @@ if the toggle is ticked).</p>
 
     def _pv_strip_click(self, item):
         r = item.data(QtCore.Qt.UserRole)
+        # (v303) previewed PDF ka page — us page tak preview scroll karo
+        if isinstance(r, tuple) and len(r) == 2 and r[0] == "pdfpage":
+            try:
+                frac = float(r[1])
+                bar = self.pv_scroll.verticalScrollBar()
+                bar.setValue(int(frac * self.pv_img.height()))
+            except Exception:
+                pass
+            return
         if isinstance(r, int) and 0 <= r < self.list.count():
             self.list.setCurrentRow(r)
 
+    def _pv_fill_pdf_strip(self, offsets):
+        """(v303) Previewed PDF ke SAARE pages ko filmstrip me 1,2,3… dikhao —
+        har thumb lambi preview-image se cut karke banti hai (PDF dobara nahi
+        kholni padti). Kisi par click = us page tak scroll."""
+        if not hasattr(self, "pv_strip"):
+            return
+        try:
+            self.pv_strip.blockSignals(True)
+            self.pv_strip.clear()
+            pm = getattr(self, "_pv_pm", None)
+            if pm is None or pm.isNull() or not offsets:
+                self.pv_strip.blockSignals(False)
+                return
+            H = pm.height(); W = pm.width()
+            n = len(offsets)
+            for i, frac in enumerate(offsets):
+                y0 = int(frac * H)
+                y1 = int(offsets[i + 1] * H) if i + 1 < n else H
+                if y1 - y0 < 4:
+                    y1 = min(H, y0 + 4)
+                crop = pm.copy(0, y0, W, y1 - y0)
+                icon = crop.scaled(38, 48, QtCore.Qt.KeepAspectRatio,
+                                   QtCore.Qt.SmoothTransformation)
+                it = QtWidgets.QListWidgetItem(QtGui.QIcon(icon), str(i + 1))
+                it.setData(QtCore.Qt.UserRole, ("pdfpage", frac))
+                it.setTextAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignBottom)
+                it.setToolTip(self.L("Page %d — click karke yahan jao" % (i + 1),
+                                     "Page %d — click to jump here" % (i + 1)))
+                self.pv_strip.addItem(it)
+            if self.pv_strip.count():
+                self.pv_strip.setCurrentRow(0)
+            self.pv_strip.blockSignals(False)
+        except Exception:
+            try:
+                self.pv_strip.blockSignals(False)
+            except Exception:
+                pass
+
     def _pv_build_filmstrip(self):
         if not hasattr(self, "pv_strip"):
+            return
+        # (v303) agar abhi koi SAVED file preview ho rahi hai to uski apni
+        # filmstrip (PDF ke pages) ko working-set se overwrite mat karo
+        if getattr(self, "_pv_showing_file", None):
             return
         try:
             self.pv_strip.blockSignals(True)
