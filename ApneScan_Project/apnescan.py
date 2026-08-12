@@ -48,7 +48,7 @@ from apnescan_lib.imaging import (
     restore_photo, save_image_keep_ext, apply_watermark,
     ai_auto_enhance, ai_color_restore, ai_denoise, ai_smart_crop, ai_deskew,
     ai_auto_all, ai_inpaint_region, ai_extract_signature, ai_scan_quality,
-    ai_photo_to_scan,
+    ai_photo_to_scan, prep_handwriting,
 )
 # Smart Orientation engine. auto_orient is the only entry point the pipeline
 # calls; the app's cached tesseract_available() is injected into the module a
@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "300"
+VERSION = "301"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -7982,6 +7982,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(me, "Contrast -", lambda: self._enhance_current(1.0, 0.88), "हिन्दी: Contrast कम करो।\nEnglish: Decrease contrast.")
         self._ma(me, "Auto-crop page", self.autocrop_current, "हिन्दी: पेज के आस-पास की खाली border काटो।\nEnglish: Trim the empty border around the page.")
         self._ma(me, "Copy page text", self.copy_page_text, "हिन्दी: इस पेज का पूरा टेक्स्ट पढ़कर कॉपी कर लो (कहीं भी paste करो)।\nEnglish: OCR this page's text to the clipboard.")
+        self._ma(me, "🖊 Read handwriting (doctor's note)…", self._ocr_handwriting_show_current, "हिन्दी: डॉक्टर की हाथ-लिखी पर्ची/नोट को खास handwriting-mode में पढ़ो (साफ़ लिखावट बेहतर पढ़ती है — best-effort, offline)।\nEnglish: Read a handwritten doctor's note in a special handwriting mode (neat writing reads better — best-effort, offline).")
         self._ma(me, "Translate page (Hindi ↔ English)…", self.translate_page, "हिन्दी: पेज का टेक्स्ट पढ़कर हिंदी/English में translate करो (इंटरनेट चाहिए)।\nEnglish: Translate the page's text between Hindi and English (needs internet).")
         self._ma(me, "↶ Undo (edit / delete)", self._hist_undo, "हिन्दी: पिछला बदलाव वापस लो — rotate, crop, enhance, deskew या delete। कई बार दबाकर और पीछे जाओ।\nEnglish: Undo the last change — rotate, crop, enhance, deskew or delete. Press again to step further back.", "Ctrl+Z")
         self._ma(me, "↷ Redo", self._hist_redo_do, "हिन्दी: Undo किया हुआ बदलाव दोबारा लगाओ।\nEnglish: Re-apply a change you undid.", "Ctrl+Shift+Z")
@@ -22839,6 +22840,8 @@ if the toggle is ticked).</p>
         nm = m.addMenu("\u2139 " + L("Jaankari / OCR", "Info / OCR"))
         nm.addAction("\u2139 " + L("Page ki jaankari", "Page info"), self._page_info_dialog)
         nm.addAction("\ud83d\udd24 " + L("Text padho (OCR)", "Read text (OCR)"), self._ocr_page_show_current)
+        nm.addAction("\U0001f58a " + L("Haath-likhi padho (doctor parchi)", "Read handwriting (doctor's note)"),
+                     self._ocr_handwriting_show_current)
         nm.addAction("\ud83e\udde0 " + L("Is naam se yaad rakho", "Remember this name"), self.rename_current_page)
 
         m.exec_(self.list.viewport().mapToGlobal(pos))
@@ -23073,6 +23076,78 @@ if the toggle is ticked).</p>
         bc = QtWidgets.QPushButton(self.L("Copy", "Copy"))
         bc.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(te.toPlainText()))
         bx = QtWidgets.QPushButton(self.L("Band karo", "Close")); bx.clicked.connect(dlg.accept)
+        h.addWidget(bc); h.addWidget(bx); v.addLayout(h)
+        dlg.exec_()
+
+    # ---- (v301) HANDWRITING OCR — doctor ki haath-likhi parchi (best-effort) ----
+    def _ocr_handwriting_text(self, path, region=None):
+        """Handwriting ke liye khaas taiyaari (upscale + adaptive-binarise +
+        stroke-thicken) ke baad Tesseract ka LSTM engine (--oem 1) chalao. Saaf
+        likhawat kaafi behtar padhti hai; ganda cursive phir bhi mushkil."""
+        try:
+            with Image.open(path) as im:
+                base = im.convert("RGB")
+            try:
+                base = deskew(base)          # tirchi parchi seedhi karo
+            except Exception:
+                pass
+            prepped = prep_handwriting(base, upscale=2.0, region=region)
+            lang = self._ocr_lang()
+            # PSM 6 = "ek block", OEM 1 = sirf LSTM (neural) — handwriting me behtar
+            for cfg in ("--oem 1 --psm 6", "--oem 1 --psm 4", "--psm 6"):
+                try:
+                    t = pytesseract.image_to_string(prepped, lang=lang, config=cfg)
+                    if t and t.strip():
+                        return t
+                except Exception:
+                    continue
+            return ""
+        except Exception:
+            return ""
+
+    def _ocr_handwriting_show_current(self):
+        """Menu/right-click: is page ko HANDWRITING-mode me padho aur text dikhao
+        (copy kar sakte ho). Background me — UI nahi rukti."""
+        item = self._current_item_or_warn()
+        if not item:
+            return
+        if not tesseract_available():
+            self._warn(self.L("Iske liye Tesseract OCR chahiye.", "This needs Tesseract OCR.")); return
+        path = item.data(QtCore.Qt.UserRole)
+        try:
+            self._an_event("ocr_hand")
+        except Exception:
+            pass
+        self._run_bg(lambda: self._ocr_handwriting_text(path),
+                     self._show_handwriting_result,
+                     self.L("Haath-likhi padh rahe hain…", "Reading handwriting…"))
+
+    def _show_handwriting_result(self, txt):
+        if isinstance(txt, Exception):
+            txt = ""
+        L = self.L
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(L("Haath-likhi ka text (best-effort)", "Handwriting text (best-effort)"))
+        dlg.resize(580, 620)
+        v = QtWidgets.QVBoxLayout(dlg)
+        tip = QtWidgets.QLabel(L(
+            "⚠ Handwriting best-effort hai — saaf likhawat behtar padhti hai, "
+            "ganda/tirchа cursive nahi. Padha hua text niche sudhaar bhi sakte ho.",
+            "⚠ Handwriting is best-effort — neat writing reads better than messy "
+            "cursive. You can correct the text below."))
+        tip.setWordWrap(True)
+        tip.setStyleSheet("color:#92400E;background:#FEF3C7;border:1px solid #FDE68A;"
+                          "border-radius:8px;padding:8px 10px;font-size:11.5px;")
+        v.addWidget(tip)
+        te = QtWidgets.QPlainTextEdit(); te.setPlainText(txt or "")
+        if not (txt or "").strip():
+            te.setPlaceholderText(L("Kuch padha nahi ja saka — page saaf/seedha ho to dobara try karo.",
+                                    "Nothing could be read — try again with a clearer/straighter page."))
+        v.addWidget(te)
+        h = QtWidgets.QHBoxLayout(); h.addStretch(1)
+        bc = QtWidgets.QPushButton(L("Copy", "Copy"))
+        bc.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(te.toPlainText()))
+        bx = QtWidgets.QPushButton(L("Band karo", "Close")); bx.clicked.connect(dlg.accept)
         h.addWidget(bc); h.addWidget(bx); v.addLayout(h)
         dlg.exec_()
 

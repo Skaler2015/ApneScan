@@ -58,6 +58,7 @@ __all__ = [
     "save_image_keep_ext",
     "apply_watermark",
     "enhance_image",
+    "prep_handwriting",
 ]
 
 
@@ -1545,3 +1546,62 @@ def enhance_image(path, brightness=1.0, contrast=1.0):
         return True
     except Exception:
         return False
+
+
+def prep_handwriting(img, upscale=2.0, region=None):
+    """Prepare a page for HANDWRITING OCR (doctor's prescriptions, notes).
+
+    Tesseract is tuned for print; handwriting needs a very different clean-up.
+    This returns a high-contrast, upscaled, adaptively-binarised image that gives
+    Tesseract's LSTM engine the best possible chance on *neat* handwriting.
+    (Messy cursive is still hard — this is best-effort, never perfect.)
+
+    Steps: crop to region (optional) -> grayscale -> upscale -> local-contrast
+    (CLAHE-like) -> denoise -> adaptive (local-mean) threshold -> thicken strokes.
+    Pure PIL + numpy, offline. Falls back to a plain grayscale on any error.
+    """
+    try:
+        im = img
+        if region:
+            try:
+                im = im.crop(region)
+            except Exception:
+                pass
+        im = im.convert("L")
+        # upscale small handwriting so strokes have enough pixels for the LSTM
+        if upscale and upscale > 1.0:
+            w, h = im.size
+            # cap so we never blow memory on a huge scan
+            max_side = 3500
+            f = upscale
+            if max(w, h) * f > max_side:
+                f = max(1.0, max_side / float(max(w, h)))
+            if f > 1.01:
+                im = im.resize((int(w * f), int(h * f)), Image.LANCZOS)
+        # gentle denoise (median) — kills scanner speckle without eating thin ink
+        im = im.filter(ImageFilter.MedianFilter(3))
+        # stretch contrast (clip a little at both ends)
+        im = ImageOps.autocontrast(im, cutoff=2)
+
+        if not HAS_NUMPY:
+            # no numpy: a fixed threshold is the best we can do
+            return im.point(lambda p: 0 if p < 150 else 255, mode="L")
+
+        import numpy as _np
+        a = _np.asarray(im, dtype=_np.float32)
+        # local-mean adaptive threshold (Bradley/Sauvola-lite): compare each pixel
+        # to the average of a window around it -> handles uneven light / shadows /
+        # blue ink far better than a single global cut.
+        blur = im.filter(ImageFilter.GaussianBlur(radius=max(6, im.size[0] // 90)))
+        m = _np.asarray(blur, dtype=_np.float32)
+        C = 12.0                                   # how much below local mean = ink
+        binimg = _np.where(a < (m - C), 0, 255).astype(_np.uint8)
+        out = Image.fromarray(binimg, mode="L")
+        # thicken strokes once so broken/thin pen lines connect (helps the LSTM)
+        out = out.filter(ImageFilter.MinFilter(3))
+        return out
+    except Exception:
+        try:
+            return img.convert("L")
+        except Exception:
+            return img
