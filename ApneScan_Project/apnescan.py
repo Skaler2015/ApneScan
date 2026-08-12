@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "304"
+VERSION = "305"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -21023,12 +21023,18 @@ if the toggle is ticked).</p>
         if isinstance(r, int) and 0 <= r < self.list.count():
             self.list.setCurrentRow(r)
 
-    # ---- (v304) filmstrip ko maus se chhota/bada karo ----
-    def _apply_pv_strip_size(self, h, rebuild=True, save=True):
-        """Filmstrip ki height (aur thumbnail size) set karo. rebuild=True par
-        thumbnails naye size par crisp banate hain; save=True par yaad rakhte."""
+    # ---- (v304/v305) filmstrip ko maus se chhota/bada karo ----
+    # Do alag YAAD size: file-preview me BADI (auto), scanned working-set me chhoti.
+    def _file_strip_h(self):
+        return int(self._opts.get("pv_strip_h_file", 120) or 120)
+
+    def _ws_strip_h(self):
+        return int(self._opts.get("pv_strip_h", 60) or 60)
+
+    def _set_strip_geom(self, h):
+        """Sirf height + icon/grid size lagao (koi rebuild/save nahi)."""
         try:
-            h = max(46, min(300, int(h)))
+            h = max(46, min(320, int(h)))
         except Exception:
             h = 60
         self._pv_strip_h = h
@@ -21040,15 +21046,23 @@ if the toggle is ticked).</p>
             self.pv_strip.setGridSize(QtCore.QSize(iw + 16, h - 2))
         except Exception:
             pass
+        return h
+
+    def _apply_pv_strip_size(self, h, rebuild=True, save=True):
+        """Filmstrip resize (drag/ctrl-scroll/double-click se). save=True par
+        current mode ke hisaab se yaad: file-preview -> pv_strip_h_file, warna
+        scanned working-set -> pv_strip_h."""
+        h = self._set_strip_geom(h)
+        in_file = bool(getattr(self, "_pv_showing_file", None))
         if save:
-            self._opts["pv_strip_h"] = h
+            self._opts["pv_strip_h_file" if in_file else "pv_strip_h"] = h
             try:
                 self._save_opts()
             except Exception:
                 pass
         if rebuild:
             try:
-                if getattr(self, "_pv_showing_file", None) and getattr(self, "_pv_page_offsets", None):
+                if in_file and getattr(self, "_pv_page_offsets", None):
                     self._pv_fill_pdf_strip(self._pv_page_offsets)
                 else:
                     self._pv_build_filmstrip()
@@ -21080,6 +21094,8 @@ if the toggle is ticked).</p>
         kholni padti). Kisi par click = us page tak scroll."""
         if not hasattr(self, "pv_strip"):
             return
+        # (v305) file preview me AUTO-BADI patti (uski apni yaad size)
+        self._set_strip_geom(self._file_strip_h())
         try:
             self.pv_strip.blockSignals(True)
             self.pv_strip.clear()
@@ -21121,6 +21137,8 @@ if the toggle is ticked).</p>
         # filmstrip (PDF ke pages) ko working-set se overwrite mat karo
         if getattr(self, "_pv_showing_file", None):
             return
+        # (v305) scanned working-set me apni (chhoti) yaad size
+        self._set_strip_geom(self._ws_strip_h())
         try:
             self.pv_strip.blockSignals(True)
             self.pv_strip.clear()
