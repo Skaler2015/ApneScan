@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "297"
+VERSION = "298"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2728,6 +2728,67 @@ class TallItemDelegate(QtWidgets.QStyledItemDelegate):
         s = super().sizeHint(opt, idx)
         s.setHeight(max(self._h, s.height()))
         return s
+
+
+# Role that carries the usage-count on a suggestion item.
+SUGG_COUNT_ROLE = int(QtCore.Qt.UserRole) + 20
+
+
+class SuggestCountDelegate(QtWidgets.QStyledItemDelegate):
+    """Rename dropdown row: document name on the LEFT, its usage count as a
+    small pill on the RIGHT — full name never clipped, comfortable height."""
+
+    def __init__(self, parent=None, height=34):
+        super().__init__(parent)
+        self._h = height
+
+    def sizeHint(self, opt, idx):
+        s = super().sizeHint(opt, idx)
+        s.setHeight(max(self._h, s.height()))
+        return s
+
+    def paint(self, painter, option, index):
+        opt = QtWidgets.QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        name = opt.text or ""
+        opt.text = ""
+        style = opt.widget.style() if opt.widget else QtWidgets.QApplication.style()
+        style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+        sel = bool(opt.state & QtWidgets.QStyle.State_Selected)
+        cnt = index.data(SUGG_COUNT_ROLE)
+        cnt_str = ""
+        try:
+            if cnt is not None and int(cnt) > 0:
+                cnt_str = str(int(cnt))
+        except Exception:
+            cnt_str = ""
+        painter.save()
+        fm = painter.fontMetrics()
+        r = opt.rect.adjusted(13, 0, -12, 0)
+        pill_w = 0
+        if cnt_str:
+            try:
+                tw = fm.horizontalAdvance(cnt_str)
+            except Exception:
+                tw = fm.width(cnt_str)
+            pill_w = max(22, tw + 14)
+            pr = QtCore.QRect(r.right() - pill_w, r.top() + (r.height() - 20) // 2,
+                              pill_w, 20)
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            painter.setPen(QtCore.Qt.NoPen)
+            painter.setBrush(QtGui.QColor("#E7E1FF" if sel else "#F0EEFB"))
+            painter.drawRoundedRect(pr, 10, 10)
+            painter.setPen(QtGui.QColor("#6A5AE0"))
+            f = painter.font(); f.setPointSizeF(max(8.0, f.pointSizeF() - 1)); f.setBold(True)
+            painter.setFont(f)
+            painter.drawText(pr, QtCore.Qt.AlignCenter, cnt_str)
+            painter.setFont(opt.font)
+        name_rect = QtCore.QRect(r.left(), r.top(),
+                                 r.width() - (pill_w + 10 if pill_w else 0), r.height())
+        painter.setPen(QtGui.QColor("#4A3FB0" if sel else "#1F2340"))
+        elided = fm.elidedText(name, QtCore.Qt.ElideRight, name_rect.width())
+        painter.drawText(name_rect, QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, elided)
+        painter.restore()
 
 
 class NameWorker(QtCore.QThread):
@@ -24380,39 +24441,46 @@ if the toggle is ticked).</p>
             L("✨ Type karo → sujhaav dropdown me; ↑/↓ se chuno, Enter se save",
               "✨ Type to see suggestions in the dropdown; ↑/↓ to pick, Enter to save"),
             "rnlab"))
-        comp_model = QtCore.QStringListModel(dlg)
+        # Model me naam (match ke liye) + uska usage-COUNT (dropdown me dikhane ke liye)
+        comp_model = QtGui.QStandardItemModel(dlg)
         completer = QtWidgets.QCompleter(comp_model, le)
         completer.setCaseSensitivity(QtCore.Qt.CaseInsensitive)
         completer.setCompletionMode(QtWidgets.QCompleter.PopupCompletion)
+        completer.setCompletionRole(QtCore.Qt.DisplayRole)   # naam par match
         try:
             completer.setFilterMode(QtCore.Qt.MatchContains)   # beech-ka-tukda bhi
         except Exception:
             pass
-        completer.setMaxVisibleItems(8)
+        completer.setMaxVisibleItems(9)
         le.setCompleter(completer)
         try:
             _pop = completer.popup()
-            # (v297) naam kabhi CUT na ho — har row ko poori height do (delegate se,
-            # kyunki stylesheet min-height completer-popup me reliably nahi lagti).
+            # naam kabhi CUT na ho + naam ke aage RIGHT me uska istemaal-count pill
             _pop.setUniformItemSizes(False)
             _pop.setSpacing(1)
-            _pop.setItemDelegate(TallItemDelegate(_pop, height=32))
+            _pop.setItemDelegate(SuggestCountDelegate(_pop, height=34))
             _pf = _pop.font(); _pf.setPointSizeF(11.0); _pop.setFont(_pf)
             _pop.setStyleSheet(
                 "QListView{border:1px solid #D6CFFB;border-radius:9px;background:#fff;"
                 "outline:0;padding:5px;color:#1F2340;}"
-                "QListView::item{min-height:30px;padding:6px 12px;margin:1px 0;"
-                "border-radius:7px;}"
-                "QListView::item:selected{background:#EEF2FF;color:#4A3FB0;}")
+                "QListView::item:selected{background:#EEF2FF;}")
         except Exception:
             pass
 
         def _rebuild_suggest():
+            comp_model.clear()
             if lib is not None:
-                nms = [it["name"] for it in lib.all(active_only=True)]
+                rows = [(it["name"], it.get("usageCount", 0))
+                        for it in lib.all(active_only=True)]
             else:
-                nms = [n for n in self._name_history() if isinstance(n, str)]
-            comp_model.setStringList(nms)
+                rows = [(n, 0) for n in self._name_history() if isinstance(n, str)]
+            for nm, uc in rows:
+                si = QtGui.QStandardItem(nm)
+                si.setData(nm, QtCore.Qt.DisplayRole)
+                si.setData(nm, QtCore.Qt.EditRole)
+                si.setData(int(uc or 0), SUGG_COUNT_ROLE)
+                si.setEditable(False)
+                comp_model.appendRow(si)
         _rebuild_suggest()
 
         def _pick_and_save(text):
