@@ -59,6 +59,7 @@ __all__ = [
     "apply_watermark",
     "enhance_image",
     "prep_handwriting",
+    "sharpen_clarity",
 ]
 
 
@@ -760,6 +761,34 @@ def denoise(img):
     (a light median filter — does not blur edges noticeably)."""
     try:
         return img.convert("RGB").filter(ImageFilter.MedianFilter(3))
+    except Exception:
+        return img
+
+
+def sharpen_clarity(img):
+    """(v306) HD-CLEAR: scan ko ekdam saaf/crisp banao (text/patli line/mohar
+    tez dikhein) BINA file size badhaye. Ek naapi-tuli UnsharpMask + halka local
+    contrast. Documents par zyada sharp (text ubhar aata), rangeen PHOTO par
+    halka (halo/kinare na banein). Save par smart-JPEG compression size sambhal
+    leti hai, isliye 'HD jaisa clear' par size lagbhag wahi rehti."""
+    try:
+        rgb = img.convert("RGB")
+        # photo vs document — colourful ho to gentle, warna strong sharpen
+        try:
+            cf = colorfulness(rgb)
+        except Exception:
+            cf = 0.0
+        # naapi-tuli taakat — crisp dikhe par file bahut na badhe (high-freq
+        # jitni kam judegi, JPEG utni hi chhoti rahegi). threshold flat area ko
+        # chhod deta hai (background me noise/size nahi badhta).
+        if cf > 22:                       # rangeen photo/ID — halka
+            rad, pct, thr, con = 1.2, 70, 3, 1.02
+        else:                              # document/text — crisp
+            rad, pct, thr, con = 1.4, 110, 3, 1.04
+        out = rgb.filter(ImageFilter.UnsharpMask(radius=rad, percent=pct, threshold=thr))
+        if con and con != 1.0:
+            out = ImageEnhance.Contrast(out).enhance(con)
+        return out
     except Exception:
         return img
 

@@ -48,7 +48,7 @@ from apnescan_lib.imaging import (
     restore_photo, save_image_keep_ext, apply_watermark,
     ai_auto_enhance, ai_color_restore, ai_denoise, ai_smart_crop, ai_deskew,
     ai_auto_all, ai_inpaint_region, ai_extract_signature, ai_scan_quality,
-    ai_photo_to_scan, prep_handwriting,
+    ai_photo_to_scan, prep_handwriting, sharpen_clarity,
 )
 # Smart Orientation engine. auto_orient is the only entry point the pipeline
 # calls; the app's cached tesseract_available() is injected into the module a
@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "305"
+VERSION = "306"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1075,6 +1075,7 @@ DEFAULT_OPTIONS = {
     "enhance_mode": "original",  # F5: original / white / enhanced / high_contrast
     "noise_removal": False,      # F8: dust/speck/noise hatao (median)
     "smart_scan": False,         # F15: ek-click auto cleanup (crop+deskew+edges+enhance+denoise)
+    "hd_clear": True,            # (v306) HD-CLEAR: har scan ko crisp/saaf karo (size same)
     "auto_colour": False,        # rangeen page colour me, baki gray me (chhoti file)
     "custom_page_mm": 600,       # "custom" page size ki lambai (mm)
     "touch_mode": False,         # bade buttons/font (touch / buzurg mode)
@@ -3022,6 +3023,13 @@ class ScanWorker(QtCore.QThread):
                         img = apply_enhance_mode(img, _mode)
                     if self.opts.get("noise_removal") or _smart:   # F8 denoise
                         img = denoise(img)
+                    # (v306) HD-CLEAR: har scan ko crisp/saaf banao (text/line/mohar
+                    # ubhre) — file size lagbhag same (save par smart-JPEG). Default ON.
+                    if self.opts.get("hd_clear", True):
+                        try:
+                            img = sharpen_clarity(img)
+                        except Exception:
+                            pass
                     # (v211) QUALITY CHOWKIDAAR: kamzor page turant pakdo —
                     # scan khatam hote hi user ko page-number ke saath chetavni
                     if self.opts.get("quality_watch", True):
@@ -8050,6 +8058,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, "👤 Analytics me naam…", self.set_user_name, "हिन्दी: Analytics में आपका नाम/clinic — ताकि किसने कितने scan किए, नाम के साथ दिखे।\nEnglish: Your name/clinic for analytics — so scans show per name.")
         self._ma(ms, "🔤 OCR bhashaayein…", self.choose_ocr_langs, "हिन्दी: OCR किन भाषाओं में पढ़े चुनो (Hindi, English, Gujarati, Marathi, Tamil आदि)। ज़्यादा भाषा = थोड़ा धीमा।\nEnglish: Choose which languages OCR should read (Hindi, English, Gujarati, Marathi, Tamil, …). More languages = a bit slower.")
         self._ma(ms, "🌐 Handwriting OCR key (OCR.space)…", self.set_ocrspace_key, "हिन्दी: डॉक्टर की हाथ-लिखी को बेहतर पढ़ने वाले online OCR (OCR.space) का free API key डालो — रोज़ 500 free। खाली छोड़ने पर सीमित demo key चलेगी। (यह सिर्फ़ '🌐 Online' दबाने पर, आपकी मर्ज़ी से चलता है।)\nEnglish: Set the free OCR.space API key for better online handwriting OCR (500/day free). Empty = limited demo key. Used only when you press '🌐 Online'.")
+        self.act_hd_clear = self._ma(ms, "🔎 HD Clear — scan ekdam saaf (size wahi)", self._toggle_hd_clear, "हिन्दी: हर scan को crisp/HD जैसा साफ़ बनाता है — text/line/मोहर उभरे, पर file size लगभग वही रहती है (save पर smart-compression)। बंद करने पर सामान्य scan।\nEnglish: Makes every scan crisp/HD-clear (sharper text/lines) while keeping the file size about the same. Turn off for a plain scan.")
+        self.act_hd_clear.setCheckable(True)
+        self.act_hd_clear.setChecked(bool(self._opts.get("hd_clear", True)))
         self._ma(ms, "🧠 Document Memory / Auto-naam…", self.ai_memory_settings, "हिन्दी: document याद रखने + auto-नाम/folder सुझाव की settings — threshold, auto-save, learning, export/import, optimize। सब offline, आपके PC पर।\nEnglish: Document-memory & auto-name/folder settings — threshold, auto-save, learning, export/import, optimise. All offline, on your PC.")
         self._ma(ms, "💬 Send feedback / rating…", self.send_feedback, "हिन्दी: App को rating दो और अपनी राय भेजो — सीधे developer तक पहुँचेगी।\nEnglish: Rate the app and send feedback — reaches the developer directly.")
         self._ma(ms, "Keyboard Shortcuts…", self.show_shortcuts, "हिन्दी: कीबोर्ड के shortcuts की सूची देखो।\nEnglish: View keyboard shortcuts.")
@@ -22963,6 +22974,7 @@ if the toggle is ticked).</p>
         em.addAction("\ud83d\udcd0 " + L("Seedha (straighten)", "Straighten"), self.deskew_current)
         em.addAction("\ud83d\udcd6 " + L("Book page seedha (flatten)", "Book flatten"), self.dewarp_current)
         em.addAction("\u2728 " + L("Auto-fix (saaf+seedha)", "Auto-fix"), self._autofix_current)
+        em.addAction("\ud83d\udd0e " + L("HD Clear (ekdam saaf/sharp)", "HD Clear (crisp)"), self._hd_clear_current)
         em.addAction("\U0001f916 " + L("AI Auto (sab kuch) \u2014 chune pages",
                                        "AI Auto (everything) \u2014 selected"), self._ai_auto_selected)
         em.addAction("\u2b1c " + L("Whiten", "Whiten"), self.whiten_current_page)
@@ -23039,6 +23051,29 @@ if the toggle is ticked).</p>
                 pass
             return im.convert("RGB")
         self._edit_current_bg(fn, self.L("Auto-fix ho raha hai\u2026", "Auto-fixing\u2026"))
+
+    def _hd_clear_current(self):
+        """(v306) Chune/abhi wale page(s) ko HD-CLEAR (crisp/saaf) karo \u2014 text/line
+        ubhre, size lagbhag same. Background me, undo surakshit."""
+        self._edit_current_bg(lambda im: sharpen_clarity(im).convert("RGB"),
+                              self.L("HD Clear \u2014 saaf kar rahe hain\u2026", "HD Clear \u2014 sharpening\u2026"))
+
+    def _toggle_hd_clear(self):
+        on = bool(self.act_hd_clear.isChecked()) if hasattr(self, "act_hd_clear") \
+            else (not self._opts.get("hd_clear", True))
+        self._opts["hd_clear"] = on
+        try:
+            self._save_opts()
+        except Exception:
+            pass
+        try:
+            self.act_hd_clear.setChecked(on)
+        except Exception:
+            pass
+        self.status.showMessage(
+            self.L("\ud83d\udd0e HD Clear %s \u2014 har scan %s saaf aayega." % (
+                       "ON" if on else "OFF", "crisp/HD jaisa" if on else "normal"),
+                   "\ud83d\udd0e HD Clear %s." % ("ON" if on else "OFF")), 5000)
 
     def _ai_auto_selected(self):
         """(v251) Thumbnail area me CHUNE (selected) pages par AI Auto (everything)
