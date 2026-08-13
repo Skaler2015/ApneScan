@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "306"
+VERSION = "307"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -19697,14 +19697,18 @@ if the toggle is ticked).</p>
                     it.setSizeHint(QtCore.QSize(108, 150))
                     grid_files.append((self.files_results.count(), p))
                 else:
-                    # (v274) file ke aage size bhi dikhe (kitni MB/KB) — (v300)
-                    # sirf jab result kam hon, warna har keystroke slow ho jata hai
+                    # (v274) file ke aage size + (v307) DATE bhi dikhe — (v300)
+                    # sirf jab result kam hon (warna har keystroke slow). Ek hi
+                    # os.stat se size aur date dono (do alag call se tez).
                     _sz = ""
                     if _show_sizes:
                         try:
-                            _b = os.path.getsize(p)
-                            _sz = ("  ·  %d KB" % round(_b / 1024.0)) if _b < 1048576 \
-                                else ("  ·  %.1f MB" % (_b / 1048576.0))
+                            _st = os.stat(p)
+                            _b = _st.st_size
+                            _szt = ("%d KB" % round(_b / 1024.0)) if _b < 1048576 \
+                                else ("%.1f MB" % (_b / 1048576.0))
+                            _dt = time.strftime("%d-%m-%Y", time.localtime(_st.st_mtime))
+                            _sz = "  ·  %s  ·  📅 %s" % (_szt, _dt)
                         except Exception:
                             _sz = ""
                     it = QtWidgets.QListWidgetItem("      " + pin + _icon.get(ext, "🖼")
