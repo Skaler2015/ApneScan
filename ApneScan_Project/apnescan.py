@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "308"
+VERSION = "309"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1076,7 +1076,7 @@ DEFAULT_OPTIONS = {
     "noise_removal": False,      # F8: dust/speck/noise hatao (median)
     "smart_scan": False,         # F15: ek-click auto cleanup (crop+deskew+edges+enhance+denoise)
     "hd_clear": True,            # (v306) HD-CLEAR: har scan ko crisp/saaf karo (size same)
-    "true_colour": False,        # (v308) Original colour — page jaisa hai waisa (koi auto rang/tone badlaav nahi)
+    "true_colour": True,         # (v309) Original colour DEFAULT ON — page jaisa hai waisa (koi auto rang/tone badlaav nahi; crisp HD-clear phir bhi chalta)
     "print_bw": False,           # (v308) print HAMESHA black&white (saved file ka colour rahe)
     "auto_colour": False,        # rangeen page colour me, baki gray me (chhoti file)
     "custom_page_mm": 600,       # "custom" page size ki lambai (mm)
@@ -3031,8 +3031,9 @@ class ScanWorker(QtCore.QThread):
                     if self.opts.get("noise_removal") or _smart:   # F8 denoise
                         img = denoise(img)
                     # (v306) HD-CLEAR: har scan ko crisp/saaf banao (text/line/mohar
-                    # ubhre) — file size lagbhag same. True-colour me chhod do (jaisa hai waisa).
-                    if self.opts.get("hd_clear", True) and not _true:
+                    # ubhre) — file size lagbhag same. (v309) True-colour me BHI chalta
+                    # hai: sharpen sirf tez/crisp karta hai, RANG nahi badalta.
+                    if self.opts.get("hd_clear", True):
                         try:
                             img = sharpen_clarity(img)
                         except Exception:
@@ -16203,10 +16204,9 @@ if the toggle is ticked).</p>
         opts = dict(opts)
         opts["page_size"] = page_size
         opts["paper_source"] = source
-        # (v308) Original-colour mode: scanner se HAMESHA colour hi lo (jaisa hai
-        # waisa), taaki koi document galti se B&W/gray na aaye. (Fast mode ko chhod do.)
-        if opts.get("true_colour") and not self.chk_fast.isChecked():
-            color = "color"
+        # (v309) Original-colour mode ab aapke chune COLOUR-MODE ka aadar karta hai
+        # (colour/gray/bw jaisa aapne chuna waisa) — sirf auto rang/tone badlaav band
+        # karta hai. Isliye yahan pixel_type ZABARDASTI colour NAHI karte.
         self._worker = ScanWorker(int(self.winId()), (prof or {}).get("source_name"),
                                   dpi, color, duplex, self._tmpdir, opts)
         self._worker.page_done.connect(self._on_page_scanned)
