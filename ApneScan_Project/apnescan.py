@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "307"
+VERSION = "308"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1076,6 +1076,8 @@ DEFAULT_OPTIONS = {
     "noise_removal": False,      # F8: dust/speck/noise hatao (median)
     "smart_scan": False,         # F15: ek-click auto cleanup (crop+deskew+edges+enhance+denoise)
     "hd_clear": True,            # (v306) HD-CLEAR: har scan ko crisp/saaf karo (size same)
+    "true_colour": False,        # (v308) Original colour — page jaisa hai waisa (koi auto rang/tone badlaav nahi)
+    "print_bw": False,           # (v308) print HAMESHA black&white (saved file ka colour rahe)
     "auto_colour": False,        # rangeen page colour me, baki gray me (chhoti file)
     "custom_page_mm": 600,       # "custom" page size ki lambai (mm)
     "touch_mode": False,         # bade buttons/font (touch / buzurg mode)
@@ -2938,6 +2940,11 @@ class ScanWorker(QtCore.QThread):
                     break
                 try:
                     self.stage.emit("processing")   # F16: live processing stage
+                    # (v308) ORIGINAL COLOUR (jaisa hai waisa): rangeen page ka
+                    # rang/tone bilkul na badle — vivid/white-balance, auto-gray,
+                    # flatten, enhance, HD-clear, adaptive-BW sab CHHOD do. Sirf
+                    # sidha-karna/crop (geometry) chalega, jo rang nahi chhoota.
+                    _true = bool(self.opts.get("true_colour"))
                     if self.opts.get("remove_blank"):
                         _sens = {"kam": 0.0003, "normal": 0.0008, "zyada": 0.004}
                         _thr = _sens.get(self.opts.get("blank_sensitivity", "normal"), 0.0008)
@@ -2964,7 +2971,7 @@ class ScanWorker(QtCore.QThread):
                     # (streak/shading bhi) — text gehra, print/PDF ekdam saaf.
                     # Photo/X-ray par apne aap no-op. Settings se band ho
                     # sakta hai (auto_flatten).
-                    if self.opts.get("auto_flatten", False):
+                    if self.opts.get("auto_flatten", False) and not _true:
                         img = flatten_background(img)
                     # (v245) NAPS2-MATCH: gray-maile/feeke scan -> naps2_levels:
                     # background CLEAN-WHITE + text DEEP-BLACK (NAPS2 jaisa). white-
@@ -2981,7 +2988,7 @@ class ScanWorker(QtCore.QThread):
                                    or (self.opts.get("enhance_mode", "original")
                                        not in ("original", "", None)))
                     if (self.opts.get("auto_vivid", True)
-                            and self.pixel_type != "bw" and not _manual_enh):
+                            and self.pixel_type != "bw" and not _manual_enh and not _true):
                         img = naps2_levels(img)
                     # ---- Smart Orientation = FIRST processing stage (spec) ----
                     # Har page ko sabse pehle seedha karo taaki aage ke sab stage
@@ -3012,20 +3019,20 @@ class ScanWorker(QtCore.QThread):
                         img = autocrop(img)
                     if self.opts.get("deskew") or _smart:
                         img = deskew(img)
-                    if self.opts.get("quality_enhance"):
+                    if self.opts.get("quality_enhance") and not _true:
                         img = auto_enhance(img)
                     # F5 background-enhancement mode (Original/White/Enhanced/High-Contrast);
                     # Smart Scan defaults it to 'enhanced' when left on Original.
                     _mode = self.opts.get("enhance_mode", "original")
                     if _smart and _mode == "original":
                         _mode = "enhanced"
-                    if _mode and _mode != "original":
+                    if _mode and _mode != "original" and not _true:
                         img = apply_enhance_mode(img, _mode)
                     if self.opts.get("noise_removal") or _smart:   # F8 denoise
                         img = denoise(img)
                     # (v306) HD-CLEAR: har scan ko crisp/saaf banao (text/line/mohar
-                    # ubhre) — file size lagbhag same (save par smart-JPEG). Default ON.
-                    if self.opts.get("hd_clear", True):
+                    # ubhre) — file size lagbhag same. True-colour me chhod do (jaisa hai waisa).
+                    if self.opts.get("hd_clear", True) and not _true:
                         try:
                             img = sharpen_clarity(img)
                         except Exception:
@@ -3044,7 +3051,7 @@ class ScanWorker(QtCore.QThread):
                     # Rang-heen page ko gray bana do (chhoti file) — sirf colour
                     # scan me, aur sirf jab option ON ho.
                     if (self.opts.get("auto_colour") and self.pixel_type == "color"
-                            and not has_real_colour(img)):
+                            and not _true and not has_real_colour(img)):
                         img = img.convert("L")   # sach me rang-heen page hi gray
                     # Ek glass par do page → do alag page (option ON ho to)
                     if self.opts.get("split_two_page"):
@@ -8061,6 +8068,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.act_hd_clear = self._ma(ms, "🔎 HD Clear — scan ekdam saaf (size wahi)", self._toggle_hd_clear, "हिन्दी: हर scan को crisp/HD जैसा साफ़ बनाता है — text/line/मोहर उभरे, पर file size लगभग वही रहती है (save पर smart-compression)। बंद करने पर सामान्य scan।\nEnglish: Makes every scan crisp/HD-clear (sharper text/lines) while keeping the file size about the same. Turn off for a plain scan.")
         self.act_hd_clear.setCheckable(True)
         self.act_hd_clear.setChecked(bool(self._opts.get("hd_clear", True)))
+        self.act_true_colour = self._ma(ms, "🎨 Original colour — page jaisa hai waisa", self._toggle_true_colour, "हिन्दी: पेज बिलकुल जैसा है वैसा ही scan हो — कोई auto रंग/tone बदलाव नहीं (न B&W, न vivid/white-balance)। रंगीन document/फ़ोटो का असली रंग बना रहे। ON करने पर scanner से हमेशा colour में आता है।\nEnglish: Scan the page exactly as it is — no auto colour/tone change (no B&W, no vivid/white-balance). Keeps the true colours of coloured documents/photos. When ON, always captures in colour.")
+        self.act_true_colour.setCheckable(True)
+        self.act_true_colour.setChecked(bool(self._opts.get("true_colour", False)))
+        self.act_print_bw = self._ma(ms, "🖨 Print black & white (file ka colour rahe)", self._toggle_print_bw, "हिन्दी: print हमेशा black & white में जाए — पर saved file का रंग वैसा ही रहे। रंगीन पेज का रंग print में नहीं आएगा (स्याही/खर्च बचे)।\nEnglish: Always print in black & white while the saved file keeps its colour. A coloured page's colour won't appear in print (saves ink).")
+        self.act_print_bw.setCheckable(True)
+        self.act_print_bw.setChecked(bool(self._opts.get("print_bw", False)))
         self._ma(ms, "🧠 Document Memory / Auto-naam…", self.ai_memory_settings, "हिन्दी: document याद रखने + auto-नाम/folder सुझाव की settings — threshold, auto-save, learning, export/import, optimize। सब offline, आपके PC पर।\nEnglish: Document-memory & auto-name/folder settings — threshold, auto-save, learning, export/import, optimise. All offline, on your PC.")
         self._ma(ms, "💬 Send feedback / rating…", self.send_feedback, "हिन्दी: App को rating दो और अपनी राय भेजो — सीधे developer तक पहुँचेगी।\nEnglish: Rate the app and send feedback — reaches the developer directly.")
         self._ma(ms, "Keyboard Shortcuts…", self.show_shortcuts, "हिन्दी: कीबोर्ड के shortcuts की सूची देखो।\nEnglish: View keyboard shortcuts.")
@@ -16190,6 +16203,10 @@ if the toggle is ticked).</p>
         opts = dict(opts)
         opts["page_size"] = page_size
         opts["paper_source"] = source
+        # (v308) Original-colour mode: scanner se HAMESHA colour hi lo (jaisa hai
+        # waisa), taaki koi document galti se B&W/gray na aaye. (Fast mode ko chhod do.)
+        if opts.get("true_colour") and not self.chk_fast.isChecked():
+            color = "color"
         self._worker = ScanWorker(int(self.winId()), (prof or {}).get("source_name"),
                                   dpi, color, duplex, self._tmpdir, opts)
         self._worker.page_done.connect(self._on_page_scanned)
@@ -23079,6 +23096,44 @@ if the toggle is ticked).</p>
                        "ON" if on else "OFF", "crisp/HD jaisa" if on else "normal"),
                    "\ud83d\udd0e HD Clear %s." % ("ON" if on else "OFF")), 5000)
 
+    def _toggle_true_colour(self):
+        on = bool(self.act_true_colour.isChecked()) if hasattr(self, "act_true_colour") \
+            else (not self._opts.get("true_colour", False))
+        self._opts["true_colour"] = on
+        try:
+            self._save_opts()
+        except Exception:
+            pass
+        try:
+            self.act_true_colour.setChecked(on)
+        except Exception:
+            pass
+        self.status.showMessage(
+            self.L("\ud83c\udfa8 Original colour %s \u2014 %s" % (
+                       "ON" if on else "OFF",
+                       "page jaisa hai waisa scan hoga (koi rang badlav nahi)." if on
+                       else "normal (auto saaf/vivid)."),
+                   "\ud83c\udfa8 Original colour %s." % ("ON" if on else "OFF")), 6000)
+
+    def _toggle_print_bw(self):
+        on = bool(self.act_print_bw.isChecked()) if hasattr(self, "act_print_bw") \
+            else (not self._opts.get("print_bw", False))
+        self._opts["print_bw"] = on
+        try:
+            self._save_opts()
+        except Exception:
+            pass
+        try:
+            self.act_print_bw.setChecked(on)
+        except Exception:
+            pass
+        self.status.showMessage(
+            self.L("\ud83d\udda8 Print black & white %s \u2014 %s" % (
+                       "ON" if on else "OFF",
+                       "print B&W me jayega (file ka colour rahega)." if on
+                       else "print colour me (jaisa file me hai)."),
+                   "\ud83d\udda8 Print B&W %s." % ("ON" if on else "OFF")), 6000)
+
     def _ai_auto_selected(self):
         """(v251) Thumbnail area me CHUNE (selected) pages par AI Auto (everything)
         EK CLICK me \u2014 editor khole bina. Kuch na chuna ho to abhi wala page.
@@ -26305,6 +26360,13 @@ if the toggle is ticked).</p>
             img = QtGui.QImage(path)
         if img.isNull():
             return
+        # (v308) PRINT B&W: page ka rang sirf PRINT me na jaye (saved file colour
+        # rehti hai) — printer par bhejne se pehle grayscale bana do.
+        if self._opts.get("print_bw"):
+            try:
+                img = img.convertToFormat(QtGui.QImage.Format_Grayscale8)
+            except Exception:
+                pass
         size = img.size()
         size.scale(target.size(), QtCore.Qt.KeepAspectRatio)
         # HD print: DOWN-scale pehle hi smooth (bilinear) kar lo — warna printer
