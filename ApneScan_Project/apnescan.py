@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "313"
+VERSION = "314"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1151,6 +1151,7 @@ DEFAULT_OPTIONS = {
     "dbl_action": "edit",         # thumbnail double-click: edit / preview
     "files_panel_side": "left",   # 'Meri Files' panel left (default) / right
     "sound_on_done": False,       # scan poora hote hi 'ting'
+    "notify_on_done": True,       # (v314) background scan poora hote hi tray notification
     "confirm_exit": False,        # band karte samay pucho
     "footer_clock": False,        # status-bar: ghadi/date
     "footer_today": False,        # status-bar: aaj ke scan
@@ -4036,6 +4037,18 @@ class ScanProgressDialog(QtWidgets.QDialog):
         elif box.clickedButton() is b_disc:
             self.cancel_requested.emit("discard"); self.enter_cancelling()
         # Wapas -> kuch nahi
+
+    def show_summary(self, text):
+        """(v314) Part 5 — khatam hone par band hone se pehle summary line dikhao."""
+        try:
+            self.lbl.setText(text)
+            self.lbl_stage.hide(); self._chip_host.hide()
+            self._lbl_blank.hide(); self._lbl_stall.hide()
+            self.bar.setRange(0, 1); self.bar.setValue(1)
+            self.btn_cancel.setEnabled(False); self.btn_bg.setEnabled(False)
+            self._stall_timer.stop()
+        except Exception:
+            pass
 
     def enter_cancelling(self):
         self._cancelling = True
@@ -16724,6 +16737,37 @@ if the toggle is ticked).</p>
         except Exception:
             pass
 
+    def _scan_summary_text(self, kept, skipped, elapsed):
+        """(v314) '✅ ApneScan — 8 pages · 2 khaali hataye · 12 second'"""
+        parts = ["%d %s" % (kept, self.L("pages", "pages"))]
+        if skipped:
+            parts.append(self.L("%d khaali hataye" % skipped, "%d blank removed" % skipped))
+        parts.append(self.L("%d second" % elapsed, "%d sec" % elapsed))
+        return "✅ ApneScan — " + "  ·  ".join(parts)
+
+    def _ensure_tray(self):
+        tr = getattr(self, "_tray", None)
+        if tr is None:
+            try:
+                tr = QtWidgets.QSystemTrayIcon(app_icon(), self)
+                tr.setToolTip("ApneScan"); tr.show()
+                self._tray = tr
+            except Exception:
+                self._tray = None
+        return getattr(self, "_tray", None)
+
+    def _notify_done(self, summary):
+        """Background scan poora hote hi tray notification (Options se on/off)."""
+        if not self._opts.get("notify_on_done", True):
+            return
+        try:
+            tr = self._ensure_tray()
+            if tr is not None:
+                tr.showMessage("ApneScan", summary,
+                               QtWidgets.QSystemTrayIcon.Information, 6000)
+        except Exception:
+            pass
+
     def _on_scan_done(self, kept, skipped):
         self._scan_place = None          # rescan/insert mode khatam
         # (v313) Part 4 — Cancel "sab hataao": is scan ke saare pages (file + list)
@@ -16789,8 +16833,27 @@ if the toggle is ticked).</p>
                 self._an_update_box()
             except Exception:
                 pass
-        if self._progress:
-            self._progress.close(); self._progress = None
+        # (v314) Part 5 — khatam hone par notification + summary
+        _was_bg = bool(self._progress is not None and not self._progress.isVisible())
+        try:
+            _t0 = (getattr(self, "_scan_info", {}) or {}).get("t0")
+            _elapsed = int(max(0, time.time() - _t0)) if _t0 else 0
+        except Exception:
+            _elapsed = 0
+        _summary = self._scan_summary_text(kept, skipped, _elapsed)
+        if kept and self._progress is not None and not _was_bg:
+            # saamne tha -> summary line ~1.6s dikhao, phir band
+            try:
+                self._progress.show_summary(_summary)
+            except Exception:
+                pass
+            _p = self._progress; self._progress = None
+            QtCore.QTimer.singleShot(1600, lambda _p=_p: _p.close())
+        else:
+            if self._progress:
+                self._progress.close(); self._progress = None
+            if kept and _was_bg:
+                self._notify_done(_summary)   # background -> tray notification
         self._scanning = False
         self.btn_scan.setEnabled(True)
         try:
@@ -22333,7 +22396,8 @@ if the toggle is ticked).</p>
         "after_save", "ui_confirm_delete", "language", "ui_corners", "high_contrast",
         "window_opacity", "brand_name", "brand_logo", "remember_window",
         "auto_update_check", "dbl_action", "files_panel_side", "sound_on_done",
-        "confirm_exit", "footer_clock", "footer_today", "footer_online", "footer_msg",
+        "notify_on_done", "confirm_exit", "footer_clock", "footer_today",
+        "footer_online", "footer_msg",
     )
 
     # Toolbar ke button jinko dikhana/chhupana user chun sakta hai
@@ -22562,6 +22626,8 @@ if the toggle is ticked).</p>
                "Ask before closing the app", False)
         _check(f, "sound_on_done", "Scan poora hote hi 'ting' awaaz",
                "Beep when a scan finishes", False)
+        _check(f, "notify_on_done", "Background scan poora hote hi notification",
+               "Show a notification when a background scan finishes", True)
         _check(f, "remember_window", 'Remember the window size/position',
                "Remember window size/position", True)
         _check(f, "auto_update_check", 'Check for updates automatically',
