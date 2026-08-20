@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "309"
+VERSION = "310"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2914,6 +2914,10 @@ class ScanWorker(QtCore.QThread):
     done = QtCore.pyqtSignal(int, int)
     failed = QtCore.pyqtSignal(str)
     stage = QtCore.pyqtSignal(str)      # F16: live processing-stage updates
+    # (v310) Part 1 — scan-dialog ke live thumbnail/counter ke liye (purane
+    # signals ko chhua nahi; ye SIRF UI dikhane ke liye extra hain):
+    page_ready = QtCore.pyqtSignal(str, int, int, str)   # (path, kept, skipped, title)
+    page_dropped = QtCore.pyqtSignal(int, str)           # (skipped_total, reason)
 
     def __init__(self, hwnd, source_name, dpi, pixel_type, duplex, tmpdir, opts):
         super().__init__()
@@ -2950,6 +2954,10 @@ class ScanWorker(QtCore.QThread):
                         _thr = _sens.get(self.opts.get("blank_sensitivity", "normal"), 0.0008)
                         if is_blank_page(img, _thr):
                             self.skipped += 1
+                            try:
+                                self.page_dropped.emit(self.skipped, "blank")
+                            except Exception:
+                                pass
                             continue
                     # (v240) ADF ki dark/gray backing (choti sheet ke SIDE/NECHE
                     # dikhne wali patti) ko GRAY ki jagah WHITE karo — user ki
@@ -3131,6 +3139,12 @@ class ScanWorker(QtCore.QThread):
                     im.convert("RGB").save(out, "JPEG", quality=90)
             self.kept += 1
             self.page_done.emit(out)
+            # (v310) dialog ke live thumbnail + counter ke liye (naam abhi nahi
+            # bana — OCR naming baad me hota hai, isliye title khaali)
+            try:
+                self.page_ready.emit(out, self.kept, self.skipped, "")
+            except Exception:
+                pass
         self._save_and_emit = _save_and_emit
 
         consumer = _th.Thread(target=_consumer, daemon=True)
@@ -3774,6 +3788,43 @@ class ScanProgressDialog(QtWidgets.QDialog):
         self.lbl_stage = QtWidgets.QLabel(self._stage_text("scanning"))
         self.lbl_stage.setStyleSheet("color:#2a78d6")
         lay.addWidget(self.lbl_stage)
+
+        # (v310) Part 1 — LIVE THUMBNAIL: abhi-abhi scan hua page turant dikhe
+        # (ulta/aadha/khaali page batch ke baad nahi, foran pata chale).
+        self._kept = 0
+        self._skipped = 0
+        self._thumb = QtWidgets.QLabel()
+        self._thumb.setFixedSize(160, 220)
+        self._thumb.setAlignment(QtCore.Qt.AlignCenter)
+        self._thumb.setStyleSheet(
+            "border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#94a3b8;")
+        self._thumb.setText(self.L2("पहला पेज आते ही यहाँ दिखेगा…",
+                                    "First page will appear here…"))
+        self._thumb.setWordWrap(True)
+        _trow = QtWidgets.QHBoxLayout(); _trow.addStretch(1)
+        _trow.addWidget(self._thumb); _trow.addStretch(1)
+        lay.addLayout(_trow)
+        # page ka naam/number (naam mila to "Page 3 — Lab_Report")
+        self._lbl_page = QtWidgets.QLabel("")
+        self._lbl_page.setAlignment(QtCore.Qt.AlignCenter)
+        self._lbl_page.setStyleSheet("font-weight:600;color:#334155;")
+        lay.addWidget(self._lbl_page)
+        # blank page hataya -> halki patti (thodi der ke liye)
+        self._lbl_blank = QtWidgets.QLabel(self.L2("⬜ खाली पेज — हटा दिया",
+                                                   "⬜ Blank page — removed"))
+        self._lbl_blank.setAlignment(QtCore.Qt.AlignCenter)
+        self._lbl_blank.setStyleSheet("background:#fef9c3;border:1px solid #fde68a;"
+                                      "border-radius:6px;color:#92400e;padding:3px;font-size:11px;")
+        self._lbl_blank.hide()
+        lay.addWidget(self._lbl_blank)
+        # counter: "4 pages ho gaye · 1 khaali hataya · 3 rakhe"
+        self._lbl_counter = QtWidgets.QLabel("")
+        self._lbl_counter.setAlignment(QtCore.Qt.AlignCenter)
+        self._lbl_counter.setStyleSheet("color:#475569;font-size:12px;")
+        lay.addWidget(self._lbl_counter)
+        self._blank_timer = QtCore.QTimer(self); self._blank_timer.setSingleShot(True)
+        self._blank_timer.timeout.connect(self._lbl_blank.hide)
+
         self.bar = QtWidgets.QProgressBar(); self.bar.setRange(0, 0)   # busy until a total is known
         lay.addWidget(self.bar)
         self.lbl_stats = QtWidgets.QLabel("")
@@ -3835,6 +3886,9 @@ class ScanProgressDialog(QtWidgets.QDialog):
     def set_stage(self, key):
         self.lbl_stage.setText(self._stage_text(key))
 
+    def L2(self, hi, en):
+        return en if self._lang == "en" else hi
+
     def set_page(self, n):
         self._pages = int(n)
         if self._total > 0:
@@ -3842,6 +3896,52 @@ class ScanProgressDialog(QtWidgets.QDialog):
         self.lbl.setText(self._page_text())
         self.set_stage("scanning")
         self._tick()
+
+    # ---- (v310) Part 1 — live thumbnail + counter ----
+    def _update_counter(self):
+        total = self._kept + self._skipped
+        if total <= 0:
+            self._lbl_counter.setText("")
+            return
+        if self._lang == "en":
+            self._lbl_counter.setText(
+                "%d scanned · %d blank removed · %d kept" % (total, self._skipped, self._kept))
+        else:
+            self._lbl_counter.setText(
+                "%d pages ho gaye · %d khaali hataye · %d rakhe" % (total, self._skipped, self._kept))
+
+    def on_page_ready(self, path, kept, skipped, title=""):
+        """Naya page save hua — uska thumbnail + naam + counter turant dikhao."""
+        self._kept = int(kept); self._skipped = int(skipped)
+        try:
+            pm = QtGui.QPixmap(path)
+            if not pm.isNull():
+                self._thumb.setText("")
+                self._thumb.setPixmap(pm.scaled(156, 216, QtCore.Qt.KeepAspectRatio,
+                                                QtCore.Qt.SmoothTransformation))
+        except Exception:
+            pass
+        t = (title or "").strip()
+        if t:
+            self._lbl_page.setText(self.L2("पेज %d — %s" % (kept, t), "Page %d — %s" % (kept, t)))
+        else:
+            self._lbl_page.setText(self.L2("पेज %d" % kept, "Page %d" % kept))
+        self._lbl_blank.hide()
+        self._update_counter()
+
+    def on_page_dropped(self, skipped, reason="blank"):
+        """Blank page hata — counter badhao + halki patti thodi der dikhao."""
+        self._skipped = int(skipped)
+        self._lbl_blank.show()
+        self._blank_timer.start(1400)
+        self._update_counter()
+
+    def set_page_title(self, kept, title):
+        """OCR-naming baad me naam de to us page ka label update kar do (agar
+        wahi page abhi dikh raha hai)."""
+        t = (title or "").strip()
+        if t and self._kept == int(kept):
+            self._lbl_page.setText(self.L2("पेज %d — %s" % (kept, t), "Page %d — %s" % (kept, t)))
 
     def closeEvent(self, e):
         try:
@@ -16214,6 +16314,9 @@ if the toggle is ticked).</p>
         self._worker.failed.connect(self._on_scan_failed)
         try:
             self._worker.stage.connect(self._progress.set_stage)   # F16 live stage
+            # (v310) Part 1 — live thumbnail + counter (naye signals; purane bache)
+            self._worker.page_ready.connect(self._progress.on_page_ready)
+            self._worker.page_dropped.connect(self._progress.on_page_dropped)
         except Exception:
             pass
         self.btn_scan.setEnabled(False)
