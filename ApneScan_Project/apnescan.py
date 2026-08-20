@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "312"
+VERSION = "313"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3765,6 +3765,7 @@ class ScanProgressDialog(QtWidgets.QDialog):
     (pages/min) and ETA (when the total is known) + Run-in-Background + Cancel."""
     cancelled = QtCore.pyqtSignal()
     error_action = QtCore.pyqtSignal(str)   # (v312) error-box button dabaya (key)
+    cancel_requested = QtCore.pyqtSignal(str)   # (v313) Part 4: "keep" ya "discard"
 
     _STAGES = {
         "scanning":   ("Scanning…", "Scan ho raha hai…"),
@@ -3800,6 +3801,7 @@ class ScanProgressDialog(QtWidgets.QDialog):
         # (ulta/aadha/khaali page batch ke baad nahi, foran pata chale).
         self._kept = 0
         self._skipped = 0
+        self._cancelling = False
         self._thumb = QtWidgets.QLabel()
         self._thumb.setFixedSize(160, 220)
         self._thumb.setAlignment(QtCore.Qt.AlignCenter)
@@ -3866,8 +3868,8 @@ class ScanProgressDialog(QtWidgets.QDialog):
         row = QtWidgets.QHBoxLayout(); row.addStretch(1)
         self.btn_bg = QtWidgets.QPushButton("Run in Background")
         self.btn_bg.clicked.connect(self.hide)
-        self.btn_cancel = QtWidgets.QPushButton("Cancel")
-        self.btn_cancel.clicked.connect(lambda: self.cancelled.emit())
+        self.btn_cancel = QtWidgets.QPushButton(self.L2("रोको", "Cancel"))
+        self.btn_cancel.clicked.connect(self._on_cancel_clicked)
         row.addWidget(self.btn_bg); row.addWidget(self.btn_cancel)
         lay.addLayout(row)
 
@@ -4007,6 +4009,53 @@ class ScanProgressDialog(QtWidgets.QDialog):
             self.btn_cancel.setEnabled(False)
         except Exception:
             pass
+
+    # ---- (v313) Part 4 — Cancel ke 2 vikalp + "Rok rahe hain…" state ----
+    def _on_cancel_clicked(self):
+        if getattr(self, "_cancelling", False):
+            return
+        if self._kept <= 0:
+            # abhi ek bhi page nahi bana -> seedha ruko, kuch mat poocho
+            self.cancel_requested.emit("discard")
+            self.enter_cancelling()
+            return
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Question)
+        box.setWindowTitle(self.L2("Scan roko", "Stop scanning"))
+        box.setText(self.L2("%d page ban chuke hain — kaise roku?" % self._kept,
+                            "%d pages done — how do you want to stop?" % self._kept))
+        b_keep = box.addButton(self.L2("Ye page poora karke ruko", "Finish this page & stop"),
+                               QtWidgets.QMessageBox.AcceptRole)
+        b_disc = box.addButton(self.L2("Abhi ruko aur sab hataao", "Stop now & discard all"),
+                               QtWidgets.QMessageBox.DestructiveRole)
+        box.addButton(self.L2("Wapas", "Back"), QtWidgets.QMessageBox.RejectRole)
+        box.setDefaultButton(b_keep)
+        box.exec_()
+        if box.clickedButton() is b_keep:
+            self.cancel_requested.emit("keep"); self.enter_cancelling()
+        elif box.clickedButton() is b_disc:
+            self.cancel_requested.emit("discard"); self.enter_cancelling()
+        # Wapas -> kuch nahi
+
+    def enter_cancelling(self):
+        self._cancelling = True
+        self.lbl.setText(self.L2("रोक रहे हैं…", "Stopping…"))
+        try:
+            self.btn_cancel.setEnabled(False)
+            self.btn_bg.setEnabled(False)
+        except Exception:
+            pass
+        self._stall_timer.stop(); self._lbl_stall.hide()
+        self.log("cancelling…")
+
+    def keyPressEvent(self, e):
+        if e.key() == QtCore.Qt.Key_Escape:
+            self._on_cancel_clicked()      # Esc = Cancel (seedha band nahi)
+            return
+        if e.key() in (QtCore.Qt.Key_Return, QtCore.Qt.Key_Enter):
+            self.hide()                    # Enter = Run in Background
+            return
+        super().keyPressEvent(e)
 
     def _add_chip(self, text, kind="normal"):
         lbl = QtWidgets.QLabel(text)
@@ -16426,6 +16475,10 @@ if the toggle is ticked).</p>
                 self._warn("No scanner is set in this profile. 'Profiles…' → Edit → Choose device."); return
         self._barcode_tried = False
         self._scan_count = 0
+        # (v313) Part 4 — is scan ke pages track karo (Cancel me "sab hataao" ke liye)
+        self._cur_scan_paths = []
+        self._cancelling = False
+        self._cancel_discard = False
         # (v312) Part 3d — DISK check: output-drive par 500MB se kam ho to pehle hi warn
         try:
             import shutil as _shutil
@@ -16444,7 +16497,8 @@ if the toggle is ticked).</p>
         except Exception:
             pass
         self._progress = ScanProgressDialog(self, prof.get("source_name") or self.L("Scan ho raha hai…", "Scanning…"), self._lang)
-        self._progress.cancelled.connect(self._cancel_scan)
+        self._progress.cancelled.connect(self._cancel_scan)               # (fallback)
+        self._progress.cancel_requested.connect(self._cancel_scan_mode)   # (v313) Part 4
         self._progress.error_action.connect(self._on_scan_error_action)   # (v312) Part 3b
         # PANEL ke bade "Scan" button se: jo setting panel me ABHI dikh rahi
         # hai USI par scan (manual). Enter / toolbar / dashboard pehle ki
@@ -16541,6 +16595,11 @@ if the toggle is ticked).</p>
         self._set_busy_display("busy")
 
     def _on_page_scanned(self, path):
+        # (v313) Part 4 — is scan me bana page track karo (Cancel "sab hataao")
+        try:
+            self._cur_scan_paths.append(path)
+        except Exception:
+            self._cur_scan_paths = [path]
         # Rescan / Insert mode: page ko us hi jagah lagao (aakhir me nahi)
         place = getattr(self, "_scan_place", None)
         if place:
@@ -16667,6 +16726,42 @@ if the toggle is ticked).</p>
 
     def _on_scan_done(self, kept, skipped):
         self._scan_place = None          # rescan/insert mode khatam
+        # (v313) Part 4 — Cancel "sab hataao": is scan ke saare pages (file + list)
+        # hata do (job to worker ke finally me DELETE ho hi chuka).
+        if getattr(self, "_cancel_discard", False):
+            self._cancel_discard = False
+            self._cancelling = False
+            paths = set(getattr(self, "_cur_scan_paths", []) or [])
+            self._cur_scan_paths = []
+            for i in range(self.list.count() - 1, -1, -1):
+                it = self.list.item(i)
+                if it and it.data(QtCore.Qt.UserRole) in paths:
+                    self.list.takeItem(i)
+            for p in paths:
+                try:
+                    os.remove(p)
+                except Exception:
+                    pass
+            try:
+                self._renumber_pages()
+            except Exception:
+                pass
+            if self._progress:
+                self._progress.close(); self._progress = None
+            self._scanning = False
+            self.btn_scan.setEnabled(True)
+            try:
+                self._state_timer.start()
+            except Exception:
+                pass
+            try:
+                self._conn_timer.start()
+            except Exception:
+                pass
+            self.status.showMessage(self.L("Scan roka gaya — is scan ke pages hata diye.",
+                                           "Scan cancelled — this scan's pages discarded."), 4000)
+            return
+        self._cancelling = False         # keep-mode cancel: pages bache, normal flow
         # (v235) WIA dheema tha to isi scanner ko TWAIN (sabse tez ADF) par le aao
         try:
             self._maybe_fallback_wia_to_twain(kept)
@@ -16804,6 +16899,37 @@ if the toggle is ticked).</p>
 
     def _on_scan_failed(self, msg):
         self._scan_place = None          # rescan/insert mode khatam
+        # (v313) Part 4 — agar user ne CANCEL kiya tha to ye 'fail' asli error
+        # nahi — chupchaap band karo (error-box mat dikhao). Discard ho to pages hatao.
+        if getattr(self, "_cancelling", False):
+            self._cancelling = False
+            if getattr(self, "_cancel_discard", False):
+                self._cancel_discard = False
+                paths = set(getattr(self, "_cur_scan_paths", []) or [])
+                self._cur_scan_paths = []
+                for i in range(self.list.count() - 1, -1, -1):
+                    it = self.list.item(i)
+                    if it and it.data(QtCore.Qt.UserRole) in paths:
+                        self.list.takeItem(i)
+                for p in paths:
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+            if self._progress:
+                try:
+                    self._progress.close()
+                except Exception:
+                    pass
+                self._progress = None
+            self._scanning = False
+            self.btn_scan.setEnabled(True)
+            try:
+                self._conn_timer.start()
+            except Exception:
+                pass
+            self.status.showMessage(self.L("Scan roka gaya.", "Scan cancelled."), 3000)
+            return
         self._save_after_scan_once = False
         self._pstats_bump(scan_fail=1)
         # admin-panel: scan fail hua (vajah ke pehle 40 अक्षर — koi document nahi)
@@ -16908,6 +17034,24 @@ if the toggle is ticked).</p>
             self._conn_timer.start()
         except Exception:
             pass
+
+    def _cancel_scan_mode(self, mode):
+        """(v313) Part 4 — Cancel ke 2 vikalp:
+          keep    = ye page poora karke ruko (job DELETE, ab tak ke pages bache)
+          discard = abhi ruko aur is scan ke sab pages hata do
+        Dono me worker ko GRACEFUL interrupt bhejte hain (isse hi eSCL job saaf
+        DELETE hota hai — HARD RULE #2). Dialog turant band nahi hota; worker
+        khatam hote hi (job DELETE ke baad) band hota hai — 'hang' jaisa nahi lagta."""
+        self._scan_place = None
+        self._cancel_discard = (mode == "discard")
+        self._cancelling = True
+        try:
+            if getattr(self, "_worker", None):
+                self._worker.requestInterruption()
+        except Exception:
+            pass
+        # dialog pehle se 'Rok rahe hain…' state me hai (enter_cancelling).
+        # yahan band NAHI karte — worker ke done/failed par band hoga.
 
     def _start_next_batch(self):
         for p in self._ordered_paths():
