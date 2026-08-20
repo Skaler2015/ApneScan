@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "310"
+VERSION = "311"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3785,6 +3785,12 @@ class ScanProgressDialog(QtWidgets.QDialog):
         self.lbl = QtWidgets.QLabel(self._page_text())
         f = self.lbl.font(); f.setPointSize(f.pointSize() + 2); f.setBold(True); self.lbl.setFont(f)
         lay.addWidget(self.lbl)
+        # (v311) Part 2 — SETTINGS ki patti: heading ke neeche compact chip-row
+        # (profile · A4 · 200dpi · Colour · Both · Feeder · Khaali: Normal),
+        # taaki galat setting par poora batch barbaad na ho — pehle hi dikh jaye.
+        self._chip_host = QtWidgets.QWidget()
+        self._chip_flow = FlowLayout(self._chip_host, margin=0, spacing=5)
+        lay.addWidget(self._chip_host)
         self.lbl_stage = QtWidgets.QLabel(self._stage_text("scanning"))
         self.lbl_stage.setStyleSheet("color:#2a78d6")
         lay.addWidget(self.lbl_stage)
@@ -3888,6 +3894,44 @@ class ScanProgressDialog(QtWidgets.QDialog):
 
     def L2(self, hi, en):
         return en if self._lang == "en" else hi
+
+    def _add_chip(self, text, kind="normal"):
+        lbl = QtWidgets.QLabel(text)
+        styles = {
+            "normal": "background:#eef2f7;color:#334155;border:1px solid #e2e8f0;",
+            "profile": "background:#EEF2FF;color:#4338CA;border:1px solid #C7D2FE;font-weight:700;",
+            "fast": "background:#FFF7ED;color:#C2410C;border:1px solid #FED7AA;font-weight:700;",
+        }
+        lbl.setStyleSheet("QLabel{%s border-radius:10px;padding:3px 9px;font-size:11px;}"
+                          % styles.get(kind, styles["normal"]))
+        self._chip_flow.addWidget(lbl)
+
+    def set_settings(self, profile="", dpi=200, color="color", duplex=False,
+                     source="feeder", page_size="auto", blank_label="", fast=False):
+        """Scan shuru hote waqt settings ek baar dikha do (read-only chips)."""
+        try:
+            while self._chip_flow.count():
+                w = self._chip_flow.takeAt(0)
+                if w and w.widget():
+                    w.widget().deleteLater()
+        except Exception:
+            pass
+        if profile:
+            self._add_chip(profile, "profile")
+        if fast:
+            self._add_chip("⚡ FAST", "fast")
+        ps = {"a4": "A4", "letter": "Letter", "legal": "Legal", "a5": "A5"}.get(
+            str(page_size or "").lower(), self.L2("Auto size", "Auto size"))
+        cm = {"color": self.L2("Colour", "Colour"), "gray": self.L2("Grayscale", "Grayscale"),
+              "bw": self.L2("B&W", "B&W")}.get(str(color or "").lower(), str(color))
+        sd = self.L2("दोनों तरफ़", "Both sides") if duplex else self.L2("एक तरफ़", "Single side")
+        sr = (self.L2("Flatbed", "Flatbed")
+              if str(source or "").lower() in ("glass", "flatbed")
+              else self.L2("Feeder (ADF)", "Feeder (ADF)"))
+        parts = [ps, "%d dpi" % int(dpi or 0), cm, sd, sr]
+        if blank_label:
+            parts.append(blank_label)
+        self._add_chip("  ·  ".join(parts), "normal")
 
     def set_page(self, n):
         self._pages = int(n)
@@ -16317,6 +16361,22 @@ if the toggle is ticked).</p>
             # (v310) Part 1 — live thumbnail + counter (naye signals; purane bache)
             self._worker.page_ready.connect(self._progress.on_page_ready)
             self._worker.page_dropped.connect(self._progress.on_page_dropped)
+        except Exception:
+            pass
+        # (v311) Part 2 — settings ki patti dialog ko ek baar bhej do
+        try:
+            _fast = bool(self.chk_fast.isChecked())
+            if opts.get("remove_blank") and not _fast:
+                _bs = {"kam": self.L("Kam", "Low"), "normal": self.L("Normal", "Normal"),
+                       "zyada": self.L("Zyada", "High")}.get(
+                           opts.get("blank_sensitivity", "normal"), self.L("Normal", "Normal"))
+                _blank = self.L("Khaali hatao: %s" % _bs, "Blank remove: %s" % _bs)
+            else:
+                _blank = self.L("Khaali hatao: OFF", "Blank remove: OFF")
+            self._progress.set_settings(
+                profile=(prof or {}).get("name", "") or "",
+                dpi=dpi, color=color, duplex=duplex, source=source,
+                page_size=page_size, blank_label=_blank, fast=_fast)
         except Exception:
             pass
         self.btn_scan.setEnabled(False)
