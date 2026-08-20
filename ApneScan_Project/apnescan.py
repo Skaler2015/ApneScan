@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "314"
+VERSION = "315"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1152,6 +1152,7 @@ DEFAULT_OPTIONS = {
     "files_panel_side": "left",   # 'Meri Files' panel left (default) / right
     "sound_on_done": False,       # scan poora hote hi 'ting'
     "notify_on_done": True,       # (v314) background scan poora hote hi tray notification
+    "scan_always_bg": False,      # (v315) scan-dialog kabhi na dikhe — seedha background
     "confirm_exit": False,        # band karte samay pucho
     "footer_clock": False,        # status-bar: ghadi/date
     "footer_today": False,        # status-bar: aaj ke scan
@@ -3767,6 +3768,8 @@ class ScanProgressDialog(QtWidgets.QDialog):
     cancelled = QtCore.pyqtSignal()
     error_action = QtCore.pyqtSignal(str)   # (v312) error-box button dabaya (key)
     cancel_requested = QtCore.pyqtSignal(str)   # (v313) Part 4: "keep" ya "discard"
+    always_bg_toggled = QtCore.pyqtSignal(bool)  # (v315) "hamesha background" checkbox
+    pos_saved = QtCore.pyqtSignal(object)        # (v315) dialog position yaad
 
     _STAGES = {
         "scanning":   ("Scanning…", "Scan ho raha hai…"),
@@ -3794,6 +3797,22 @@ class ScanProgressDialog(QtWidgets.QDialog):
         self._chip_host = QtWidgets.QWidget()
         self._chip_flow = FlowLayout(self._chip_host, margin=0, spacing=5)
         lay.addWidget(self._chip_host)
+        # (v315) Part 6.1 — STAGE STEPS jo hare hote jayein: Scan → Receive →
+        # Process → Save → Name
+        _steprow = QtWidgets.QHBoxLayout(); _steprow.setSpacing(2)
+        self._steps = []
+        _names = [self.L2("Scan", "Scan"), self.L2("Aayi", "Receive"),
+                  self.L2("Saaf", "Process"), self.L2("Save", "Save"),
+                  self.L2("Naam", "Name")]
+        for i, nm in enumerate(_names):
+            if i:
+                _sep = QtWidgets.QLabel("›"); _sep.setStyleSheet("color:#cbd5e1;")
+                _steprow.addWidget(_sep)
+            s = QtWidgets.QLabel(nm)
+            s.setStyleSheet("color:#94a3b8;font-size:11px;")
+            self._steps.append(s); _steprow.addWidget(s)
+        _steprow.addStretch(1)
+        lay.addLayout(_steprow)
         self.lbl_stage = QtWidgets.QLabel(self._stage_text("scanning"))
         self.lbl_stage.setStyleSheet("color:#2a78d6")
         lay.addWidget(self.lbl_stage)
@@ -3873,6 +3892,13 @@ class ScanProgressDialog(QtWidgets.QDialog):
         self.btn_cancel.clicked.connect(self._on_cancel_clicked)
         row.addWidget(self.btn_bg); row.addWidget(self.btn_cancel)
         lay.addLayout(row)
+        # (v315) Part 6.5 — "Hamesha background me chalao" (config me save)
+        self._chk_always_bg = QtWidgets.QCheckBox(self.L2(
+            "Hamesha background me chalao (dialog na dikhe)",
+            "Always run in the background (don't show this dialog)"))
+        self._chk_always_bg.setStyleSheet("font-size:11px;color:#64748b;")
+        self._chk_always_bg.toggled.connect(self.always_bg_toggled.emit)
+        lay.addWidget(self._chk_always_bg)
 
         # (v312) Part 3c — "Details ▾" (default band): technical log + Copy
         self._btn_details = QtWidgets.QToolButton()
@@ -3946,6 +3972,7 @@ class ScanProgressDialog(QtWidgets.QDialog):
         self.lbl_stage.setText(self._stage_text(key))
         self._signal_seen()
         self.log("stage: " + key)
+        self._set_step({"scanning": 0, "processing": 2, "saving": 3}.get(key, 0))
 
     def L2(self, hi, en):
         return en if self._lang == "en" else hi
@@ -4038,8 +4065,34 @@ class ScanProgressDialog(QtWidgets.QDialog):
             self.cancel_requested.emit("discard"); self.enter_cancelling()
         # Wapas -> kuch nahi
 
+    def _set_step(self, i):
+        """(v315) Step row (Scan→Receive→Process→Save→Name) ko active-index tak hara."""
+        for j, s in enumerate(getattr(self, "_steps", [])):
+            if j < i:
+                s.setStyleSheet("color:#16a34a;font-size:11px;")          # done
+            elif j == i:
+                s.setStyleSheet("color:#4338ca;font-size:11px;font-weight:700;")  # active
+            else:
+                s.setStyleSheet("color:#94a3b8;font-size:11px;")          # pending
+
+    def set_always_bg(self, on):
+        try:
+            self._chk_always_bg.blockSignals(True)
+            self._chk_always_bg.setChecked(bool(on))
+            self._chk_always_bg.blockSignals(False)
+        except Exception:
+            pass
+
+    def moveEvent(self, e):
+        try:
+            self.pos_saved.emit(self.pos())
+        except Exception:
+            pass
+        super().moveEvent(e)
+
     def show_summary(self, text):
         """(v314) Part 5 — khatam hone par band hone se pehle summary line dikhao."""
+        self._set_step(4)
         try:
             self.lbl.setText(text)
             self.lbl_stage.hide(); self._chip_host.hide()
@@ -4134,6 +4187,7 @@ class ScanProgressDialog(QtWidgets.QDialog):
     def on_page_ready(self, path, kept, skipped, title=""):
         """Naya page save hua — uska thumbnail + naam + counter turant dikhao."""
         self._signal_seen()
+        self._set_step(3)          # Receive+Process+Save ho gaya
         self.log("page ready #%d (%s)" % (kept, os.path.basename(str(path))))
         self._kept = int(kept); self._skipped = int(skipped)
         try:
@@ -4167,6 +4221,7 @@ class ScanProgressDialog(QtWidgets.QDialog):
         t = (title or "").strip()
         if t and self._kept == int(kept):
             self._lbl_page.setText(self.L2("पेज %d — %s" % (kept, t), "Page %d — %s" % (kept, t)))
+            self._set_step(4)      # Name ho gaya
 
     def closeEvent(self, e):
         try:
@@ -16509,10 +16564,39 @@ if the toggle is ticked).</p>
                     return
         except Exception:
             pass
-        self._progress = ScanProgressDialog(self, prof.get("source_name") or self.L("Scan ho raha hai…", "Scanning…"), self._lang)
+        # (v315) Part 6.8 — title: "ApneScan — <scanner> (<ip>) · <profile>"
+        _dev = prof.get("source_name") or self.L("Scanner", "Scanner")
+        _ip = self._opts.get("scanner_ip", "") if method == "escl" else ""
+        _title = "ApneScan — %s%s" % (_dev, (" (%s)" % _ip) if _ip else "")
+        _pn = (prof or {}).get("name", "")
+        if _pn:
+            _title += "  ·  " + _pn
+        self._progress = ScanProgressDialog(self, _title, self._lang)
         self._progress.cancelled.connect(self._cancel_scan)               # (fallback)
         self._progress.cancel_requested.connect(self._cancel_scan_mode)   # (v313) Part 4
         self._progress.error_action.connect(self._on_scan_error_action)   # (v312) Part 3b
+        # (v315) Part 6.7/6.9 — theme follow + position yaad
+        try:
+            self._progress.setStyleSheet(self.styleSheet())
+        except Exception:
+            pass
+        try:
+            _pos = self._config.get("scan_dialog_pos")
+            if isinstance(_pos, (list, tuple)) and len(_pos) == 2:
+                self._progress.move(int(_pos[0]), int(_pos[1]))
+        except Exception:
+            pass
+        self._progress.pos_saved.connect(self._save_scan_dialog_pos)
+        # (v315) Part 6.5 — "hamesha background": checkbox set + agar ON to abhi hide
+        self._progress.set_always_bg(bool(self._opts.get("scan_always_bg")))
+        self._progress.always_bg_toggled.connect(self._on_always_bg_toggled)
+        if self._opts.get("scan_always_bg"):
+            try:
+                self._progress.hide()
+            except Exception:
+                pass
+        # (v315) Part 6.4 — scan ke dauraan PC/display ko sone mat do
+        self._keep_awake(True)
         # PANEL ke bade "Scan" button se: jo setting panel me ABHI dikh rahi
         # hai USI par scan (manual). Enter / toolbar / dashboard pehle ki
         # tarah PROFILE ki saved setting se. dpi_override sirf DPI-shortcut
@@ -16745,6 +16829,38 @@ if the toggle is ticked).</p>
         parts.append(self.L("%d second" % elapsed, "%d sec" % elapsed))
         return "✅ ApneScan — " + "  ·  ".join(parts)
 
+    def _keep_awake(self, on):
+        """(v315) Scan ke dauraan PC/screen sone na paye; khatam hote hi normal."""
+        try:
+            if sys.platform.startswith("win"):
+                import ctypes
+                ES_CONTINUOUS = 0x80000000
+                ES_SYSTEM_REQUIRED = 0x00000001
+                ES_DISPLAY_REQUIRED = 0x00000002
+                flags = (ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED) if on \
+                    else ES_CONTINUOUS
+                ctypes.windll.kernel32.SetThreadExecutionState(flags)
+        except Exception:
+            pass
+
+    def _on_always_bg_toggled(self, on):
+        self._opts["scan_always_bg"] = bool(on)
+        try:
+            self._save_opts()
+        except Exception:
+            pass
+        if on and self._progress is not None:
+            try:
+                self._progress.hide()
+            except Exception:
+                pass
+
+    def _save_scan_dialog_pos(self, pos):
+        try:
+            self._config["scan_dialog_pos"] = [int(pos.x()), int(pos.y())]
+        except Exception:
+            pass
+
     def _ensure_tray(self):
         tr = getattr(self, "_tray", None)
         if tr is None:
@@ -16770,6 +16886,11 @@ if the toggle is ticked).</p>
 
     def _on_scan_done(self, kept, skipped):
         self._scan_place = None          # rescan/insert mode khatam
+        self._keep_awake(False)          # (v315) scan khatam — normal sleep
+        try:
+            save_config(self._config)    # dialog position (agar badli) yaad rahe
+        except Exception:
+            pass
         # (v313) Part 4 — Cancel "sab hataao": is scan ke saare pages (file + list)
         # hata do (job to worker ke finally me DELETE ho hi chuka).
         if getattr(self, "_cancel_discard", False):
@@ -16962,6 +17083,7 @@ if the toggle is ticked).</p>
 
     def _on_scan_failed(self, msg):
         self._scan_place = None          # rescan/insert mode khatam
+        self._keep_awake(False)          # (v315) scan khatam — normal sleep
         # (v313) Part 4 — agar user ne CANCEL kiya tha to ye 'fail' asli error
         # nahi — chupchaap band karo (error-box mat dikhao). Discard ho to pages hatao.
         if getattr(self, "_cancelling", False):
@@ -22396,8 +22518,8 @@ if the toggle is ticked).</p>
         "after_save", "ui_confirm_delete", "language", "ui_corners", "high_contrast",
         "window_opacity", "brand_name", "brand_logo", "remember_window",
         "auto_update_check", "dbl_action", "files_panel_side", "sound_on_done",
-        "notify_on_done", "confirm_exit", "footer_clock", "footer_today",
-        "footer_online", "footer_msg",
+        "notify_on_done", "scan_always_bg", "confirm_exit", "footer_clock",
+        "footer_today", "footer_online", "footer_msg",
     )
 
     # Toolbar ke button jinko dikhana/chhupana user chun sakta hai
