@@ -250,7 +250,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "311"
+VERSION = "312"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3764,6 +3764,7 @@ class ScanProgressDialog(QtWidgets.QDialog):
     """Scanning box: live page counter, current stage, elapsed time + rate
     (pages/min) and ETA (when the total is known) + Run-in-Background + Cancel."""
     cancelled = QtCore.pyqtSignal()
+    error_action = QtCore.pyqtSignal(str)   # (v312) error-box button dabaya (key)
 
     _STAGES = {
         "scanning":   ("Scanning…", "Scan ho raha hai…"),
@@ -3831,6 +3832,32 @@ class ScanProgressDialog(QtWidgets.QDialog):
         self._blank_timer = QtCore.QTimer(self); self._blank_timer.setSingleShot(True)
         self._blank_timer.timeout.connect(self._lbl_blank.hide)
 
+        # (v312) Part 3a — ATAKAV (stall) warning: 15s tak koi signal na aaye to
+        # peeli patti. Ye timer scanner ko POLL nahi karta — sirf HAMARE signals
+        # dekhta hai (koi extra eSCL request nahi = 503 nahi).
+        self._lbl_stall = QtWidgets.QLabel(self.L2(
+            "⚠️ Scanner se jawab nahi aa raha — feeder me kagaz check karo",
+            "⚠️ No response from the scanner — check the paper in the feeder"))
+        self._lbl_stall.setWordWrap(True)
+        self._lbl_stall.setStyleSheet("background:#fef3c7;border:1px solid #fcd34d;"
+                                      "border-radius:6px;color:#92400e;padding:6px 9px;font-size:12px;")
+        self._lbl_stall.hide()
+        lay.addWidget(self._lbl_stall)
+        self._stall_timer = QtCore.QTimer(self); self._stall_timer.setSingleShot(True)
+        self._stall_timer.timeout.connect(self._lbl_stall.show)
+
+        # (v312) Part 3b — ERROR box (dialog band nahi hota): message + action buttons
+        self._err_box = QtWidgets.QFrame()
+        self._err_box.setStyleSheet("QFrame{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;}")
+        _ev = QtWidgets.QVBoxLayout(self._err_box); _ev.setContentsMargins(10, 8, 10, 8)
+        self._err_msg = QtWidgets.QLabel(""); self._err_msg.setWordWrap(True)
+        self._err_msg.setStyleSheet("color:#991b1b;font-size:12.5px;font-weight:600;border:none;background:transparent;")
+        _ev.addWidget(self._err_msg)
+        self._err_btnrow = QtWidgets.QHBoxLayout(); self._err_btnrow.addStretch(1)
+        _ev.addLayout(self._err_btnrow)
+        self._err_box.hide()
+        lay.addWidget(self._err_box)
+
         self.bar = QtWidgets.QProgressBar(); self.bar.setRange(0, 0)   # busy until a total is known
         lay.addWidget(self.bar)
         self.lbl_stats = QtWidgets.QLabel("")
@@ -3843,10 +3870,33 @@ class ScanProgressDialog(QtWidgets.QDialog):
         self.btn_cancel.clicked.connect(lambda: self.cancelled.emit())
         row.addWidget(self.btn_bg); row.addWidget(self.btn_cancel)
         lay.addLayout(row)
+
+        # (v312) Part 3c — "Details ▾" (default band): technical log + Copy
+        self._btn_details = QtWidgets.QToolButton()
+        self._btn_details.setText(self.L2("जानकारी ▾", "Details ▾"))
+        self._btn_details.setStyleSheet("QToolButton{border:none;color:#64748b;font-size:11px;}")
+        self._btn_details.setCheckable(True)
+        self._btn_details.setCursor(QtCore.Qt.PointingHandCursor)
+        self._btn_details.toggled.connect(self._toggle_details)
+        _drow = QtWidgets.QHBoxLayout(); _drow.addWidget(self._btn_details); _drow.addStretch(1)
+        self._btn_copylog = QtWidgets.QPushButton(self.L2("Copy", "Copy"))
+        self._btn_copylog.setStyleSheet("font-size:11px;padding:2px 8px;")
+        self._btn_copylog.clicked.connect(self._copy_log)
+        self._btn_copylog.hide()
+        _drow.addWidget(self._btn_copylog)
+        lay.addLayout(_drow)
+        self._log = QtWidgets.QPlainTextEdit(); self._log.setReadOnly(True)
+        self._log.setMaximumHeight(140)
+        self._log.setStyleSheet("font-family:Consolas,monospace;font-size:10.5px;"
+                                "background:#0f172a;color:#cbd5e1;border-radius:6px;")
+        self._log.hide()
+        lay.addWidget(self._log)
+
         # tick the elapsed/rate/ETA line ~2x per second
         self._timer = QtCore.QTimer(self); self._timer.timeout.connect(self._tick)
         self._timer.start(500)
         self._tick()
+        self._signal_seen()          # start the 15s stall watch
         self.show()
 
     def _page_text(self):
@@ -3891,9 +3941,72 @@ class ScanProgressDialog(QtWidgets.QDialog):
 
     def set_stage(self, key):
         self.lbl_stage.setText(self._stage_text(key))
+        self._signal_seen()
+        self.log("stage: " + key)
 
     def L2(self, hi, en):
         return en if self._lang == "en" else hi
+
+    # ---- (v312) Part 3 — stall watch + details log + error box ----
+    def _signal_seen(self):
+        """Koi bhi worker-signal aaya — stall warning hatao aur 15s timer reset.
+        (Scanner ko poll NAHI karta — sirf hamare signals dekhta hai.)"""
+        try:
+            self._lbl_stall.hide()
+            self._stall_timer.start(15000)
+        except Exception:
+            pass
+
+    def log(self, text):
+        try:
+            self._log.appendPlainText("%s  %s" % (self._fmt_time(time.time() - self._t0), text))
+        except Exception:
+            pass
+
+    def _toggle_details(self, on):
+        self._log.setVisible(on)
+        self._btn_copylog.setVisible(on)
+        self._btn_details.setText(self.L2("जानकारी ▴", "Details ▴") if on
+                                  else self.L2("जानकारी ▾", "Details ▾"))
+
+    def _copy_log(self):
+        try:
+            QtWidgets.QApplication.clipboard().setText(self._log.toPlainText())
+        except Exception:
+            pass
+
+    def clear_error(self):
+        try:
+            self._err_box.hide()
+            while self._err_btnrow.count() > 1:      # stretch chhod kar sab hatao
+                it = self._err_btnrow.takeAt(1)
+                if it and it.widget():
+                    it.widget().deleteLater()
+        except Exception:
+            pass
+
+    def show_error(self, message, actions):
+        """Error dialog me hi dikhao (band nahi hota). actions = [(label, key), …]
+        — button dabane par error_action(key) emit hota hai."""
+        self.clear_error()
+        self._stall_timer.stop(); self._lbl_stall.hide()
+        try:
+            self.bar.setRange(0, 1); self.bar.setValue(0)
+        except Exception:
+            pass
+        self._err_msg.setText(message)
+        self.log("ERROR: " + message)
+        for label, key in actions:
+            b = QtWidgets.QPushButton(label)
+            b.setObjectName("primary" if key in ("retry", "continue") else "")
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.clicked.connect(lambda _c=False, k=key: self.error_action.emit(k))
+            self._err_btnrow.addWidget(b)
+        self._err_box.show()
+        try:
+            self.btn_cancel.setEnabled(False)
+        except Exception:
+            pass
 
     def _add_chip(self, text, kind="normal"):
         lbl = QtWidgets.QLabel(text)
@@ -3932,6 +4045,8 @@ class ScanProgressDialog(QtWidgets.QDialog):
         if blank_label:
             parts.append(blank_label)
         self._add_chip("  ·  ".join(parts), "normal")
+        self._signal_seen()
+        self.log("start: %s | %s" % (profile or "-", "  ·  ".join(parts)))
 
     def set_page(self, n):
         self._pages = int(n)
@@ -3956,6 +4071,8 @@ class ScanProgressDialog(QtWidgets.QDialog):
 
     def on_page_ready(self, path, kept, skipped, title=""):
         """Naya page save hua — uska thumbnail + naam + counter turant dikhao."""
+        self._signal_seen()
+        self.log("page ready #%d (%s)" % (kept, os.path.basename(str(path))))
         self._kept = int(kept); self._skipped = int(skipped)
         try:
             pm = QtGui.QPixmap(path)
@@ -3975,6 +4092,8 @@ class ScanProgressDialog(QtWidgets.QDialog):
 
     def on_page_dropped(self, skipped, reason="blank"):
         """Blank page hata — counter badhao + halki patti thodi der dikhao."""
+        self._signal_seen()
+        self.log("page dropped (%s), skipped=%d" % (reason, skipped))
         self._skipped = int(skipped)
         self._lbl_blank.show()
         self._blank_timer.start(1400)
@@ -16307,8 +16426,26 @@ if the toggle is ticked).</p>
                 self._warn("No scanner is set in this profile. 'Profiles…' → Edit → Choose device."); return
         self._barcode_tried = False
         self._scan_count = 0
+        # (v312) Part 3d — DISK check: output-drive par 500MB se kam ho to pehle hi warn
+        try:
+            import shutil as _shutil
+            _drv = self._opts.get("save_folder") or self._tmpdir or os.path.expanduser("~")
+            _free = _shutil.disk_usage(_drv).free
+            if _free < 500 * 1024 * 1024:
+                _gb = _free / (1024.0 ** 3)
+                if QtWidgets.QMessageBox.warning(
+                        self, self.L("Jagah kam hai", "Low disk space"),
+                        self.L("Sirf %.1f GB jagah bachi hai — scan/save me dikkat aa sakti hai. "
+                               "Phir bhi scan karein?" % _gb,
+                               "Only %.1f GB free — scanning/saving may fail. Scan anyway?" % _gb),
+                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                        QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+                    return
+        except Exception:
+            pass
         self._progress = ScanProgressDialog(self, prof.get("source_name") or self.L("Scan ho raha hai…", "Scanning…"), self._lang)
         self._progress.cancelled.connect(self._cancel_scan)
+        self._progress.error_action.connect(self._on_scan_error_action)   # (v312) Part 3b
         # PANEL ke bade "Scan" button se: jo setting panel me ABHI dikh rahi
         # hai USI par scan (manual). Enter / toolbar / dashboard pehle ki
         # tarah PROFILE ki saved setting se. dpi_override sirf DPI-shortcut
@@ -16676,8 +16813,6 @@ if the toggle is ticked).</p>
         except Exception:
             pass
         self._last_error = msg
-        if self._progress:
-            self._progress.close(); self._progress = None
         self._scanning = False
         self.btn_scan.setEnabled(True)
         try:
@@ -16689,7 +16824,75 @@ if the toggle is ticked).</p>
             self._conn_timer.start()
         except Exception:
             pass
+        # (v312) Part 3b — dialog SAAMNE khula ho to error USI me dikhao (band nahi
+        # hota, action buttons ke saath); background/hidden ho to purana messagebox.
+        if self._progress is not None and self._progress.isVisible():
+            try:
+                message, actions = self._classify_scan_error(msg)
+                self._progress.show_error(message, actions)
+                return
+            except Exception:
+                pass
+        if self._progress is not None:
+            try:
+                self._progress.close()
+            except Exception:
+                pass
+            self._progress = None
         self._warn(friendly_error(msg, self._opts.get("language", "en")))
+
+    def _classify_scan_error(self, msg):
+        """Scan-fail message ko (Hindi/Eng message, action-buttons) me badlo.
+        Returns (message, [(label, key), …]). key: retry / rediscover / close."""
+        L = self.L
+        low = (str(msg) or "").lower()
+        b_close = (L("Band karo", "Close"), "close")
+        if any(k in low for k in ("no space", "space left", "disk full", "errno 28")):
+            return (L("Jagah kam hai — disk lagbhag bhar gayi. Kuch files hataao phir scan karo.",
+                      "Low disk space — the drive is nearly full. Free up space, then scan."),
+                    [b_close])
+        if "jam" in low:
+            return (L("Kagaz fansa hai — nikalo, phir 'Dubara koshish' dabao.",
+                      "Paper jam — clear it, then press 'Retry'."),
+                    [(L("Dubara koshish", "Retry"), "retry"), b_close])
+        if any(k in low for k in ("busy", "503", "409", "429")):
+            return (L("Scanner vyast hai. Koi doosra scan app (NAPS2 / HP Scan / purani ApneScan) "
+                      "khula ho to band karo, ya scanner ek baar off/on karo.",
+                      "Scanner is busy. Close any other scan app (NAPS2 / HP Scan / old ApneScan), "
+                      "or power-cycle the scanner once."),
+                    [(L("Dubara koshish", "Retry"), "retry"), b_close])
+        if any(k in low for k in ("timeout", "timed out", "unreachable", "refused", "getaddr",
+                                  "urlerror", "not set", "no route", "name or service",
+                                  "connection", "network")):
+            ip = self._opts.get("scanner_ip", "")
+            _s = (" (%s)" % ip) if ip else ""
+            return (L("Scanner network se hat gaya%s — connection check karo (WiFi/LAN/IP)." % _s,
+                      "The scanner is off the network%s — check the connection (WiFi/LAN/IP)." % _s),
+                    [(L("Dubara dhoondho", "Find scanner"), "rediscover"), b_close])
+        if any(k in low for k in ("no page", "0 page", "did not start", "location not found",
+                                  "no page was scanned", "feeder", "empty")):
+            return (L("Feeder me kagaz nahi mila — kagaz lagao aur 'Aage badho' dabao.",
+                      "No paper found in the feeder — load paper and press 'Continue'."),
+                    [(L("Aage badho", "Continue"), "retry"), b_close])
+        return (friendly_error(msg, self._opts.get("language", "en")) or str(msg),
+                [(L("Dubara koshish", "Retry"), "retry"), b_close])
+
+    def _on_scan_error_action(self, key):
+        """Error-box ke button ka jawab: close / retry / rediscover."""
+        if self._progress is not None:
+            try:
+                self._progress.close()
+            except Exception:
+                pass
+            self._progress = None
+        if key == "retry":
+            QtCore.QTimer.singleShot(250, lambda: self.do_scan())
+        elif key == "rediscover":
+            try:
+                self.auto_detect_scanner()
+            except Exception:
+                pass
+            QtCore.QTimer.singleShot(400, lambda: self.do_scan())
 
     def _cancel_scan(self):
         self._scan_place = None          # rescan/insert mode khatam
