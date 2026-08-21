@@ -158,7 +158,7 @@ jobs:
           protocol: ftps
           port: 21
           local-dir: ./_site/
-          server-dir: ${{ vars.FTP_REMOTE_DIR || 'public_html/apnescan/' }}
+          server-dir: ${{ vars.FTP_REMOTE_DIR || 'domains/apnesoft.com/public_html/apnescan/' }}
           dangerous-clean-slate: false
           exclude: |
             **/.git*
