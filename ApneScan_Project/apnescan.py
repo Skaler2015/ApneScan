@@ -87,6 +87,7 @@ from apnescan_lib.file_search import SearchEngine as FileSearchEngine, ENGINE as
 from apnescan_lib import pdf_tools as _pdftools
 from apnescan_lib import pdf_text_edit as _pdftext
 from apnescan_lib import pdf_table as _pdftable
+from apnescan_lib import image_tools as _imgtools
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
@@ -254,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "321"
+VERSION = "322"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -19643,6 +19644,368 @@ if the toggle is ticked).</p>
             })
         return spans
 
+    # ==================== IMAGE TOOLS (My Files right-click) ==============
+    _IMG_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff",
+                 ".webp", ".gif", ".heic", ".heif")
+
+    def _img_out(self, src, tag, ext=None):
+        d = os.path.dirname(src)
+        base = os.path.splitext(os.path.basename(src))[0]
+        ext = ext or os.path.splitext(src)[1] or ".jpg"
+        return self._unique_fs_path(os.path.join(d, "%s %s%s" % (base, tag, ext)))
+
+    def _img_run(self, job, label, open_folder=None):
+        """Image-tool ko BACKGROUND me chalao; done par toast + refresh."""
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn(self.L("Image tool nahi chala:\n%s",
+                                  "Image tool failed:\n%s") % res)
+                return
+            try:
+                self._invalidate_files_index(); self._refresh_files_root()
+            except Exception:
+                pass
+            self._toast(self.L("✓ %s ban gaya" % label, "✓ %s created" % label))
+            if open_folder:
+                try:
+                    self._open_path(open_folder)
+                except Exception:
+                    pass
+        self._run_bg(job, done, self.L("Image par kaam ho raha…",
+                                       "Working on the image…"))
+
+    # ---- A) convert / format ----
+    def _img_convert(self, path):
+        fmts = ["PNG", "JPG", "WEBP", "BMP", "TIFF"]
+        f, ok = QtWidgets.QInputDialog.getItem(
+            self, self.L("Format badlo", "Convert format"),
+            self.L("Kis format me?", "Convert to:"), fmts, 0, False)
+        if not ok or not f:
+            return
+        ext = "." + ("jpg" if f == "JPG" else f.lower())
+        out = self._img_out(path, "", ext)
+        self._img_run(lambda: _imgtools.convert_format(path, out),
+                      self.L("%s image" % f, "%s image" % f))
+
+    def _img_heic(self, path):
+        if not _imgtools.HAS_HEIF:
+            self._warn(self.L("HEIC support (pillow-heif) install nahi hai.",
+                              "HEIC support (pillow-heif) is not installed."))
+            return
+        out = self._img_out(path, "", ".jpg")
+        self._img_run(lambda: _imgtools.heic_to_jpg(path, out),
+                      self.L("JPG", "JPG"))
+
+    def _img_to_pdf(self, paths):
+        d = os.path.dirname(paths[0])
+        base = os.path.splitext(os.path.basename(paths[0]))[0]
+        out = self._unique_fs_path(os.path.join(d, base + ".pdf"))
+        self._img_run(lambda: _imgtools.images_to_pdf(paths, out),
+                      self.L("PDF", "PDF"), open_folder=d)
+
+    # ---- B) size / compress ----
+    def _img_compress_kb(self, path):
+        kb, ok = QtWidgets.QInputDialog.getInt(
+            self, self.L("Chhoti karo (KB tak)", "Compress (to KB)"),
+            self.L("Kitne KB se neeche laani hai?", "Target size (KB):"),
+            200, 10, 20000)
+        if not ok:
+            return
+        out = self._img_out(path, "(%dKB)" % kb, ".jpg")
+        self._img_run(lambda: _imgtools.compress_to_kb(path, out, kb),
+                      self.L("Chhoti image", "Compressed image"))
+
+    def _img_resize(self, path):
+        txt, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Naap badlo", "Resize"),
+            self.L("Nayi chaudai px (jaise 800), ya % (jaise 50%):",
+                   "New width px (e.g. 800), or % (e.g. 50%):"))
+        txt = (txt or "").strip()
+        if not ok or not txt:
+            return
+        out = self._img_out(path, "(resize)")
+        if txt.endswith("%"):
+            try:
+                pct = float(txt[:-1])
+            except Exception:
+                return
+            self._img_run(lambda: _imgtools.resize_percent(path, out, pct),
+                          self.L("Resize image", "Resized image"))
+        else:
+            try:
+                w = int(txt)
+            except Exception:
+                return
+            self._img_run(lambda: _imgtools.resize_to(path, out, width=w),
+                          self.L("Resize image", "Resized image"))
+
+    def _img_dpi(self, path):
+        dpi, ok = QtWidgets.QInputDialog.getInt(
+            self, self.L("DPI set karo", "Set DPI"),
+            self.L("DPI (jaise 300):", "DPI (e.g. 300):"), 300, 72, 1200)
+        if not ok:
+            return
+        out = self._img_out(path, "(%ddpi)" % dpi)
+        self._img_run(lambda: _imgtools.set_dpi(path, out, dpi),
+                      self.L("DPI image", "DPI image"))
+
+    # ---- C) rotate / fix ----
+    def _img_rotate(self, path, deg):
+        out = self._img_out(path, "(ghumaya)")
+        self._img_run(lambda: _imgtools.rotate(path, out, deg),
+                      self.L("Ghumayi image", "Rotated image"))
+
+    def _img_flip(self, path, horizontal):
+        out = self._img_out(path, "(flip)")
+        self._img_run(lambda: _imgtools.flip(path, out, horizontal),
+                      self.L("Flip image", "Flipped image"))
+
+    def _img_simple(self, path, fn, tag, label):
+        out = self._img_out(path, tag)
+        self._img_run(lambda: fn(path, out), label)
+
+    def _img_brightness(self, path):
+        b, ok = QtWidgets.QInputDialog.getInt(
+            self, self.L("Brightness/Contrast", "Brightness/Contrast"),
+            self.L("Brightness % (100 = normal):", "Brightness % (100 = normal):"),
+            100, 20, 300)
+        if not ok:
+            return
+        c, ok = QtWidgets.QInputDialog.getInt(
+            self, self.L("Contrast", "Contrast"),
+            self.L("Contrast % (100 = normal):", "Contrast % (100 = normal):"),
+            100, 20, 300)
+        if not ok:
+            return
+        out = self._img_out(path, "(adjust)")
+        self._img_run(lambda: _imgtools.adjust_bc(path, out, b / 100.0, c / 100.0),
+                      self.L("Adjust image", "Adjusted image"))
+
+    # ---- E) combine ----
+    def _img_merge(self, paths, direction):
+        d = os.path.dirname(paths[0])
+        out = self._unique_fs_path(os.path.join(d, self.L("jodi", "merged") + ".jpg"))
+        self._img_run(lambda: _imgtools.merge_images(paths, out, direction),
+                      self.L("Judi image", "Merged image"), open_folder=d)
+
+    # ---- F) form-specific ----
+    def _img_passport(self, path):
+        out = self._img_out(path, "(passport 35x45)")
+        self._img_run(lambda: _imgtools.passport_photo(path, out),
+                      self.L("Passport photo", "Passport photo"))
+
+    def _img_signature(self, path):
+        out = self._img_out(path, "(sign)", ".png")
+        self._img_run(lambda: _imgtools.signature_png(path, out),
+                      self.L("Signature (transparent)", "Signature (transparent)"))
+
+    # ---- G) mark ----
+    def _img_watermark(self, path):
+        txt, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Watermark", "Watermark"),
+            self.L("Kya likhein?", "Watermark text:"),
+            text=self.L("COPY", "COPY"))
+        txt = (txt or "").strip()
+        if not ok or not txt:
+            return
+        out = self._img_out(path, "(watermark)")
+        self._img_run(lambda: _imgtools.watermark(path, out, txt),
+                      self.L("Watermark image", "Watermarked image"))
+
+    # ---- H) info / privacy ----
+    def _img_info(self, path):
+        try:
+            d = _imgtools.info(path)
+        except Exception as exc:
+            self._warn(str(exc)); return
+        kb = d["bytes"] / 1024.0
+        msg = self.L(
+            "Format: %s\nMode: %s\nNaap: %d × %d px\nDPI: %s\nFile size: %.1f KB",
+            "Format: %s\nMode: %s\nSize: %d × %d px\nDPI: %s\nFile size: %.1f KB") % (
+            d["format"], d["mode"], d["width"], d["height"],
+            (d["dpi"] or self.L("pata nahi", "unknown")), kb)
+        QtWidgets.QMessageBox.information(self, self.L("Image info", "Image info"), msg)
+
+    def _img_strip_meta(self, path):
+        out = self._img_out(path, "(no-metadata)")
+        self._img_run(lambda: _imgtools.strip_metadata(path, out),
+                      self.L("Bina-metadata image", "Metadata-free image"))
+
+    # ---- OCR: image -> text / word / excel ----
+    def _img_to_text(self, path):
+        if not tesseract_available():
+            self._warn(self.L("Iske liye OCR (Tesseract) chahiye.",
+                              "This needs OCR (Tesseract).")); return
+        def job():
+            with Image.open(path) as im:
+                return pytesseract.image_to_string(im.convert("RGB"), lang="eng+hin")
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn(str(res)); return
+            out = os.path.splitext(path)[0] + ".txt"
+            out = self._unique_fs_path(out)
+            try:
+                with open(out, "w", encoding="utf-8") as fh:
+                    fh.write(res)
+            except Exception as exc:
+                self._warn(str(exc)); return
+            self._invalidate_files_index(); self._refresh_files_root()
+            self._toast(self.L("✓ Text file bani", "✓ Text file created"))
+        self._run_bg(job, done, self.L("OCR ho raha…", "Running OCR…"))
+
+    def _img_to_excel(self, path):
+        if not HAS_XLSX:
+            self._warn(self.L("Iske liye openpyxl chahiye.", "This needs openpyxl."))
+            return
+        if not tesseract_available():
+            self._warn(self.L("Iske liye OCR chahiye.", "This needs OCR.")); return
+        out = self._unique_fs_path(os.path.splitext(path)[0] + ".xlsx")
+        def job():
+            with Image.open(path) as im:
+                words = self._ocr_table_words(im)
+            g = _pdftable.words_to_grid(words)
+            if not g:
+                raise RuntimeError(self.L("Koi table nahi mili.", "No table found."))
+            _pdftable.write_tables_xlsx([{"title": "Sheet1", "rows": g}], out)
+            return out
+        self._img_run(job, self.L("Excel", "Excel"), open_folder=os.path.dirname(out))
+
+    def _add_image_tools_menu(self, menu, path):
+        """Ek image par '🖼 Image Tools' submenu."""
+        L = self.L
+        it = menu.addMenu("🖼 " + L("Image Tools", "Image Tools"))
+        # A) convert
+        it.addAction("🖼 " + L("Format badlo (PNG/JPG/…)", "Convert format…"),
+                     lambda: self._img_convert(path))
+        if path.lower().endswith((".heic", ".heif")):
+            it.addAction("📷 " + L("HEIC → JPG", "HEIC → JPG"),
+                         lambda: self._img_heic(path))
+        it.addAction("📄 " + L("Image → PDF", "Image → PDF"),
+                     lambda: self._img_to_pdf([path]))
+        it.addSeparator()
+        # B) size
+        it.addAction("🎯 " + L("Chhoti karo (KB tak)…", "Compress to KB…"),
+                     lambda: self._img_compress_kb(path))
+        it.addAction("📐 " + L("Naap badlo (resize)…", "Resize…"),
+                     lambda: self._img_resize(path))
+        it.addAction("🖨 " + L("DPI set karo…", "Set DPI…"),
+                     lambda: self._img_dpi(path))
+        it.addSeparator()
+        # C) rotate / fix
+        rm = it.addMenu("🔄 " + L("Ghumao / Palto", "Rotate / Flip"))
+        rm.addAction("↻ 90°", lambda: self._img_rotate(path, 90))
+        rm.addAction("↺ 270°", lambda: self._img_rotate(path, 270))
+        rm.addAction("⤾ 180°", lambda: self._img_rotate(path, 180))
+        rm.addAction(L("↔ Aaine jaisa (H)", "↔ Flip horizontal"),
+                     lambda: self._img_flip(path, True))
+        rm.addAction(L("↕ Ulta (V)", "↕ Flip vertical"),
+                     lambda: self._img_flip(path, False))
+        it.addAction("📐 " + L("Seedha karo (auto-deskew)", "Auto-straighten (deskew)"),
+                     lambda: self._img_simple(path, _imgtools.deskew, "(seedha)",
+                                              L("Seedhi image", "Straightened")))
+        it.addAction("✂ " + L("Auto-crop kinare", "Auto-crop edges"),
+                     lambda: self._img_simple(path, _imgtools.auto_crop, "(crop)",
+                                              L("Crop image", "Cropped")))
+        it.addAction("📸 " + L("Photo → Scan (seedha+saaf)", "Photo → Scan (flatten)"),
+                     lambda: self._img_simple(path, _imgtools.photo_to_scan, "(scan)",
+                                              L("Scan-jaisi image", "Scan-like")))
+        it.addSeparator()
+        # D) enhance / clean
+        it.addAction("✨ " + L("Auto-nikhaar (enhance)", "Auto-enhance"),
+                     lambda: self._img_simple(path, _imgtools.auto_enhance, "(enhance)",
+                                              L("Nikhri image", "Enhanced")))
+        it.addAction("⬛ " + L("Black & White", "Black & White"),
+                     lambda: self._img_simple(path, _imgtools.black_white, "(B&W)",
+                                              L("B&W image", "B&W image")))
+        it.addAction("🌫 " + L("Grayscale", "Grayscale"),
+                     lambda: self._img_simple(path, _imgtools.grayscale, "(gray)",
+                                              L("Gray image", "Gray image")))
+        it.addAction("💡 " + L("Chaya hatao / background safed", "Remove shadow / whiten"),
+                     lambda: self._img_simple(path, _imgtools.remove_shadow, "(saaf)",
+                                              L("Saaf image", "Cleaned")))
+        it.addAction("🔆 " + L("Brightness / Contrast…", "Brightness / Contrast…"),
+                     lambda: self._img_brightness(path))
+        it.addAction("🧹 " + L("Denoise (daane hatao)", "Denoise"),
+                     lambda: self._img_simple(path, _imgtools.denoise, "(denoise)",
+                                              L("Saaf image", "Denoised")))
+        it.addAction("🔎 " + L("Sharpen (crisp)", "Sharpen"),
+                     lambda: self._img_simple(path, _imgtools.sharpen, "(sharp)",
+                                              L("Crisp image", "Sharpened")))
+        it.addSeparator()
+        # F) form-specific
+        it.addAction("🪪 " + L("Passport-size (35×45mm)", "Passport-size (35×45mm)"),
+                     lambda: self._img_passport(path))
+        it.addAction("✒ " + L("Signature nikaalo (transparent)", "Extract signature (transparent)"),
+                     lambda: self._img_signature(path))
+        # G) mark
+        it.addAction("💧 " + L("Watermark…", "Watermark…"),
+                     lambda: self._img_watermark(path))
+        it.addSeparator()
+        # OCR
+        it.addAction("📝 " + L("Image → Text (OCR)", "Image → Text (OCR)"),
+                     lambda: self._img_to_text(path))
+        it.addAction("📊 " + L("Image → Excel (table)", "Image → Excel (table)"),
+                     lambda: self._img_to_excel(path))
+        it.addSeparator()
+        # H) info / privacy
+        it.addAction("ℹ " + L("Image info", "Image info"),
+                     lambda: self._img_info(path))
+        it.addAction("🧽 " + L("Metadata/EXIF hatao", "Remove metadata/EXIF"),
+                     lambda: self._img_strip_meta(path))
+        return it
+
+    def _add_image_tools_bulk(self, menu, imgs):
+        """Kai image par: har ek par same tool, ya sab ko jodo."""
+        L = self.L
+        it = menu.addMenu("🖼 " + L("Image Tools (%d)" % len(imgs),
+                                    "Image Tools (%d)" % len(imgs)))
+        it.addAction("📄 " + L("Sab → ek PDF", "All → one PDF"),
+                     lambda: self._img_to_pdf(imgs))
+        it.addAction("🔗 " + L("Jodo (upar-neeche)", "Merge (vertical)"),
+                     lambda: self._img_merge(imgs, "vertical"))
+        it.addAction("🔗 " + L("Jodo (agal-bagal)", "Merge (horizontal)"),
+                     lambda: self._img_merge(imgs, "horizontal"))
+        it.addSeparator()
+
+        def _each(fn, tag, label):
+            def run():
+                def job():
+                    n = 0
+                    for p in imgs:
+                        try:
+                            fn(p, self._img_out(p, tag)); n += 1
+                        except Exception:
+                            pass
+                    return n
+                def done(res):
+                    try:
+                        self._invalidate_files_index(); self._refresh_files_root()
+                    except Exception:
+                        pass
+                    self._toast(L("✓ %d image: %s" % (res, label),
+                                  "✓ %d images: %s" % (res, label)))
+                self._run_bg(job, done, L("Image par kaam…", "Working on images…"))
+            return run
+        it.addAction("⬛ " + L("Black & White", "Black & White"),
+                     _each(_imgtools.black_white, "(B&W)", L("B&W", "B&W")))
+        it.addAction("✨ " + L("Auto-nikhaar", "Auto-enhance"),
+                     _each(_imgtools.auto_enhance, "(enhance)", L("enhance", "enhance")))
+        it.addAction("📸 " + L("Photo → Scan", "Photo → Scan"),
+                     _each(_imgtools.photo_to_scan, "(scan)", L("scan", "scan")))
+        it.addSeparator()
+
+        def _compress_bulk():
+            kb, ok = QtWidgets.QInputDialog.getInt(
+                self, L("Chhoti karo (KB tak)", "Compress to KB"),
+                L("Har image kitne KB se neeche?", "Each image under (KB):"),
+                200, 10, 20000)
+            if not ok:
+                return
+            _each(lambda p, o: _imgtools.compress_to_kb(p, o, kb),
+                  "(%dKB)" % kb, L("chhoti", "compressed"))()
+        it.addAction("🎯 " + L("Chhoti karo (KB tak)…", "Compress to KB…"), _compress_bulk)
+        return it
+
     def _add_pdf_tools_menu(self, menu, path):
         """Ek PDF par '📄 PDF Tools' submenu."""
         pt = menu.addMenu("📄 " + self.L("PDF Tools", "PDF Tools"))
@@ -19763,6 +20126,10 @@ if the toggle is ticked).</p>
                                lambda: self._bulk_compress(sel_files))
                 # (v316) har PDF par same tool (B&W/rotate/crop/flatten/repair)
                 self._add_pdf_tools_bulk(menu, _pdfsel)
+            _imgsel = [f for f in sel_files if f.lower().endswith(self._IMG_EXTS)]
+            if len(_imgsel) > 1:
+                # (v322) kai image: sab->PDF, jodo, B&W/enhance/compress
+                self._add_image_tools_bulk(menu, _imgsel)
             menu.addAction(self.L("📁 Dusre folder me le jao…", "📁 Move to another folder…"),
                            lambda: self._bulk_move(sel_files, copy=False))
             menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
@@ -19845,6 +20212,9 @@ if the toggle is ticked).</p>
                                  lambda p=path: self._open_path(os.path.dirname(p)))
                     # ---- (v316) Poore PDF Tools submenu (extract/rotate/split…) ----
                     self._add_pdf_tools_menu(menu, path)
+                if path.lower().endswith(self._IMG_EXTS):
+                    # ---- (v322) Image Tools submenu (compress/resize/deskew…) ----
+                    self._add_image_tools_menu(menu, path)
                 menu.addAction("📝 " + (self.L("Note badlo…", "Edit note…") if self._file_note(path)
                                         else self.L("Note lagao…", "Add note…")),
                                lambda: self._edit_note(path))
@@ -19921,6 +20291,9 @@ if the toggle is ticked).</p>
                                       "🗜 Compress %d PDFs…" % _npdf),
                                lambda: self._bulk_compress(files))
                 self._add_pdf_tools_bulk(menu, _pdfsel)
+            _imgsel = [f for f in files if f.lower().endswith(self._IMG_EXTS)]
+            if len(_imgsel) > 1:
+                self._add_image_tools_bulk(menu, _imgsel)
             menu.addAction(self.L("📁 Dusre folder me le jao…", "📁 Move to another folder…"),
                            lambda: self._bulk_move(files, copy=False))
             menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
@@ -19945,6 +20318,8 @@ if the toggle is ticked).</p>
                 menu.addAction("🗜 " + self.L("Compress…", "Compress…"),
                                lambda: self.compress_pdf_tool(path))
                 self._add_pdf_tools_menu(menu, path)
+            if path.lower().endswith(self._IMG_EXTS):
+                self._add_image_tools_menu(menu, path)
             menu.addAction("📱 " + self.L("Phone ko bhejo", "Send to phone"),
                            lambda: self._send_files_to_phone([path]))
             menu.addAction("🏷 " + self.L("Tag lagao…", "Add tag…"), lambda: self.tag_pdf(path))

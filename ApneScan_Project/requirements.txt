@@ -10,6 +10,8 @@ pywin32
 pytwain
 python-docx
 qrcode
+# HEIC/HEIF (iPhone photos) -> JPG ke liye
+pillow-heif
 # behtar PDF import/render (sirf 64-bit — 32-bit ka wheel nahi milta)
 PyMuPDF; platform_machine == "AMD64" or platform_machine == "x86_64"
 # optional: PyMuPDF  (behtar PDF import ke liye)
