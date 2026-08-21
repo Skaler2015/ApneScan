@@ -83,6 +83,8 @@ from apnescan_lib.ocr_text import (
 # File Search Engine — Everything-style instant search for the My Files panel
 # (normalise / tokenize / partial+number+fuzzy match / rank / filters / cache).
 from apnescan_lib.file_search import SearchEngine as FileSearchEngine, ENGINE as _search_engine
+# PDF tools engine — file→file operations for the My Files right-click menu.
+from apnescan_lib import pdf_tools as _pdftools
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
@@ -250,7 +252,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "315"
+VERSION = "316"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -18924,6 +18926,266 @@ if the toggle is ticked).</p>
         except Exception:
             pass
 
+    # ==================================================================
+    #  (v316) PDF TOOLS — My Files right-click ke liye (file->file).
+    #  Engine: apnescan_lib/pdf_tools.py. Asli file kabhi nahi badalti;
+    #  har tool NAYI file banata hai (ya folder me images).
+    # ==================================================================
+    def _pdf_out(self, src, tag, ext=".pdf"):
+        d = os.path.dirname(src)
+        base = os.path.splitext(os.path.basename(src))[0]
+        return self._unique_fs_path(os.path.join(d, "%s %s%s" % (base, tag, ext)))
+
+    def _pdf_run(self, job, label, open_folder=None):
+        """PDF-tool ko BACKGROUND me chalao; done par toast + files refresh."""
+        def done(res):
+            if isinstance(res, Exception):
+                self._warn(self.L("PDF tool nahi chala:\n%s", "PDF tool failed:\n%s") % res)
+                return
+            try:
+                self._invalidate_files_index()
+                self._refresh_files_root()
+            except Exception:
+                pass
+            self._toast(self.L("✓ %s ban gaya" % label, "✓ %s created" % label))
+            if open_folder:
+                try:
+                    self._open_path(open_folder)
+                except Exception:
+                    pass
+        self._run_bg(job, done, self.L("PDF par kaam ho raha…", "Working on the PDF…"))
+
+    def _pdf_ask_range(self, path, title):
+        try:
+            total = _pdftools.page_count(path)
+        except Exception:
+            total = 0
+        txt, ok = QtWidgets.QInputDialog.getText(
+            self, title,
+            self.L("Kaun se page? (jaise 3-5, 8, 11-)   [kul %d]" % total,
+                   "Which pages? (e.g. 3-5, 8, 11-)   [of %d]" % total))
+        if not ok:
+            return None
+        idx = _pdftools.parse_ranges(txt, total)
+        if not idx:
+            self._warn(self.L("Koi sahi page number nahi mila.", "No valid page numbers."))
+            return None
+        return idx
+
+    def _pdf_extract(self, path):
+        idx = self._pdf_ask_range(path, self.L("Page nikaalo", "Extract pages"))
+        if idx is None:
+            return
+        out = self._pdf_out(path, self.L("(chune page)", "(pages)"))
+        self._pdf_run(lambda: _pdftools.extract_pages(path, out, idx),
+                      self.L("Chune page", "Extracted pages"))
+
+    def _pdf_delete_pages(self, path):
+        idx = self._pdf_ask_range(path, self.L("Page hatao", "Delete pages"))
+        if idx is None:
+            return
+        out = self._pdf_out(path, self.L("(page hataye)", "(trimmed)"))
+        self._pdf_run(lambda: _pdftools.delete_pages(path, out, idx),
+                      self.L("Page-hatai PDF", "Trimmed PDF"))
+
+    def _pdf_rotate(self, path, deg):
+        out = self._pdf_out(path, self.L("(ghumaya)", "(rotated)"))
+        self._pdf_run(lambda: _pdftools.rotate_pdf(path, out, deg),
+                      self.L("Ghumayi PDF", "Rotated PDF"))
+
+    def _pdf_split_each(self, path):
+        d = os.path.dirname(path)
+        base = os.path.splitext(os.path.basename(path))[0]
+        self._pdf_run(lambda: _pdftools.split_each_page(path, d, base + " page"),
+                      self.L("Har page ki alag PDF", "One PDF per page"))
+
+    def _pdf_split_n(self, path):
+        n, ok = QtWidgets.QInputDialog.getInt(
+            self, self.L("Har kitne page ka tukda?", "Pages per part?"),
+            self.L("Har kitne page ki ek PDF:", "How many pages per PDF:"), 2, 1, 500)
+        if not ok:
+            return
+        d = os.path.dirname(path)
+        base = os.path.splitext(os.path.basename(path))[0]
+        self._pdf_run(lambda: _pdftools.split_every_n(path, d, base, n),
+                      self.L("Bantwa hui PDF", "Split PDFs"))
+
+    def _pdf_grayscale(self, path):
+        out = self._pdf_out(path, self.L("(B&W)", "(grayscale)"))
+        self._pdf_run(lambda: _pdftools.grayscale_pdf(path, out),
+                      self.L("Black & White PDF", "Grayscale PDF"))
+
+    def _pdf_crop(self, path):
+        out = self._pdf_out(path, self.L("(crop)", "(cropped)"))
+        self._pdf_run(lambda: _pdftools.crop_margins(path, out),
+                      self.L("Crop ki PDF", "Cropped PDF"))
+
+    def _pdf_repair(self, path):
+        out = self._pdf_out(path, self.L("(theek)", "(repaired)"))
+        self._pdf_run(lambda: _pdftools.repair_pdf(path, out),
+                      self.L("Theek ki PDF", "Repaired PDF"))
+
+    def _pdf_flatten(self, path):
+        out = self._pdf_out(path, self.L("(flat)", "(flat)"))
+        self._pdf_run(lambda: _pdftools.flatten_pdf(path, out),
+                      self.L("Flatten PDF", "Flattened PDF"))
+
+    def _pdf_protect(self, path):
+        pw, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Password lagao", "Protect with password"),
+            self.L("Naya password:", "New password:"), QtWidgets.QLineEdit.Password)
+        pw = (pw or "").strip()
+        if not ok or not pw:
+            return
+        out = self._pdf_out(path, self.L("(lock)", "(locked)"))
+        self._pdf_run(lambda: _pdftools.protect_pdf(path, out, pw),
+                      self.L("Password-lock PDF", "Password-locked PDF"))
+
+    def _pdf_to_png(self, path):
+        d = os.path.dirname(path)
+        base = os.path.splitext(os.path.basename(path))[0]
+        self._pdf_run(lambda: _pdftools.pdf_to_png(path, d, base, dpi=200),
+                      self.L("PNG images", "PNG images"), open_folder=d)
+
+    def _pdf_extract_images(self, path):
+        d = os.path.dirname(path)
+        base = os.path.splitext(os.path.basename(path))[0]
+        def job():
+            imgs = _pdftools.extract_images(path, d, base)
+            if not imgs:
+                raise RuntimeError(self.L("Is PDF me embedded image nahi mili.",
+                                          "No embedded images in this PDF."))
+            return imgs
+        self._pdf_run(job, self.L("Nikaali images", "Extracted images"), open_folder=d)
+
+    def _pdf_nup(self, path, per):
+        out = self._pdf_out(path, "(%d-up)" % per)
+        self._pdf_run(lambda: _pdftools.n_up(path, out, per),
+                      self.L("%d-in-1 PDF" % per, "%d-in-1 PDF" % per))
+
+    def _pdf_remove_password(self, path):
+        pw, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Password hatao", "Remove password"),
+            self.L("Is PDF ka password:", "This PDF's password:"),
+            QtWidgets.QLineEdit.Password)
+        if not ok:
+            return
+        out = self._pdf_out(path, self.L("(bina-lock)", "(unlocked)"))
+        self._pdf_run(lambda: _pdftools.remove_password(path, out, pw or ""),
+                      self.L("Bina-password PDF", "Unlocked PDF"))
+
+    def _pdf_watermark(self, path):
+        txt, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Watermark", "Watermark"),
+            self.L("Kya likhein? (jaise COPY / clinic naam):",
+                   "What to write? (e.g. COPY / clinic name):"),
+            text=self.L("COPY", "COPY"))
+        txt = (txt or "").strip()
+        if not ok or not txt:
+            return
+        out = self._pdf_out(path, self.L("(watermark)", "(watermark)"))
+        self._pdf_run(lambda: _pdftools.watermark_file(path, out, txt),
+                      self.L("Watermark PDF", "Watermarked PDF"))
+
+    def _pdf_page_numbers(self, path):
+        hdr, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Page number", "Page numbers"),
+            self.L("Upar header text? (khaali bhi chhod sakte ho):",
+                   "Header text on top? (can leave empty):"))
+        if not ok:
+            return
+        out = self._pdf_out(path, self.L("(page number)", "(numbered)"))
+        self._pdf_run(lambda: _pdftools.page_numbers_file(path, out, (hdr or "").strip()),
+                      self.L("Page-number PDF", "Numbered PDF"))
+
+    def _add_pdf_tools_menu(self, menu, path):
+        """Ek PDF par '📄 PDF Tools' submenu."""
+        pt = menu.addMenu("📄 " + self.L("PDF Tools", "PDF Tools"))
+        L = self.L
+        pt.addAction("✂ " + L("Page nikaalo (extract)…", "Extract pages…"),
+                     lambda: self._pdf_extract(path))
+        pt.addAction("🗑 " + L("Page hatao…", "Delete pages…"),
+                     lambda: self._pdf_delete_pages(path))
+        rm = pt.addMenu("🔄 " + L("Ghumao (rotate)", "Rotate"))
+        rm.addAction("↻ 90°", lambda: self._pdf_rotate(path, 90))
+        rm.addAction("↺ 270°", lambda: self._pdf_rotate(path, 270))
+        rm.addAction("⤾ 180°", lambda: self._pdf_rotate(path, 180))
+        sm = pt.addMenu("🪓 " + L("Bantwa (split)", "Split"))
+        sm.addAction(L("Har page alag PDF", "Each page → own PDF"),
+                     lambda: self._pdf_split_each(path))
+        sm.addAction(L("Har N page ka tukda…", "Every N pages…"),
+                     lambda: self._pdf_split_n(path))
+        pt.addAction("🧩 " + L("Compress (chhoti karo)…", "Compress…"),
+                     lambda: self.compress_pdf_tool(path))
+        pt.addAction("⬛ " + L("Black & White banao", "Make grayscale/B&W"),
+                     lambda: self._pdf_grayscale(path))
+        pt.addAction("✂ " + L("Crop (khaali kinare kaato)", "Crop margins"),
+                     lambda: self._pdf_crop(path))
+        pt.addAction("🗞 " + L("2-in-1 (2 page ek sheet)", "2-up (2 per sheet)"),
+                     lambda: self._pdf_nup(path, 2))
+        pt.addAction("🗞 " + L("4-in-1", "4-up"), lambda: self._pdf_nup(path, 4))
+        pt.addSeparator()
+        pt.addAction("🔒 " + L("Password lagao…", "Protect (password)…"),
+                     lambda: self._pdf_protect(path))
+        pt.addAction("🔓 " + L("Password hatao…", "Remove password…"),
+                     lambda: self._pdf_remove_password(path))
+        pt.addAction("🧽 " + L("Metadata hatao (anonymize)", "Anonymize (metadata)"),
+                     lambda: self._pdf_anonymize_for(path))
+        pt.addSeparator()
+        pt.addAction("💧 " + L("Watermark lagao…", "Watermark…"),
+                     lambda: self._pdf_watermark(path))
+        pt.addAction("🔢 " + L("Page number lagao…", "Add page numbers…"),
+                     lambda: self._pdf_page_numbers(path))
+        pt.addAction("🛠 " + L("Theek karo (repair)", "Repair"),
+                     lambda: self._pdf_repair(path))
+        pt.addAction("📌 " + L("Flatten (pakka karo)", "Flatten"),
+                     lambda: self._pdf_flatten(path))
+        pt.addSeparator()
+        pt.addAction("🖼 " + L("PDF → PNG images", "PDF → PNG images"),
+                     lambda: self._pdf_to_png(path))
+        pt.addAction("🖼 " + L("Andar ki images nikaalo", "Extract images"),
+                     lambda: self._pdf_extract_images(path))
+        pt.addAction("📝 " + L("PDF → Word", "PDF → Word"),
+                     lambda: self.pdf_to_word(path))
+        pt.addAction("📊 " + L("PDF → Excel", "PDF → Excel"),
+                     lambda: self.pdf_to_excel(path))
+        return pt
+
+    def _add_pdf_tools_bulk(self, menu, pdfs):
+        """Kai PDF par: har ek par same tool (loop)."""
+        L = self.L
+        pt = menu.addMenu("📄 " + L("PDF Tools (har ek par)", "PDF Tools (each)"))
+
+        def _each(fn, label):
+            def run():
+                def job():
+                    n = 0
+                    for p in pdfs:
+                        try:
+                            fn(p); n += 1
+                        except Exception:
+                            pass
+                    return n
+                def done(res):
+                    try:
+                        self._invalidate_files_index(); self._refresh_files_root()
+                    except Exception:
+                        pass
+                    self._toast(L("✓ %d PDF: %s" % (res, label), "✓ %d PDFs: %s" % (res, label)))
+                self._run_bg(job, done, L("PDF par kaam…", "Working on PDFs…"))
+            return run
+        pt.addAction("⬛ " + L("Black & White", "Grayscale/B&W"),
+                     _each(lambda p: _pdftools.grayscale_pdf(p, self._pdf_out(p, "(B&W)")), L("B&W", "grayscale")))
+        pt.addAction("↻ " + L("90° ghumao", "Rotate 90°"),
+                     _each(lambda p: _pdftools.rotate_pdf(p, self._pdf_out(p, "(ghumaya)"), 90), L("ghumaya", "rotated")))
+        pt.addAction("✂ " + L("Crop kinare", "Crop margins"),
+                     _each(lambda p: _pdftools.crop_margins(p, self._pdf_out(p, "(crop)")), L("crop", "cropped")))
+        pt.addAction("📌 " + L("Flatten", "Flatten"),
+                     _each(lambda p: _pdftools.flatten_pdf(p, self._pdf_out(p, "(flat)")), L("flatten", "flattened")))
+        pt.addAction("🛠 " + L("Repair", "Repair"),
+                     _each(lambda p: _pdftools.repair_pdf(p, self._pdf_out(p, "(theek)")), L("repair", "repaired")))
+        return pt
+
     def _files_tree_menu(self, pos):
         idx = self.files_tree.indexAt(pos)
         menu = QtWidgets.QMenu(self)
@@ -18945,11 +19207,14 @@ if the toggle is ticked).</p>
             menu.addAction("🏷 " + self.L("%d files par tag…" % len(sel_files),
                                           "Tag %d files…" % len(sel_files)),
                            lambda: self._bulk_tag(sel_files))
-            _npdf = len([f for f in sel_files if f.lower().endswith(".pdf")])
+            _pdfsel = [f for f in sel_files if f.lower().endswith(".pdf")]
+            _npdf = len(_pdfsel)
             if _npdf:
                 menu.addAction(self.L("🗜 %d PDF ek saath compress… (custom size)" % _npdf,
                                       "🗜 Compress %d PDFs together… (custom size)" % _npdf),
                                lambda: self._bulk_compress(sel_files))
+                # (v316) har PDF par same tool (B&W/rotate/crop/flatten/repair)
+                self._add_pdf_tools_bulk(menu, _pdfsel)
             menu.addAction(self.L("📁 Dusre folder me le jao…", "📁 Move to another folder…"),
                            lambda: self._bulk_move(sel_files, copy=False))
             menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
@@ -19030,6 +19295,8 @@ if the toggle is ticked).</p>
                     tm.addAction("📂 " + self.L("Folder kholo (file drag karne ke liye)",
                                                 "Open folder (to drag the file)"),
                                  lambda p=path: self._open_path(os.path.dirname(p)))
+                    # ---- (v316) Poore PDF Tools submenu (extract/rotate/split…) ----
+                    self._add_pdf_tools_menu(menu, path)
                 menu.addAction("📝 " + (self.L("Note badlo…", "Edit note…") if self._file_note(path)
                                         else self.L("Note lagao…", "Add note…")),
                                lambda: self._edit_note(path))
@@ -19099,11 +19366,13 @@ if the toggle is ticked).</p>
             menu.addAction("🏷 " + self.L("%d files par tag…" % len(files),
                                           "Tag %d files…" % len(files)),
                            lambda: self._bulk_tag(files))
-            _npdf = len([f for f in files if f.lower().endswith(".pdf")])
+            _pdfsel = [f for f in files if f.lower().endswith(".pdf")]
+            _npdf = len(_pdfsel)
             if _npdf:
                 menu.addAction(self.L("🗜 %d PDF compress…" % _npdf,
                                       "🗜 Compress %d PDFs…" % _npdf),
                                lambda: self._bulk_compress(files))
+                self._add_pdf_tools_bulk(menu, _pdfsel)
             menu.addAction(self.L("📁 Dusre folder me le jao…", "📁 Move to another folder…"),
                            lambda: self._bulk_move(files, copy=False))
             menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
@@ -19127,6 +19396,7 @@ if the toggle is ticked).</p>
                 menu.addAction("✉ Email", lambda: self.share_email(path))
                 menu.addAction("🗜 " + self.L("Compress…", "Compress…"),
                                lambda: self.compress_pdf_tool(path))
+                self._add_pdf_tools_menu(menu, path)
             menu.addAction("📱 " + self.L("Phone ko bhejo", "Send to phone"),
                            lambda: self._send_files_to_phone([path]))
             menu.addAction("🏷 " + self.L("Tag lagao…", "Add tag…"), lambda: self.tag_pdf(path))
@@ -23399,12 +23669,12 @@ if the toggle is ticked).</p>
                 texts.append("")
         return texts
 
-    def pdf_to_word(self):
-        """Pages/PDF ka text OCR karke Word (.docx) file banao."""
+    def pdf_to_word(self, src=None):
+        """Pages/PDF ka text OCR karke Word (.docx) file banao.
+        src diya ho (My Files right-click) to seedha usi PDF par kaam."""
         if not tesseract_available():
             self._warn("This needs Tesseract OCR."); return
-        src = None
-        if not self._ordered_paths():
+        if not src and not self._ordered_paths():
             src = self._pick_pdf('Which PDF to convert to Word?')
             if not src:
                 return
@@ -23437,12 +23707,12 @@ if the toggle is ticked).</p>
             QtWidgets.QMessageBox.information(self, "Done", "File created:\n%s" % res)
         self._run_bg(job, done, "Creating Word… (OCR running)")
 
-    def pdf_to_excel(self):
-        """Bill/table wale pages ko OCR karke Excel me nikaalo (best-effort)."""
+    def pdf_to_excel(self, src=None):
+        """Bill/table wale pages ko OCR karke Excel me nikaalo (best-effort).
+        src diya ho (My Files right-click) to seedha usi PDF par kaam."""
         if not tesseract_available() or not HAS_XLSX:
             self._warn("This needs Tesseract OCR + openpyxl."); return
-        src = None
-        if not self._ordered_paths():
+        if not src and not self._ordered_paths():
             src = self._pick_pdf('Which PDF to convert to Excel?')
             if not src:
                 return
