@@ -254,7 +254,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "319"
+VERSION = "320"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8113,6 +8113,8 @@ class PdfTextEditDialog(QtWidgets.QDialog):
         self.dirty = False
         self._editor = None
         self._edit_span = None
+        # scanned edits ke liye naye text ka font-parivaar (document se milane ko)
+        self.font_family = "serif"           # zyadatar chhape documents serif hote
         L = parent.L
         self.setWindowTitle(
             (L("Scan PDF text badlo (OCR) — %s", "Edit scanned PDF text (OCR) — %s")
@@ -8142,6 +8144,20 @@ class PdfTextEditDialog(QtWidgets.QDialog):
         b_find.clicked.connect(self._find_replace)
         bar.addWidget(self.b_prev); bar.addWidget(self.lbl_page); bar.addWidget(self.b_next)
         bar.addStretch(1)
+        if scanned:
+            # naye text ka font document se milane ke liye (serif/sans/mono)
+            bar.addWidget(QtWidgets.QLabel(L("Font:", "Font:")))
+            self.cmb_font = QtWidgets.QComboBox()
+            self.cmb_font.addItem(L("Serif (chhapa/Times jaisa)", "Serif (Times-like)"), "serif")
+            self.cmb_font.addItem(L("Sans (saada/Arial jaisa)", "Sans (Arial-like)"), "sans")
+            self.cmb_font.addItem(L("Mono (typewriter)", "Mono (typewriter)"), "mono")
+            self.cmb_font.setCurrentIndex(0)
+            self.cmb_font.currentIndexChanged.connect(self._on_font_changed)
+            self.cmb_font.setToolTip(L(
+                "Naye text ka font document ke akshar se milaao.",
+                "Match the new text's font to the document."))
+            bar.addWidget(self.cmb_font)
+            bar.addSpacing(8)
         bar.addWidget(b_zout); bar.addWidget(b_zin)
         bar.addSpacing(10); bar.addWidget(b_find)
         v.addLayout(bar)
@@ -8205,6 +8221,17 @@ class PdfTextEditDialog(QtWidgets.QDialog):
         self.b_prev.setEnabled(self.page_no > 0)
         self.b_next.setEnabled(self.page_no < self.doc.page_count - 1)
         self._kill_editor()
+
+    def _on_font_changed(self, _idx):
+        self.font_family = self.cmb_font.currentData() or "serif"
+
+    def _font_name(self):
+        """Scanned edit ke liye base-14 font naam (document se milane ko).
+        Digital edit ke liye None (asli span ke flags se decide hota)."""
+        if not self.scanned:
+            return None
+        return {"serif": "tiro", "sans": "helv", "mono": "cour"}.get(
+            self.font_family, "tiro")
 
     def _page_spans(self, pno):
         """Digital PDF: asli text spans. Scanned PDF: OCR se line-spans
@@ -8294,7 +8321,8 @@ class PdfTextEditDialog(QtWidgets.QDialog):
         try:
             _pdftext.replace_span(self.doc, self.page_no, sp, new,
                                   scanned=self.scanned,
-                                  fill=sp.get("fill", (1, 1, 1)))
+                                  fill=sp.get("fill", (1, 1, 1)),
+                                  fontname=self._font_name())
             # scan-mode: cache me is line ka text update kar do
             if self.scanned:
                 sp["text"] = new
@@ -8338,7 +8366,8 @@ class PdfTextEditDialog(QtWidgets.QDialog):
                         newt = sp["text"].replace(find, repl)
                         _pdftext.replace_span(self.doc, pno, sp, newt,
                                               scanned=self.scanned,
-                                              fill=sp.get("fill", (1, 1, 1)))
+                                              fill=sp.get("fill", (1, 1, 1)),
+                                              fontname=self._font_name())
                         if self.scanned:
                             sp["text"] = newt
                         n += 1
@@ -19539,6 +19568,28 @@ if the toggle is ticked).</p>
         except Exception:
             return (1, 1, 1)
 
+    def _sample_ink(self, img, x0, y0, x1, y1):
+        """Line-box ke andar ke SABSE GEHRE (ink) pixels ka median rang —
+        naya text isi shade (aksar dark-gray, pure black nahi) me aata hai
+        taaki purani likhawat se mel khaaye. int 0xRRGGBB lauta."""
+        try:
+            W, H = img.size
+            c = img.crop((max(0, x0), max(0, y0),
+                          min(W, x1), min(H, y1))).convert("RGB")
+            if c.width < 2 or c.height < 2:
+                return 0
+            arr = np.asarray(c).reshape(-1, 3).astype(np.float32)
+            lum = arr[:, 0] * 0.299 + arr[:, 1] * 0.587 + arr[:, 2] * 0.114
+            thr = np.percentile(lum, 20)          # sabse gehre ~20% = ink
+            mask = lum <= max(thr, 10)
+            if mask.sum() < 5:
+                return 0
+            med = np.median(arr[mask], axis=0)
+            r, g, b = (int(round(v)) for v in med)
+            return (r << 16) | (g << 8) | b
+        except Exception:
+            return 0
+
     def _ocr_line_spans(self, doc, page_no, dpi=200):
         """Scanned page par OCR chalakar LINE-wise editable spans banao.
         Har span: {id, text, bbox(pt), size, flags, color, origin, fill}.
@@ -19548,7 +19599,8 @@ if the toggle is ticked).</p>
         pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
         img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
         data = pytesseract.image_to_data(
-            img, lang="eng+hin", output_type=pytesseract.Output.DICT)
+            img, lang="eng+hin", config="--psm 6",
+            output_type=pytesseract.Output.DICT)
         lines = {}
         n = len(data["text"])
         for i in range(n):
@@ -19572,8 +19624,10 @@ if the toggle is ticked).</p>
             x0 = min(t[0] for t in ws); y0 = min(t[1] for t in ws)
             x1 = max(t[0] + t[2] for t in ws); y1 = max(t[1] + t[3] for t in ws)
             fill = self._sample_bg(img, x0, y0, x1, y1)
+            ink = self._sample_ink(img, x0, y0, x1, y1)
+            # size = akshar ki oonchai (cap-height) se — mel khaati rahe
             h_pt = (y1 - y0) / zoom
-            size = max(6.0, h_pt * 0.86)
+            size = max(6.0, h_pt * 0.92)
             bx0, by0 = x0 / zoom, y0 / zoom
             bx1, by1 = x1 / zoom, y1 / zoom
             spans.append({
@@ -19582,9 +19636,9 @@ if the toggle is ticked).</p>
                 "bbox": (bx0, by0, bx1, by1),
                 "size": size,
                 "flags": 0,
-                "color": 0,                  # scanned text -> kaala maano
+                "color": ink,                # asli syahi ka shade
                 "font": "",
-                "origin": (bx0, by1 - h_pt * 0.18),
+                "origin": (bx0, by1 - h_pt * 0.20),
                 "fill": fill,
             })
         return spans

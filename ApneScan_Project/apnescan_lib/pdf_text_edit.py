@@ -100,7 +100,7 @@ def _find_span(doc, page_no, span_id):
 
 
 def replace_span(doc, page_no, span, new_text, fit=True,
-                 scanned=False, fill=(1, 1, 1)):
+                 scanned=False, fill=(1, 1, 1), fontname=None):
     """Ek span (purana text) ko new_text se badlo — usi jagah, usi size/rang.
     span = page_spans() (digital) ya OCR-span (scanned) dict.
 
@@ -134,7 +134,9 @@ def replace_span(doc, page_no, span, new_text, fit=True,
         return                              # sirf mitana tha
 
     size = span["size"]
-    fontname = _base14_for(span["flags"])
+    # fontname override (scanned me document ka serif/sans match karne ke liye)
+    if not fontname:
+        fontname = _base14_for(span["flags"])
     color = _color_rgb(span["color"])
     origin = fitz.Point(span["origin"])
 
