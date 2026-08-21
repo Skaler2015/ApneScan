@@ -134,6 +134,15 @@ jobs:
         run: |
           if [ -n "${{ secrets.FTP_SERVER }}" ] && [ -n "${{ secrets.FTP_USERNAME }}" ] && [ -n "${{ secrets.FTP_PASSWORD }}" ]; then
             echo "have=yes" >> "$GITHUB_OUTPUT"
+            # FTP_SERVER ko saaf karo: 'ftp://'/'ftps://' prefix, koi path aur
+            # aas-paas ki space hata do (Hostinger 'ftp://82.180.164.152' dikhata
+            # hai — prefix rehne par getaddrinfo ENOTFOUND aata hai).
+            host="${{ secrets.FTP_SERVER }}"
+            host="${host#ftp://}"; host="${host#ftps://}"; host="${host#sftp://}"
+            host="${host%%/*}"
+            host="$(printf '%s' "$host" | tr -d '[:space:]')"
+            echo "::add-mask::$host"
+            echo "host=$host" >> "$GITHUB_OUTPUT"
           else
             echo "have=no" >> "$GITHUB_OUTPUT"
             echo "::notice title=Website upload skipped::FTP secrets (FTP_SERVER/FTP_USERNAME/FTP_PASSWORD) set nahi hain. Site build ho gayi par Hostinger par upload nahi hui. Settings > Secrets and variables > Actions me ye 3 secrets daalein — phir apne-aap deploy hone lagega."
@@ -143,7 +152,7 @@ jobs:
         if: steps.ftp.outputs.have == 'yes'
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
-          server: ${{ secrets.FTP_SERVER }}
+          server: ${{ steps.ftp.outputs.host }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
