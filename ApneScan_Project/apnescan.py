@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "328"
+VERSION = "329"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8523,6 +8523,244 @@ class PdfTextEditDialog(QtWidgets.QDialog):
         except Exception:
             pass
         super().closeEvent(e)
+
+
+class SavePreviewDialog(QtWidgets.QDialog):
+    """(v329) Thumbnail → My Files drop par SAVE se PEHLE preview.
+    Har banne wali PDF ka NAAM (badla ja sake) + anumaanit SIZE dikhata hai;
+    kisi ki 'max size' (KB) khud likho to us se KAM ki PDF banti hai.
+    Colour/Gray/B&W, sab ek PDF ya alag, kul-size meter, duplicate-check."""
+
+    def __init__(self, app, folder, docs):
+        super().__init__(app)
+        self.app = app
+        self.folder = folder
+        # docs: list of {"name": str, "paths": [page paths]}
+        self.docs = [dict(d) for d in docs]
+        self._est = {}            # index -> HD size (bytes) ya None (compute ho raha)
+        L = app.L
+        self.setWindowTitle(L("Save — pehle dekho", "Save — preview"))
+        self.resize(620, 500)
+        v = QtWidgets.QVBoxLayout(self)
+        v.setSpacing(9)
+
+        hdr = QtWidgets.QLabel(L(
+            "💾 %d document save honge  ·  folder: %s" % (len(self.docs), os.path.basename(folder) or folder),
+            "💾 Saving %d document(s)  ·  folder: %s" % (len(self.docs), os.path.basename(folder) or folder)))
+        hdr.setStyleSheet("font-weight:700;font-size:14px;")
+        v.addWidget(hdr)
+
+        # ---- global bar: colour + preset max-size + one-PDF ----
+        gb = QtWidgets.QHBoxLayout(); gb.setSpacing(6)
+        gb.addWidget(QtWidgets.QLabel(L("Rang:", "Colour:")))
+        self.cmb_colour = QtWidgets.QComboBox()
+        self.cmb_colour.addItems([L("Colour", "Colour"), L("Grayscale", "Grayscale"),
+                                  L("Black & White", "Black & White")])
+        gb.addWidget(self.cmb_colour)
+        gb.addSpacing(8)
+        gb.addWidget(QtWidgets.QLabel(L("Sabki max:", "Max (all):")))
+        for kb, lbl in ((0, L("No limit", "No limit")), (200, "200KB"),
+                        (500, "500KB"), (1024, "1MB")):
+            b = QtWidgets.QPushButton(lbl)
+            b.setCursor(QtCore.Qt.PointingHandCursor)
+            b.setStyleSheet("QPushButton{font-size:11px;padding:4px 9px;border:1px solid #cbd5e1;"
+                            "border-radius:12px;}QPushButton:hover{border-color:#0D9488;}")
+            b.clicked.connect(lambda _c=False, k=kb: self._apply_preset(k))
+            gb.addWidget(b)
+        gb.addStretch(1)
+        v.addLayout(gb)
+        _o2 = QtWidgets.QHBoxLayout()
+        self.chk_one = QtWidgets.QCheckBox(L("Sab ek hi PDF me", "All in one PDF"))
+        self.chk_one.setChecked(len(self.docs) == 1)
+        self.chk_one.setEnabled(len(self.docs) > 1)
+        self.chk_pw = QtWidgets.QCheckBox(L("Password lagao", "Password-protect"))
+        _o2.addWidget(self.chk_one); _o2.addWidget(self.chk_pw); _o2.addStretch(1)
+        v.addLayout(_o2)
+
+        # ---- doc rows ----
+        area = QtWidgets.QScrollArea(); area.setWidgetResizable(True)
+        area.setStyleSheet("QScrollArea{border:1px solid #e2e8f0;border-radius:8px;}")
+        inner = QtWidgets.QWidget()
+        il = QtWidgets.QVBoxLayout(inner); il.setSpacing(6); il.setContentsMargins(6, 6, 6, 6)
+        self._rows = []
+        for i, d in enumerate(self.docs):
+            il.addWidget(self._make_row(i, d))
+        il.addStretch(1)
+        area.setWidget(inner)
+        v.addWidget(area, 1)
+
+        # ---- total + buttons ----
+        self.lbl_total = QtWidgets.QLabel("")
+        self.lbl_total.setStyleSheet("color:#475569;font-size:12px;")
+        v.addWidget(self.lbl_total)
+        bb = QtWidgets.QHBoxLayout(); bb.addStretch(1)
+        b_cancel = QtWidgets.QPushButton(L("Radd", "Cancel"))
+        b_cancel.clicked.connect(self.reject)
+        self.b_save = QtWidgets.QPushButton(L("💾 Save", "💾 Save"))
+        self.b_save.setStyleSheet("QPushButton{background:#0D9488;color:#fff;font-weight:700;"
+                                  "padding:8px 20px;border-radius:8px;}"
+                                  "QPushButton:hover{background:#0B8276;}")
+        self.b_save.clicked.connect(self._do_save)
+        bb.addWidget(b_cancel); bb.addWidget(self.b_save)
+        v.addLayout(bb)
+
+        # sizes background me estimate karo
+        QtCore.QTimer.singleShot(60, self._estimate_all)
+
+    # ---------- row ----------
+    def _make_row(self, i, d):
+        L = self.app.L
+        w = QtWidgets.QFrame()
+        w.setStyleSheet("QFrame{border:1px solid #e5e7eb;border-radius:9px;}")
+        h = QtWidgets.QHBoxLayout(w); h.setContentsMargins(9, 7, 9, 7); h.setSpacing(9)
+        mid = QtWidgets.QVBoxLayout(); mid.setSpacing(3)
+        ed = QtWidgets.QLineEdit((d.get("name") or "").strip())
+        ed.setPlaceholderText(L("File ka naam…", "File name…"))
+        ed.setStyleSheet("border:1px solid #cbd5e1;border-radius:6px;padding:4px 7px;font-weight:600;")
+        mid.addWidget(ed)
+        meta = QtWidgets.QLabel(L("%d page  ·  size gin rahe…" % len(d["paths"]),
+                                  "%d pages  ·  estimating size…" % len(d["paths"])))
+        meta.setStyleSheet("color:#94a3b8;font-size:11px;border:none;")
+        mid.addWidget(meta)
+        h.addLayout(mid, 1)
+        mx = QtWidgets.QSpinBox()
+        mx.setRange(0, 51200); mx.setSingleStep(50); mx.setValue(0)
+        mx.setSpecialValueText(L("— (poora)", "— (full)"))
+        mx.setSuffix(" KB"); mx.setFixedWidth(110)
+        mx.setToolTip(L("Is PDF ki max size — 0 = koi limit nahi.\nItne KB se KAM ki PDF banegi.",
+                        "Max size for this PDF — 0 = no limit.\nThe PDF will be made SMALLER than this."))
+        mx.valueChanged.connect(lambda _v, ix=i: self._refresh_row(ix))
+        h.addWidget(mx)
+        self._rows.append({"name": ed, "meta": meta, "max": mx})
+        return w
+
+    # ---------- estimate ----------
+    def _estimate_all(self):
+        docs = self.docs
+        def job():
+            out = {}
+            for i, d in enumerate(docs):
+                try:
+                    fd, tmp = tempfile.mkstemp(suffix=".pdf"); os.close(fd)
+                    self.app._write_compressed_pdf(d["paths"], tmp, None)   # HD size
+                    out[i] = os.path.getsize(tmp)
+                    os.remove(tmp)
+                except Exception:
+                    out[i] = None
+            return out
+        def done(res):
+            if isinstance(res, Exception):
+                return
+            self._est = res
+            for i in range(len(self.docs)):
+                self._refresh_row(i)
+            self._refresh_total()
+        self.app._run_bg_quiet(job, done)
+
+    @staticmethod
+    def _pretty(b):
+        kb = b / 1024.0
+        return ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024.0))
+
+    def _refresh_row(self, i):
+        r = self._rows[i]; L = self.app.L
+        n = len(self.docs[i]["paths"])
+        est = self._est.get(i)
+        mx_kb = r["max"].value()
+        if est is None:
+            r["meta"].setText(L("%d page  ·  size gin rahe…" % n,
+                                "%d pages  ·  estimating…" % n))
+            return
+        txt = L("%d page  ·  ~%s" % (n, self._pretty(est)),
+                "%d pages  ·  ~%s" % (n, self._pretty(est)))
+        if mx_kb > 0:
+            if est <= mx_kb * 1024:
+                txt += L("  ·  limit ke andar ✓", "  ·  under limit ✓")
+            else:
+                txt += L("  ·  → ≤ %d KB banegi ✓" % mx_kb, "  ·  → will shrink under %d KB ✓" % mx_kb)
+        r["meta"].setText(txt)
+
+    def _refresh_total(self):
+        L = self.app.L
+        vals = [self._est.get(i) for i in range(len(self.docs))]
+        if any(v is None for v in vals):
+            self.lbl_total.setText(L("Kul size gin rahe…", "Estimating total…"))
+            return
+        tot = 0
+        for i, v in enumerate(vals):
+            mx = self._rows[i]["max"].value()
+            tot += min(v, mx * 1024) if mx > 0 and v > mx * 1024 else v
+        self.lbl_total.setText(L("Kul: %d PDF  ·  ~%s" % (len(self.docs), self._pretty(tot)),
+                                 "Total: %d PDF  ·  ~%s" % (len(self.docs), self._pretty(tot))))
+
+    def _apply_preset(self, kb):
+        for r in self._rows:
+            r["max"].setValue(int(kb))
+        for i in range(len(self.docs)):
+            self._refresh_row(i)
+        self._refresh_total()
+
+    # ---------- save ----------
+    def _do_save(self):
+        L = self.app.L
+        colour = ("gray" if self.cmb_colour.currentIndex() == 1
+                  else "bw" if self.cmb_colour.currentIndex() == 2 else "color")
+        one = self.chk_one.isChecked() and len(self.docs) > 1
+        pw = None
+        if self.chk_pw.isChecked():
+            pw, ok = QtWidgets.QInputDialog.getText(
+                self, L("Password", "Password"),
+                L("PDF ka password:", "PDF password:"), QtWidgets.QLineEdit.Password)
+            if not ok or not pw:
+                return
+        # rows se naam + max jama karo
+        jobs = []
+        if one:
+            allpaths = [p for d in self.docs for p in d["paths"]]
+            name = (self._rows[0]["name"].text().strip() or "scan")
+            mx = max((self._rows[i]["max"].value() for i in range(len(self.docs))), default=0)
+            jobs.append((name, allpaths, mx))
+        else:
+            for i, d in enumerate(self.docs):
+                name = (self._rows[i]["name"].text().strip() or "scan")
+                jobs.append((name, d["paths"], self._rows[i]["max"].value()))
+        folder = self.folder
+        app = self.app
+
+        def job():
+            saved = []
+            for name, paths, mx in jobs:
+                prepped = app._prep_pages_colour(paths, colour)
+                base = underscore_name(name) or "scan"
+                out = app._unique_fs_path(os.path.join(folder, base + ".pdf"))
+                limit = (mx * 1024) if mx > 0 else None
+                app._write_compressed_pdf(prepped, out, limit)
+                if pw:
+                    try:
+                        _pdftools.protect_pdf(out, out + ".p.pdf", pw)
+                        os.replace(out + ".p.pdf", out)
+                    except Exception:
+                        pass
+                saved.append(out)
+            return saved
+
+        def done(res):
+            if isinstance(res, Exception):
+                app._warn(L("Save nahi hua:\n%s", "Save failed:\n%s") % res); return
+            for s in res:
+                try:
+                    app._remember_save_dir(s); app._record_save(s, 0)
+                except Exception:
+                    pass
+            app._invalidate_files_index(); app._refresh_files_root()
+            try:
+                app._panel_show(folder)
+            except Exception:
+                pass
+            app._toast(L("✓ %d PDF save ho gayi" % len(res), "✓ Saved %d PDF(s)" % len(res)))
+        app._run_bg(job, done, L("Save ho raha hai… (size set kar rahe)",
+                                 "Saving… (applying size)"))
+        self.accept()
 
 
 class ScannerWindow(QtWidgets.QMainWindow):
@@ -19386,7 +19624,68 @@ if the toggle is ticked).</p>
             p = self._panel_current_dir()
         folder = p if os.path.isdir(p) else os.path.dirname(p)
         paths = self._selected_paths() or self._ordered_paths()
+        if not paths:
+            self._warn("Scan or import a page first."); return
+        # (v329) SAVE se PEHLE preview: naam + anumaanit size + per-file max-size.
+        # (Settings me 'save_preview' False karke seedha save wapas la sakte hain.)
+        if self._opts.get("save_preview", True):
+            try:
+                docs = self._group_pages_by_name(paths)
+                SavePreviewDialog(self, folder, docs).exec_()
+                return
+            except Exception:
+                pass          # koi dikkat -> purana seedha save
         self._save_pages_grouped(folder, paths)
+
+    def _group_pages_by_name(self, paths):
+        """Pages ko unke NAAM (title) se group karo -> [{name, paths}, …].
+        Bina-naam group ko auto-naam (build_filename) mil jaata hai."""
+        title_of = {}
+        for i in range(self.list.count()):
+            it = self.list.item(i)
+            title_of[it.data(QtCore.Qt.UserRole)] = it.data(TITLE_ROLE)
+        groups, order = [], {}
+        for p in paths:
+            t = (title_of.get(p) or "").strip()
+            key = t or "__auto__"
+            if key not in order:
+                order[key] = len(groups)
+                groups.append([t, []])
+            groups[order[key]][1].append(p)
+        out = []
+        for t, gpaths in groups:
+            if t:
+                nm = t
+            else:
+                nm = os.path.basename(self._build_filename(".pdf", paths=gpaths))
+                if nm.lower().endswith(".pdf"):
+                    nm = nm[:-4]
+            out.append({"name": nm, "paths": gpaths})
+        return out
+
+    def _prep_pages_colour(self, paths, mode):
+        """Save se pehle pages ko chune rang me badlo — 'color' (jaisa hai),
+        'gray', ya 'bw'. Naye temp images lauta (color par originals)."""
+        if mode == "color" or not paths:
+            return list(paths)
+        out = []
+        for p in paths:
+            try:
+                with Image.open(p) as im:
+                    im = im.convert("RGB")
+                    if mode == "gray":
+                        res = im.convert("L")
+                    else:                          # bw
+                        try:
+                            res = adaptive_bw(im)
+                        except Exception:
+                            res = im.convert("L")
+                    fd, tmp = tempfile.mkstemp(suffix=".png", dir=self._tmpdir); os.close(fd)
+                    res.save(tmp)
+                    out.append(tmp)
+            except Exception:
+                out.append(p)
+        return out
 
     def _save_pages_grouped(self, folder, paths):
         """Selected pages ko unke NAAM (title) ke hisaab se group karke save karo:
