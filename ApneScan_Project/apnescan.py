@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "322"
+VERSION = "323"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -14941,17 +14941,18 @@ if the toggle is ticked).</p>
         scanbar = QtWidgets.QWidget(); scanbar.setObjectName("scanbar")
         # ✨ premium scanbar: pill-style dropdowns, halka hover-glow, gradient Scan
         scanbar.setStyleSheet(
-            "#scanbar{background:#FFFFFF;border-bottom:1px solid #EEF0F4;}"
-            "#scanbar QComboBox{border:1px solid #E5E7EB;border-radius:9px;padding:5px 10px;"
-            "background:#F9FAFB;font-weight:600;color:#1F2937;font-size:12px;}"
-            "#scanbar QComboBox:hover{border-color:#C7D2FE;background:#FFFFFF;}"
-            "#scanbar QComboBox:focus{border-color:#A5B4FC;}"
+            # ✨ (v323) floating rounded CARD — mockup jaisa
+            "#scanbar{background:#FFFFFF;border:1px solid #E6E8F0;border-radius:16px;}"
+            "#scanbar QComboBox{border:1px solid #D7DBE6;border-radius:10px;padding:6px 11px;"
+            "background:#FFFFFF;font-weight:600;color:#1F2937;font-size:13px;min-height:20px;}"
+            "#scanbar QComboBox:hover{border-color:#B7BEF6;}"
+            "#scanbar QComboBox:focus{border-color:#8B93F0;}"
             "#scanbar QComboBox::drop-down{border:none;width:20px;}"
-            "#scanbar QPushButton{border:1px solid #E5E7EB;border-radius:9px;background:#F9FAFB;padding:5px 9px;}"
-            "#scanbar QPushButton:hover{border-color:#C7D2FE;background:#EEF2FF;}"
-            "#scanbar #devpill{background:#F9FAFB;border:1px solid #E5E7EB;border-radius:9px;}"
-            "#scanbar QPushButton#primary{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #4F46E5,stop:1 #7C3AED);border:none;color:#fff;font-weight:800;"
-            "font-size:13.5px;padding:10px 32px;border-radius:11px;}"
+            "#scanbar QPushButton{border:1px solid #D7DBE6;border-radius:10px;background:#FFFFFF;padding:6px 9px;}"
+            "#scanbar QPushButton:hover{border-color:#B7BEF6;background:#F3F4FF;}"
+            "#scanbar #devpill{background:#FFFFFF;border:1px solid #D7DBE6;border-radius:10px;}"
+            "#scanbar QPushButton#primary{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #6A5AE0,stop:1 #4F46E5);border:none;color:#fff;font-weight:800;"
+            "font-size:14px;padding:11px 30px;border-radius:12px;}"
             "#scanbar QPushButton#primary:hover{background:#4338CA;}"
             "#scanbar QPushButton#primary:pressed{background:#3730A3;}")
         self.left_panel = scanbar     # purane F9 / show_left_panel toggle isi par
@@ -15197,9 +15198,25 @@ if the toggle is ticked).</p>
         self.cmb_dpi.setToolTip("Resolution: lower dpi = faster scan")
         self.cmb_depth.setToolTip("Black & White is fastest, Colour is slower")
         self.setAcceptDrops(True)
-        outer.addWidget(scanbar)
-        _sbhr = QtWidgets.QFrame(); _sbhr.setObjectName("hr"); _sbhr.setFrameShape(QtWidgets.QFrame.HLine)
-        outer.addWidget(_sbhr)
+        # ✨ (v323) scanbar ko halke grey par FLOATING rounded card banao (mockup)
+        _sbwrap = QtWidgets.QWidget(); _sbwrap.setObjectName("sbwrap")
+        _sbwrap.setStyleSheet("#sbwrap{background:#F1F2F7;}")
+        _sbwl = QtWidgets.QVBoxLayout(_sbwrap)
+        _sbwl.setContentsMargins(12, 11, 12, 10); _sbwl.setSpacing(0)
+        try:
+            _sh = QtWidgets.QGraphicsDropShadowEffect(self)
+            _sh.setBlurRadius(26)
+            _sh.setColor(QtGui.QColor(30, 34, 60, 46))
+            _sh.setOffset(0, 6)
+            scanbar.setGraphicsEffect(_sh)
+        except Exception:
+            pass
+        scanbar.setVisible(True)          # wrapper ab visibility sambhaalega
+        _sbwl.addWidget(scanbar)
+        outer.addWidget(_sbwrap)
+        self.left_panel = _sbwrap         # F9 / show-hide ab poore card par
+        if not self._opts.get("show_left_panel", True):
+            _sbwrap.hide()
 
         # ---------- BODY: My Files | pages | preview — RESIZABLE splitter ----------
         spl = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
