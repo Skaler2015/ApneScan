@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "326"
+VERSION = "327"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3826,6 +3826,7 @@ class ScanProgressDialog(QtWidgets.QDialog):
         # (ulta/aadha/khaali page batch ke baad nahi, foran pata chale).
         self._kept = 0
         self._skipped = 0
+        self._bytes = 0            # (v326) ab tak bani file(on) ka kul size
         self._cancelling = False
         self._thumb = QtWidgets.QLabel()
         self._thumb.setFixedSize(160, 220)
@@ -3838,6 +3839,21 @@ class ScanProgressDialog(QtWidgets.QDialog):
         _trow = QtWidgets.QHBoxLayout(); _trow.addStretch(1)
         _trow.addWidget(self._thumb); _trow.addStretch(1)
         lay.addLayout(_trow)
+        # (v326) FILMSTRIP — ab tak ke SAB pages ki chhoti jhalak ek row me
+        # (sirf aakhri nahi — 1,2,3… jaise-jaise aate jaayein).
+        self._film_scroll = QtWidgets.QScrollArea()
+        self._film_scroll.setWidgetResizable(True)
+        self._film_scroll.setFixedHeight(60)
+        self._film_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self._film_scroll.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self._film_scroll.setStyleSheet("QScrollArea{border:none;background:transparent;}")
+        _fw = QtWidgets.QWidget()
+        self._film_row = QtWidgets.QHBoxLayout(_fw)
+        self._film_row.setContentsMargins(2, 2, 2, 2); self._film_row.setSpacing(4)
+        self._film_row.addStretch(1)
+        self._film_scroll.setWidget(_fw)
+        self._film_scroll.hide()          # pehla page aate hi dikhega
+        lay.addWidget(self._film_scroll)
         # page ka naam/number (naam mila to "Page 3 — Lab_Report")
         self._lbl_page = QtWidgets.QLabel("")
         self._lbl_page.setAlignment(QtCore.Qt.AlignCenter)
@@ -3959,6 +3975,8 @@ class ScanProgressDialog(QtWidgets.QDialog):
                 remaining = (self._total - self._pages) / (self._pages / el)
                 parts.append(("~%s left" % self._fmt_time(remaining)) if self._lang == "en"
                              else ("~%s baaki" % self._fmt_time(remaining)))
+        if getattr(self, "_bytes", 0) > 0:          # (v326) chalta file-size
+            parts.append("~%.1f MB" % (self._bytes / 1048576.0))
         self.lbl_stats.setText("  ·  ".join(parts))
 
     def set_total(self, n):
@@ -4201,6 +4219,23 @@ class ScanProgressDialog(QtWidgets.QDialog):
                 self._thumb.setText("")
                 self._thumb.setPixmap(pm.scaled(156, 216, QtCore.Qt.KeepAspectRatio,
                                                 QtCore.Qt.SmoothTransformation))
+                # (v326) filmstrip me is page ki mini-jhalak jodo
+                mini = QtWidgets.QLabel()
+                mini.setFixedSize(36, 48)
+                mini.setAlignment(QtCore.Qt.AlignCenter)
+                mini.setStyleSheet("border:1px solid #cbd5e1;border-radius:4px;background:#fff;")
+                mini.setPixmap(pm.scaled(34, 46, QtCore.Qt.KeepAspectRatio,
+                                         QtCore.Qt.SmoothTransformation))
+                mini.setToolTip(self.L2("पेज %d" % kept, "Page %d" % kept))
+                self._film_row.insertWidget(self._film_row.count() - 1, mini)
+                self._film_scroll.show()
+                _sb = self._film_scroll.horizontalScrollBar()
+                QtCore.QTimer.singleShot(0, lambda b=_sb: b.setValue(b.maximum()))
+        except Exception:
+            pass
+        # (v326) chalti file-size ginti
+        try:
+            self._bytes += os.path.getsize(path)
         except Exception:
             pass
         t = (title or "").strip()
@@ -17436,19 +17471,22 @@ if the toggle is ticked).</p>
         except Exception:
             _elapsed = 0
         _summary = self._scan_summary_text(kept, skipped, _elapsed)
-        if kept and self._progress is not None and not _was_bg:
-            # saamne tha -> summary line ~1.6s dikhao, phir band
+        # (v326) PROCESS poora hote hi dialog TURANT band — user ko manually
+        # band nahi karna padta. Summary chhote toast/tray-notification me.
+        if self._progress is not None:
             try:
-                self._progress.show_summary(_summary)
+                self._progress.close()
             except Exception:
                 pass
-            _p = self._progress; self._progress = None
-            QtCore.QTimer.singleShot(1600, lambda _p=_p: _p.close())
-        else:
-            if self._progress:
-                self._progress.close(); self._progress = None
-            if kept and _was_bg:
-                self._notify_done(_summary)   # background -> tray notification
+            self._progress = None
+        if kept:
+            if _was_bg:
+                self._notify_done(_summary)          # background -> tray notification
+            else:
+                try:
+                    self._toast(_summary)            # saamne tha -> chhota toast
+                except Exception:
+                    pass
         self._scanning = False
         self.btn_scan.setEnabled(True)
         try:
