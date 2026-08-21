@@ -124,7 +124,23 @@ jobs:
       #   FTP_USERNAME  = FTP username
       #   FTP_PASSWORD  = FTP password
       # server-dir = subdomain ka folder (Hostinger FTP home ke andar).
+      #
+      # Pehle dekho ki FTP secrets set hain ya nahi. Nahi hain to upload SKIP
+      # karo (job GREEN rahegi, laal-fail NAHI) aur ek saaf notice do — taaki
+      # "Input required and not supplied: server" wala fail na aaye. Secrets
+      # daalte hi agli baar upload apne-aap hone lagega.
+      - name: Check FTP secrets
+        id: ftp
+        run: |
+          if [ -n "${{ secrets.FTP_SERVER }}" ] && [ -n "${{ secrets.FTP_USERNAME }}" ] && [ -n "${{ secrets.FTP_PASSWORD }}" ]; then
+            echo "have=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=no" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Website upload skipped::FTP secrets (FTP_SERVER/FTP_USERNAME/FTP_PASSWORD) set nahi hain. Site build ho gayi par Hostinger par upload nahi hui. Settings > Secrets and variables > Actions me ye 3 secrets daalein — phir apne-aap deploy hone lagega."
+          fi
+
       - name: Deploy to Hostinger (apnescan.apnesoft.com) via FTP
+        if: steps.ftp.outputs.have == 'yes'
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
