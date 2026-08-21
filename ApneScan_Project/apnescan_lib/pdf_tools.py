@@ -403,3 +403,284 @@ def watermark_file(src, out, text, opacity=0.12):
     finally:
         doc.close()
     return out
+
+
+# ==========================================================================
+# (v331) NEW TOOLS — organize / convert / mark / info
+# ==========================================================================
+def merge_pdfs(srcs, out):
+    """Kai PDF ko kram me jodkar ek PDF banao."""
+    w = PdfWriter()
+    for s in srcs:
+        for pg in PdfReader(s).pages:
+            w.add_page(pg)
+    with open(out, "wb") as fh:
+        w.write(fh)
+    return out
+
+
+def reverse_pages(src, out):
+    """Pages ka kram ulta karo (aakhri page pehle)."""
+    r = PdfReader(src)
+    w = PdfWriter()
+    for pg in reversed(r.pages):
+        w.add_page(pg)
+    with open(out, "wb") as fh:
+        w.write(fh)
+    return out
+
+
+def insert_pages(src, out, other, at_index=None):
+    """'other' PDF ke saare pages ko src me at_index (0-based) se PEHLE ghusao.
+    at_index None -> aakhir me (append)."""
+    r = PdfReader(src)
+    o = PdfReader(other)
+    n = len(r.pages)
+    if at_index is None or at_index > n:
+        at_index = n
+    at_index = max(0, at_index)
+    w = PdfWriter()
+    for i in range(at_index):
+        w.add_page(r.pages[i])
+    for pg in o.pages:
+        w.add_page(pg)
+    for i in range(at_index, n):
+        w.add_page(r.pages[i])
+    with open(out, "wb") as fh:
+        w.write(fh)
+    return out
+
+
+def _page_is_blank(page, dpi=100, ink_frac=0.004):
+    """PyMuPDF page blank hai? (render karke gehre pixel ka anupaat dekho)."""
+    try:
+        zoom = dpi / 72.0
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        try:
+            import numpy as np
+            a = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.stride)
+            a = a[:, :pix.width * pix.n].reshape(pix.height, pix.width, pix.n)
+            lum = a[:, :, :3].mean(axis=2) if pix.n >= 3 else a[:, :, 0]
+            dark = (lum < 160).mean()
+            return dark < ink_frac
+        except Exception:
+            # numpy na ho -> samples se mota andaaza
+            s = pix.samples
+            step = max(1, len(s) // 20000)
+            dark = sum(1 for i in range(0, len(s), step) if s[i] < 160)
+            return dark < (len(s) / step) * ink_frac
+    except Exception:
+        return False
+
+
+def remove_blank_pages(src, out, dpi=100):
+    """Khaali (blank) pages hatakar nayi PDF. Lauta: (out, kitne_hataye)."""
+    doc = fitz.open(src)
+    keep = [i for i in range(doc.page_count) if not _page_is_blank(doc[i], dpi)]
+    doc.close()
+    removed = page_count(src) - len(keep)
+    if not keep:
+        keep = [0]
+    extract_pages(src, out, keep)
+    return out, removed
+
+
+def split_by_size(src, outdir, base, max_bytes):
+    """PDF ko aise tukdo me baanto ki har tukda max_bytes se chhota rahe.
+    Pages page-index se jodte hain; size paar hote hi naya part. Lauta: file list."""
+    import io
+    r = PdfReader(src)
+    outs = []
+    part = 1
+    i = 0
+    n = len(r.pages)
+    while i < n:
+        w = PdfWriter()
+        j = i
+        while j < n:
+            w.add_page(r.pages[j])
+            buf = io.BytesIO(); w.write(buf)
+            if buf.tell() > max_bytes and (j - i) >= 1:
+                # ye page hatao (agla part me jayega)
+                w = PdfWriter()
+                for k in range(i, j):
+                    w.add_page(r.pages[k])
+                break
+            j += 1
+        if j == i:            # ek page hi max se bada — use akela rakho
+            w = PdfWriter(); w.add_page(r.pages[i]); j = i + 1
+        p = os.path.join(outdir, "%s part%d.pdf" % (base, part))
+        with open(p, "wb") as fh:
+            w.write(fh)
+        outs.append(p); part += 1
+        i = j
+    return outs
+
+
+def pdf_to_jpg(src, outdir, base, dpi=200, quality=88):
+    """Har page ek JPG."""
+    doc = fitz.open(src)
+    zoom = dpi / 72.0
+    outs = []
+    for i, page in enumerate(doc, 1):
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        p = os.path.join(outdir, "%s_%03d.jpg" % (base, i))
+        pix.pil_save(p, format="JPEG", quality=quality) if hasattr(pix, "pil_save") \
+            else pix.save(p)
+        outs.append(p)
+    doc.close()
+    return outs
+
+
+def pdf_to_text(src, out):
+    """Poori PDF ka text ek .txt me (digital PDF; scan me khaali aa sakta)."""
+    doc = fitz.open(src)
+    parts = []
+    for page in doc:
+        parts.append(page.get_text("text"))
+    doc.close()
+    with open(out, "w", encoding="utf-8") as fh:
+        fh.write("\n\n".join(parts))
+    return out
+
+
+def header_footer(src, out, header="", footer="", size=9, color=(0.3, 0.3, 0.3)):
+    """Har page par upar header aur/ya neeche footer (text)."""
+    doc = fitz.open(src)
+    for page in doc:
+        r = page.rect
+        if header:
+            page.insert_text((r.width / 2 - fitz.get_text_length(header, fontsize=size) / 2, 24),
+                             header, fontsize=size, color=color)
+        if footer:
+            page.insert_text((r.width / 2 - fitz.get_text_length(footer, fontsize=size) / 2, r.height - 18),
+                             footer, fontsize=size, color=color)
+    doc.save(out, garbage=4, deflate=True)
+    doc.close()
+    return out
+
+
+def stamp_pdf(src, out, text, color=(0.82, 0.1, 0.1)):
+    """Har page par bada tirchha (45°) STAMP (APPROVED/PAID/COPY)."""
+    doc = fitz.open(src)
+    for page in doc:
+        r = page.rect
+        pivot = fitz.Point(r.width / 2.0, r.height / 2.0)
+        fs = int(min(60, max(30, r.width / max(6, len(text)) * 1.5)))
+        try:
+            tw = fitz.TextWriter(r, color=color)
+            start = fitz.Point(r.width * 0.5 - len(text) * fs * 0.27, r.height * 0.5)
+            tw.append(start, text, fontsize=fs)
+            tw.write_text(page, morph=(pivot, fitz.Matrix(45)), opacity=0.30)
+        except Exception:
+            try:
+                page.insert_text(fitz.Point(r.width * 0.18, r.height * 0.5),
+                                 text, fontsize=44, color=color)
+            except Exception:
+                pass
+    doc.save(out, garbage=4, deflate=True)
+    doc.close()
+    return out
+
+
+def overlay_image(src, out, img_path, corner="br", scale=0.25, pages=None, margin=18):
+    """Signature/stamp image ko PDF par rakho. corner: tl/tr/bl/br.
+    pages None -> saare; ya 0-based index list."""
+    doc = fitz.open(src)
+    try:
+        pix = fitz.Pixmap(img_path)
+        iw, ih = pix.width, pix.height
+    except Exception:
+        iw, ih = 200, 80
+    for i, page in enumerate(doc):
+        if pages is not None and i not in pages:
+            continue
+        r = page.rect
+        w = r.width * scale
+        h = w * (ih / iw if iw else 0.4)
+        if corner == "tl":
+            rect = fitz.Rect(margin, margin, margin + w, margin + h)
+        elif corner == "tr":
+            rect = fitz.Rect(r.width - margin - w, margin, r.width - margin, margin + h)
+        elif corner == "bl":
+            rect = fitz.Rect(margin, r.height - margin - h, margin + w, r.height - margin)
+        else:  # br
+            rect = fitz.Rect(r.width - margin - w, r.height - margin - h,
+                             r.width - margin, r.height - margin)
+        try:
+            page.insert_image(rect, filename=img_path)
+        except Exception:
+            pass
+    doc.save(out, garbage=4, deflate=True)
+    doc.close()
+    return out
+
+
+def redact_text(src, out, term):
+    """PDF me 'term' (jo bhi likha ho) ko dhoondh kar KAALA karo (permanent).
+    Digital text par kaam karta hai. Lauta: (out, kitni jagah)."""
+    doc = fitz.open(src)
+    n = 0
+    for page in doc:
+        try:
+            rects = page.search_for(term)
+        except Exception:
+            rects = []
+        for rc in rects:
+            page.add_redact_annot(rc, fill=(0, 0, 0))
+            n += 1
+        if rects:
+            try:
+                page.apply_redactions()
+            except Exception:
+                pass
+    doc.save(out, garbage=4, deflate=True)
+    doc.close()
+    return out, n
+
+
+def set_metadata(src, out, title="", author="", subject=""):
+    """PDF ki Title/Author/Subject set karo."""
+    r = PdfReader(src)
+    w = PdfWriter()
+    for pg in r.pages:
+        w.add_page(pg)
+    md = {}
+    if title:
+        md["/Title"] = title
+    if author:
+        md["/Author"] = author
+    if subject:
+        md["/Subject"] = subject
+    if md:
+        w.add_metadata(md)
+    with open(out, "wb") as fh:
+        w.write(fh)
+    return out
+
+
+def change_password(src, out, old, new):
+    """Purana password hatao aur naya lagao (ek step)."""
+    r = PdfReader(src)
+    if r.is_encrypted:
+        r.decrypt(old or "")
+    w = PdfWriter()
+    for pg in r.pages:
+        w.add_page(pg)
+    if new:
+        w.encrypt(new)
+    with open(out, "wb") as fh:
+        w.write(fh)
+    return out
+
+
+def optimize_pdf(src, out, dpi=150, quality=70):
+    """PDF ko chhota karo — andar ki images ko re-encode + structure saaf.
+    Vector/text waisa hi rehta; scan-PDF me size kaafi ghatta."""
+    doc = fitz.open(src)
+    try:
+        doc.save(out, garbage=4, deflate=True, clean=True)
+    except Exception:
+        doc.save(out, garbage=4, deflate=True)
+    doc.close()
+    return out

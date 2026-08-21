@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "330"
+VERSION = "331"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8596,11 +8596,14 @@ class SavePreviewDialog(QtWidgets.QDialog):
         bb = QtWidgets.QHBoxLayout(); bb.addStretch(1)
         b_cancel = QtWidgets.QPushButton(L("Radd", "Cancel"))
         b_cancel.clicked.connect(self.reject)
+        b_cancel.setAutoDefault(False); b_cancel.setDefault(False)
         self.b_save = QtWidgets.QPushButton(L("💾 Save", "💾 Save"))
         self.b_save.setStyleSheet("QPushButton{background:#0D9488;color:#fff;font-weight:700;"
                                   "padding:8px 20px;border-radius:8px;}"
                                   "QPushButton:hover{background:#0B8276;}")
         self.b_save.clicked.connect(self._do_save)
+        # (v331) Enter dabate hi SAVE (default button)
+        self.b_save.setAutoDefault(True); self.b_save.setDefault(True)
         bb.addWidget(b_cancel); bb.addWidget(self.b_save)
         v.addLayout(bb)
 
@@ -8612,27 +8615,51 @@ class SavePreviewDialog(QtWidgets.QDialog):
         L = self.app.L
         w = QtWidgets.QFrame()
         w.setStyleSheet("QFrame{border:1px solid #e5e7eb;border-radius:9px;}")
-        h = QtWidgets.QHBoxLayout(w); h.setContentsMargins(9, 7, 9, 7); h.setSpacing(9)
-        mid = QtWidgets.QVBoxLayout(); mid.setSpacing(3)
+        h = QtWidgets.QHBoxLayout(w); h.setContentsMargins(11, 9, 11, 9); h.setSpacing(11)
+        mid = QtWidgets.QVBoxLayout(); mid.setSpacing(4)
         ed = QtWidgets.QLineEdit((d.get("name") or "").strip())
         ed.setPlaceholderText(L("File ka naam…", "File name…"))
-        ed.setStyleSheet("border:1px solid #cbd5e1;border-radius:6px;padding:4px 7px;font-weight:600;")
+        ed.setStyleSheet("border:1px solid #cbd5e1;border-radius:6px;padding:5px 8px;"
+                         "font-weight:600;font-size:13px;")
         mid.addWidget(ed)
-        meta = QtWidgets.QLabel(L("%d page  ·  size gin rahe…" % len(d["paths"]),
-                                  "%d pages  ·  estimating size…" % len(d["paths"])))
-        meta.setStyleSheet("color:#94a3b8;font-size:11px;border:none;")
-        mid.addWidget(meta)
+        # PROMINENT size (bada, gehra) + chhota page/status
+        srow = QtWidgets.QHBoxLayout(); srow.setSpacing(9)
+        size = QtWidgets.QLabel("…")
+        size.setStyleSheet("color:#0D9488;font-size:18px;font-weight:800;border:none;")
+        pages = QtWidgets.QLabel(L("%d page" % len(d["paths"]), "%d pages" % len(d["paths"])))
+        pages.setStyleSheet("color:#94a3b8;font-size:11px;border:none;")
+        status = QtWidgets.QLabel("")
+        status.setStyleSheet("border:none;font-size:11px;font-weight:700;")
+        srow.addWidget(size); srow.addWidget(pages); srow.addWidget(status); srow.addStretch(1)
+        mid.addLayout(srow)
         h.addLayout(mid, 1)
-        mx = QtWidgets.QSpinBox()
-        mx.setRange(0, 51200); mx.setSingleStep(50); mx.setValue(0)
-        mx.setSpecialValueText(L("— (poora)", "— (full)"))
-        mx.setSuffix(" KB"); mx.setFixedWidth(110)
-        mx.setToolTip(L("Is PDF ki max size — 0 = koi limit nahi.\nItne KB se KAM ki PDF banegi.",
-                        "Max size for this PDF — 0 = no limit.\nThe PDF will be made SMALLER than this."))
-        mx.valueChanged.connect(lambda _v, ix=i: self._refresh_row(ix))
-        h.addWidget(mx)
-        self._rows.append({"name": ed, "meta": meta, "max": mx})
+        # max-size: KHAALI box jisme aap KB likho
+        mxwrap = QtWidgets.QVBoxLayout(); mxwrap.setSpacing(2)
+        cap = QtWidgets.QLabel(L("Max size (KB)", "Max size (KB)"))
+        cap.setStyleSheet("color:#0D9488;font-size:9px;font-weight:700;border:none;")
+        cap.setAlignment(QtCore.Qt.AlignCenter)
+        mx = QtWidgets.QLineEdit()
+        mx.setPlaceholderText(L("likho…", "type…"))
+        mx.setValidator(QtGui.QIntValidator(0, 51200, mx))
+        mx.setFixedWidth(104); mx.setAlignment(QtCore.Qt.AlignRight)
+        mx.setStyleSheet("border:2px solid #0D9488;border-radius:8px;padding:7px 9px;"
+                         "font-size:15px;font-weight:800;background:#f0fdfa;color:#0f172a;")
+        mx.setToolTip(L("Yahan KB likho — itne se KAM ki PDF banegi. Khaali = poora (koi limit nahi).",
+                        "Type KB here — the PDF will be made SMALLER than this. Empty = full."))
+        mx.textChanged.connect(lambda _t, ix=i: (self._refresh_row(ix), self._refresh_total()))
+        mxwrap.addWidget(cap); mxwrap.addWidget(mx)
+        h.addLayout(mxwrap)
+        self._rows.append({"name": ed, "size": size, "pages": pages,
+                           "status": status, "max": mx})
         return w
+
+    @staticmethod
+    def _row_max(r):
+        try:
+            t = r["max"].text().strip()
+            return int(t) if t else 0
+        except Exception:
+            return 0
 
     # ---------- estimate ----------
     def _estimate_all(self):
@@ -8664,21 +8691,20 @@ class SavePreviewDialog(QtWidgets.QDialog):
 
     def _refresh_row(self, i):
         r = self._rows[i]; L = self.app.L
-        n = len(self.docs[i]["paths"])
         est = self._est.get(i)
-        mx_kb = r["max"].value()
+        mx_kb = self._row_max(r)
         if est is None:
-            r["meta"].setText(L("%d page  ·  size gin rahe…" % n,
-                                "%d pages  ·  estimating…" % n))
+            r["size"].setText("…"); r["status"].setText("")
             return
-        txt = L("%d page  ·  ~%s" % (n, self._pretty(est)),
-                "%d pages  ·  ~%s" % (n, self._pretty(est)))
-        if mx_kb > 0:
-            if est <= mx_kb * 1024:
-                txt += L("  ·  limit ke andar ✓", "  ·  under limit ✓")
-            else:
-                txt += L("  ·  → ≤ %d KB banegi ✓" % mx_kb, "  ·  → will shrink under %d KB ✓" % mx_kb)
-        r["meta"].setText(txt)
+        r["size"].setText("~" + self._pretty(est))
+        if mx_kb > 0 and est > mx_kb * 1024:
+            r["status"].setText(L("→ ≤ %d KB banegi ✓" % mx_kb, "→ ≤ %d KB ✓" % mx_kb))
+            r["status"].setStyleSheet("border:none;color:#0D9488;font-size:11px;font-weight:700;")
+        elif mx_kb > 0:
+            r["status"].setText(L("limit me ✓", "under ✓"))
+            r["status"].setStyleSheet("border:none;color:#16a34a;font-size:11px;font-weight:700;")
+        else:
+            r["status"].setText("")
 
     def _refresh_total(self):
         L = self.app.L
@@ -8688,14 +8714,14 @@ class SavePreviewDialog(QtWidgets.QDialog):
             return
         tot = 0
         for i, v in enumerate(vals):
-            mx = self._rows[i]["max"].value()
+            mx = self._row_max(self._rows[i])
             tot += min(v, mx * 1024) if mx > 0 and v > mx * 1024 else v
         self.lbl_total.setText(L("Kul: %d PDF  ·  ~%s" % (len(self.docs), self._pretty(tot)),
                                  "Total: %d PDF  ·  ~%s" % (len(self.docs), self._pretty(tot))))
 
     def _apply_preset(self, kb):
         for r in self._rows:
-            r["max"].setValue(int(kb))
+            r["max"].setText("" if int(kb) <= 0 else str(int(kb)))
         for i in range(len(self.docs)):
             self._refresh_row(i)
         self._refresh_total()
@@ -8718,12 +8744,12 @@ class SavePreviewDialog(QtWidgets.QDialog):
         if one:
             allpaths = [p for d in self.docs for p in d["paths"]]
             name = (self._rows[0]["name"].text().strip() or "scan")
-            mx = max((self._rows[i]["max"].value() for i in range(len(self.docs))), default=0)
+            mx = max((self._row_max(self._rows[i]) for i in range(len(self.docs))), default=0)
             jobs.append((name, allpaths, mx))
         else:
             for i, d in enumerate(self.docs):
                 name = (self._rows[i]["name"].text().strip() or "scan")
-                jobs.append((name, d["paths"], self._rows[i]["max"].value()))
+                jobs.append((name, d["paths"], self._row_max(self._rows[i])))
         folder = self.folder
         app = self.app
 
@@ -19910,6 +19936,219 @@ if the toggle is ticked).</p>
         self._pdf_run(lambda: _pdftools.page_numbers_file(path, out, (hdr or "").strip()),
                       self.L("Page-number PDF", "Numbered PDF"))
 
+    # ---- (v331) naye PDF tools: organize / convert / mark / info ----
+    def _pdf_merge_more(self, path):
+        others, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self, self.L("Kaun si PDF jodni hai?", "Which PDFs to add?"),
+            os.path.dirname(path), "PDF (*.pdf)")
+        if not others:
+            return
+        srcs = [path] + [o for o in others if os.path.abspath(o) != os.path.abspath(path)]
+        out = self._pdf_out(path, self.L("(judi)", "(merged)"))
+        self._pdf_run(lambda: _pdftools.merge_pdfs(srcs, out),
+                      self.L("Judi PDF", "Merged PDF"))
+
+    def _pdf_reverse(self, path):
+        out = self._pdf_out(path, self.L("(ulta)", "(reversed)"))
+        self._pdf_run(lambda: _pdftools.reverse_pages(path, out),
+                      self.L("Ulti-kram PDF", "Reversed PDF"))
+
+    def _pdf_insert(self, path):
+        other, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, self.L("Kaun si PDF ghusani hai?", "Which PDF to insert?"),
+            os.path.dirname(path), "PDF (*.pdf)")
+        if not other:
+            return
+        try:
+            total = _pdftools.page_count(path)
+        except Exception:
+            total = 0
+        pos, ok = QtWidgets.QInputDialog.getInt(
+            self, self.L("Kahan ghusaayein?", "Insert where?"),
+            self.L("Kis page ke PEHLE? (1 = shuru, %d = aakhir me)" % (total + 1),
+                   "Before which page? (1 = start, %d = end)" % (total + 1)),
+            total + 1, 1, total + 1)
+        if not ok:
+            return
+        out = self._pdf_out(path, self.L("(joda)", "(inserted)"))
+        self._pdf_run(lambda: _pdftools.insert_pages(path, out, other, pos - 1),
+                      self.L("Joda-page PDF", "Inserted PDF"))
+
+    def _pdf_remove_blank(self, path):
+        out = self._pdf_out(path, self.L("(bina-khaali)", "(no-blank)"))
+        def job():
+            o, rm = _pdftools.remove_blank_pages(path, out)
+            if rm <= 0:
+                raise RuntimeError(self.L("Koi khaali page nahi mila.",
+                                          "No blank pages found."))
+            return o
+        self._pdf_run(job, self.L("Bina-khaali PDF", "No-blank PDF"))
+
+    def _pdf_split_size(self, path):
+        mb, ok = QtWidgets.QInputDialog.getDouble(
+            self, self.L("Size se baanto", "Split by size"),
+            self.L("Har tukda kitne MB se chhota?", "Each part under (MB)?"),
+            2.0, 0.1, 100.0, 1)
+        if not ok:
+            return
+        d = os.path.dirname(path)
+        base = os.path.splitext(os.path.basename(path))[0]
+        def job():
+            parts = _pdftools.split_by_size(path, d, base, int(mb * 1024 * 1024))
+            return parts
+        self._pdf_run(job, self.L("Size se bant-ti PDF", "Size-split PDFs"), open_folder=d)
+
+    def _pdf_searchable(self, path):
+        if not tesseract_available():
+            self._warn(self.L("Iske liye OCR (Tesseract) chahiye.",
+                              "This needs OCR (Tesseract).")); return
+        out = self._pdf_out(path, self.L("(searchable)", "(searchable)"))
+        def job():
+            import io
+            pages = pdf_to_images(path, self._tmpdir) or []
+            if not pages:
+                raise RuntimeError(self.L("PDF ke page nahi mile.", "Could not read pages."))
+            writer = PdfWriter()
+            for img in pages:
+                data = pytesseract.image_to_pdf_or_hocr(img, lang="eng+hin", extension="pdf")
+                for pg in PdfReader(io.BytesIO(data)).pages:
+                    writer.add_page(pg)
+            with open(out, "wb") as fh:
+                writer.write(fh)
+            return out
+        self._pdf_run(job, self.L("Searchable PDF", "Searchable PDF"))
+
+    def _pdf_to_jpg(self, path):
+        d = os.path.dirname(path)
+        base = os.path.splitext(os.path.basename(path))[0]
+        self._pdf_run(lambda: _pdftools.pdf_to_jpg(path, d, base),
+                      self.L("JPG images", "JPG images"), open_folder=d)
+
+    def _pdf_to_text(self, path):
+        out = self._pdf_out(path, "", ".txt")
+        def job():
+            _pdftools.pdf_to_text(path, out)
+            return out
+        self._pdf_run(job, self.L("Text file", "Text file"))
+
+    def _pdf_header_footer(self, path):
+        hdr, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Header (upar)", "Header (top)"),
+            self.L("Har page ke UPAR kya likhein? (khaali = kuch nahi):",
+                   "Text at the TOP of each page? (empty = none):"))
+        if not ok:
+            return
+        ftr, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Footer (neeche)", "Footer (bottom)"),
+            self.L("Har page ke NEECHE kya likhein?:", "Text at the BOTTOM of each page?:"))
+        if not ok:
+            return
+        out = self._pdf_out(path, self.L("(header)", "(header-footer)"))
+        self._pdf_run(lambda: _pdftools.header_footer(path, out, (hdr or "").strip(),
+                                                      (ftr or "").strip()),
+                      self.L("Header/Footer PDF", "Header/Footer PDF"))
+
+    def _pdf_stamp(self, path):
+        presets = ["APPROVED", "PAID", "COPY", "ORIGINAL", "DUPLICATE", "URGENT",
+                   "CONFIDENTIAL", self.L("Custom…", "Custom…")]
+        item, ok = QtWidgets.QInputDialog.getItem(
+            self, self.L("Stamp (mohar)", "Stamp"), self.L("Kaunsi mohar?", "Which stamp?"),
+            presets, 0, False)
+        if not ok:
+            return
+        if item.startswith("Custom"):
+            item, ok = QtWidgets.QInputDialog.getText(
+                self, self.L("Custom stamp", "Custom stamp"),
+                self.L("Kya likhein?", "Text:"))
+            item = (item or "").strip()
+            if not ok or not item:
+                return
+        out = self._pdf_out(path, self.L("(stamp)", "(stamped)"))
+        self._pdf_run(lambda: _pdftools.stamp_pdf(path, out, item),
+                      self.L("Stamp PDF", "Stamped PDF"))
+
+    def _pdf_signature(self, path):
+        img, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, self.L("Signature image chuno (PNG best)", "Pick signature image (PNG best)"),
+            os.path.dirname(path), "Image (*.png *.jpg *.jpeg)")
+        if not img:
+            return
+        corners = [(self.L("Neeche-daayein", "Bottom-right"), "br"),
+                   (self.L("Neeche-baayein", "Bottom-left"), "bl"),
+                   (self.L("Upar-daayein", "Top-right"), "tr"),
+                   (self.L("Upar-baayein", "Top-left"), "tl")]
+        item, ok = QtWidgets.QInputDialog.getItem(
+            self, self.L("Kahan lagayein?", "Where?"), self.L("Kona:", "Corner:"),
+            [c[0] for c in corners], 0, False)
+        if not ok:
+            return
+        corner = dict((c[0], c[1]) for c in corners).get(item, "br")
+        out = self._pdf_out(path, self.L("(sign)", "(signed)"))
+        self._pdf_run(lambda: _pdftools.overlay_image(path, out, img, corner=corner),
+                      self.L("Signature-wali PDF", "Signed PDF"))
+
+    def _pdf_redact(self, path):
+        term, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Redact (kaala karo)", "Redact"),
+            self.L("Kaunsa shabd/number chhupana hai? (jaise naam ya claim no.)",
+                   "Which word/number to hide? (e.g. a name or claim no.)"))
+        term = (term or "").strip()
+        if not ok or not term:
+            return
+        out = self._pdf_out(path, self.L("(chhupa)", "(redacted)"))
+        def job():
+            o, n = _pdftools.redact_text(path, out, term)
+            if n <= 0:
+                raise RuntimeError(self.L("'%s' PDF me nahi mila (ye scan PDF me kaam nahi karta)." % term,
+                                          "'%s' not found (this doesn't work on scanned PDFs)." % term))
+            return o
+        self._pdf_run(job, self.L("Chhupayi PDF", "Redacted PDF"))
+
+    def _pdf_metadata(self, path):
+        title, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Title", "Title"), self.L("PDF ka title:", "PDF title:"),
+            text=os.path.splitext(os.path.basename(path))[0])
+        if not ok:
+            return
+        author, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Author", "Author"), self.L("Author/clinic naam:", "Author/clinic name:"))
+        if not ok:
+            return
+        out = self._pdf_out(path, self.L("(info)", "(metadata)"))
+        self._pdf_run(lambda: _pdftools.set_metadata(path, out, (title or "").strip(),
+                                                     (author or "").strip()),
+                      self.L("Metadata PDF", "Metadata PDF"))
+
+    def _pdf_change_password(self, path):
+        old, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Purana password", "Old password"),
+            self.L("Purana password (na ho to khaali):", "Old password (empty if none):"),
+            QtWidgets.QLineEdit.Password)
+        if not ok:
+            return
+        new, ok = QtWidgets.QInputDialog.getText(
+            self, self.L("Naya password", "New password"),
+            self.L("Naya password (khaali = password hata do):", "New password (empty = remove):"),
+            QtWidgets.QLineEdit.Password)
+        if not ok:
+            return
+        out = self._pdf_out(path, self.L("(naya-pass)", "(new-pass)"))
+        self._pdf_run(lambda: _pdftools.change_password(path, out, old or "", new or ""),
+                      self.L("Password badli PDF", "Re-passworded PDF"))
+
+    def _pdf_optimize(self, path):
+        out = self._pdf_out(path, self.L("(chhoti)", "(optimized)"))
+        def job():
+            _pdftools.optimize_pdf(path, out)
+            try:
+                if os.path.getsize(out) >= os.path.getsize(path):
+                    # aur chhoti na hui -> compress engine se try
+                    self._write_compressed_pdf(pdf_to_images(path, self._tmpdir) or [], out, None)
+            except Exception:
+                pass
+            return out
+        self._pdf_run(job, self.L("Optimized PDF", "Optimized PDF"))
+
     def _pdf_edit_text(self, path):
         """Digital PDF ka ASLI text badlo (click karke edit)."""
         if not HAS_FITZ:
@@ -20474,6 +20713,42 @@ if the toggle is ticked).</p>
                      lambda: self.pdf_to_word(path))
         pt.addAction("📊 " + L("PDF → Excel", "PDF → Excel"),
                      lambda: self.pdf_to_excel(path))
+        pt.addAction("🖼 " + L("PDF → JPG", "PDF → JPG"),
+                     lambda: self._pdf_to_jpg(path))
+        pt.addAction("📃 " + L("PDF → Text (.txt)", "PDF → Text (.txt)"),
+                     lambda: self._pdf_to_text(path))
+        pt.addAction("🔎 " + L("Searchable banao (OCR)", "Make searchable (OCR)"),
+                     lambda: self._pdf_searchable(path))
+        # (v331) — jodna / kram badalna (organize)
+        om = pt.addMenu("🗂 " + L("Jodo / kram (organize)", "Organize"))
+        om.addAction("🔗 " + L("Doosri PDF jodo (merge)…", "Merge other PDFs…"),
+                     lambda: self._pdf_merge_more(path))
+        om.addAction("➕ " + L("Beech me page daalo…", "Insert pages…"),
+                     lambda: self._pdf_insert(path))
+        om.addAction("↕ " + L("Ulta karo (reverse)", "Reverse pages"),
+                     lambda: self._pdf_reverse(path))
+        om.addAction("🧹 " + L("Khaali page hatao", "Remove blank pages"),
+                     lambda: self._pdf_remove_blank(path))
+        om.addAction("🪓 " + L("Size se baanto…", "Split by size…"),
+                     lambda: self._pdf_split_size(path))
+        # (v331) — nishaan / hastaakshar (mark)
+        mm = pt.addMenu("🖊 " + L("Nishaan / sign (mark)", "Sign & mark"))
+        mm.addAction("✍ " + L("Signature lagao…", "Add signature…"),
+                     lambda: self._pdf_signature(path))
+        mm.addAction("🏷 " + L("Stamp (mohar)…", "Stamp…"),
+                     lambda: self._pdf_stamp(path))
+        mm.addAction("📋 " + L("Header / Footer…", "Header / Footer…"),
+                     lambda: self._pdf_header_footer(path))
+        mm.addAction("🚫 " + L("Redact (chhupao)…", "Redact…"),
+                     lambda: self._pdf_redact(path))
+        # (v331) — jaankari / suraksha (info)
+        im = pt.addMenu("ℹ " + L("Jaankari / suraksha", "Info & security"))
+        im.addAction("🏷 " + L("Metadata badlo…", "Edit metadata…"),
+                     lambda: self._pdf_metadata(path))
+        im.addAction("🔑 " + L("Password badlo…", "Change password…"),
+                     lambda: self._pdf_change_password(path))
+        im.addAction("📐 " + L("Optimize (aur chhoti)", "Optimize (shrink)"),
+                     lambda: self._pdf_optimize(path))
         return pt
 
     def _add_pdf_tools_bulk(self, menu, pdfs):
