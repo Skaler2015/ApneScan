@@ -253,7 +253,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "317"
+VERSION = "318"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8100,19 +8100,23 @@ class PdfTextEditDialog(QtWidgets.QDialog):
     (Scanned/photo-jaisi PDF par kaam nahi karta — us me asli text hi
     nahi hota.)"""
 
-    def __init__(self, parent, src):
+    def __init__(self, parent, src, scanned=False):
         super().__init__(parent)
         self.app = parent
         self.src = src
+        self.scanned = scanned
         self.zoom = 1.6
         self.page_no = 0
         self.spans = []
+        self._ocr_cache = {}
         self.dirty = False
         self._editor = None
         self._edit_span = None
         L = parent.L
-        self.setWindowTitle(L("PDF text badlo — %s", "Edit PDF text — %s")
-                            % os.path.basename(src))
+        self.setWindowTitle(
+            (L("Scan PDF text badlo (OCR) — %s", "Edit scanned PDF text (OCR) — %s")
+             if scanned else L("PDF text badlo — %s", "Edit PDF text — %s"))
+            % os.path.basename(src))
         self.resize(900, 780)
         self.doc = fitz.open(src)
 
@@ -8141,9 +8145,18 @@ class PdfTextEditDialog(QtWidgets.QDialog):
         bar.addSpacing(10); bar.addWidget(b_find)
         v.addLayout(bar)
 
-        hint = QtWidgets.QLabel("💡 " + L(
-            "Kisi bhi text par click karke naya likho, phir Enter dabao.",
-            "Click any text to edit it, then press Enter."))
+        if scanned:
+            htext = L("💡 Kisi bhi line par click karke sudhaaro, phir Enter. "
+                      "(Scan me naya text substitute font me aata hai — ye ek "
+                      "saaf sudhaar hai, gaur se dekhne par edit dikh sakta hai.)",
+                      "💡 Click any line to correct it, then Enter. (On a scan the "
+                      "new text uses a substitute font — this is a clean correction, "
+                      "an edit can still be noticed on close inspection.)")
+        else:
+            htext = L("💡 Kisi bhi text par click karke naya likho, phir Enter dabao.",
+                      "💡 Click any text to edit it, then press Enter.")
+        hint = QtWidgets.QLabel(htext)
+        hint.setWordWrap(True)
         hint.setStyleSheet("color:#475569; padding:2px 4px;")
         v.addWidget(hint)
 
@@ -8185,12 +8198,27 @@ class PdfTextEditDialog(QtWidgets.QDialog):
                            pix.stride, QtGui.QImage.Format_RGB888)
         self.canvas.setPixmap(QtGui.QPixmap.fromImage(img.copy()))
         self.canvas.resize(pix.width, pix.height)
-        self.spans = _pdftext.page_spans(self.doc, self.page_no)
+        self.spans = self._page_spans(self.page_no)
         self.lbl_page.setText("  %s %d / %d  " % (
             self.app.L("Page", "Page"), self.page_no + 1, self.doc.page_count))
         self.b_prev.setEnabled(self.page_no > 0)
         self.b_next.setEnabled(self.page_no < self.doc.page_count - 1)
         self._kill_editor()
+
+    def _page_spans(self, pno):
+        """Digital PDF: asli text spans. Scanned PDF: OCR se line-spans
+        (ek baar chalta hai, phir cache)."""
+        if not self.scanned:
+            return _pdftext.page_spans(self.doc, pno)
+        if pno not in self._ocr_cache:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+            try:
+                self._ocr_cache[pno] = self.app._ocr_line_spans(self.doc, pno)
+            except Exception:
+                self._ocr_cache[pno] = []
+            finally:
+                QtWidgets.QApplication.restoreOverrideCursor()
+        return self._ocr_cache[pno]
 
     def _set_zoom(self, z):
         self.zoom = max(0.5, min(4.0, z))
@@ -8263,7 +8291,12 @@ class PdfTextEditDialog(QtWidgets.QDialog):
         if new == old:
             return
         try:
-            _pdftext.replace_span(self.doc, self.page_no, sp, new)
+            _pdftext.replace_span(self.doc, self.page_no, sp, new,
+                                  scanned=self.scanned,
+                                  fill=sp.get("fill", (1, 1, 1)))
+            # scan-mode: cache me is line ka text update kar do
+            if self.scanned:
+                sp["text"] = new
             self.dirty = True
             self.lbl_status.setText(self.app.L("● Badlaav hue (save karna baaki)",
                                                "● Edited (unsaved)"))
@@ -8299,10 +8332,14 @@ class PdfTextEditDialog(QtWidgets.QDialog):
         n = 0
         try:
             for pno in pages:
-                for sp in _pdftext.page_spans(self.doc, pno):
+                for sp in self._page_spans(pno):
                     if find in sp["text"]:
-                        _pdftext.replace_span(self.doc, pno, sp,
-                                              sp["text"].replace(find, repl))
+                        newt = sp["text"].replace(find, repl)
+                        _pdftext.replace_span(self.doc, pno, sp, newt,
+                                              scanned=self.scanned,
+                                              fill=sp.get("fill", (1, 1, 1)))
+                        if self.scanned:
+                            sp["text"] = newt
                         n += 1
         except Exception as exc:
             self.app._warn(self.app.L("Badalne me dikkat:\n%s",
@@ -19439,24 +19476,117 @@ if the toggle is ticked).</p>
         except Exception as exc:
             self._warn(self.L("PDF khul nahi payi:\n%s", "Could not open PDF:\n%s") % exc)
             return
+        scanned = False
         if not has:
-            QtWidgets.QMessageBox.information(
-                self, self.L("Scanned PDF", "Scanned PDF"),
-                self.L("Is PDF me asli (selectable) text nahi hai — ye "
-                       "scan/photo-jaisi PDF lagti hai. Ese me text seedha "
-                       "nahi badla ja sakta.\n\n(Text-edit sirf Word/print-"
-                       "se-bani digital PDF par chalta hai.)",
-                       "This PDF has no real (selectable) text — it looks "
-                       "like a scan/photo. Its text can't be edited directly.\n\n"
-                       "(Text editing works only on digital PDFs made from "
-                       "Word/print-to-PDF.)"))
-            return
+            # Scanned/photo-jaisi PDF — Adobe/WPS ki tarah OCR karke edit
+            if not tesseract_available():
+                QtWidgets.QMessageBox.information(
+                    self, self.L("Scanned PDF", "Scanned PDF"),
+                    self.L("Ye scan/photo-jaisi PDF hai. Ise edit karne ke liye "
+                           "OCR (Tesseract) chahiye, jo abhi nahi mila.",
+                           "This is a scanned/photo PDF. Editing it needs OCR "
+                           "(Tesseract), which isn't available."))
+                return
+            r = QtWidgets.QMessageBox.question(
+                self, self.L("Scan PDF edit (Adobe/WPS jaisa)",
+                             "Edit scanned PDF (like Adobe/WPS)"),
+                self.L("Ye scan/photo-jaisi PDF hai (asli text nahi). Adobe/WPS "
+                       "ki tarah OCR chalakar ise editable banaya ja sakta hai.\n\n"
+                       "• Naya text ek milte-julte (substitute) font me aata hai.\n"
+                       "• Ye ek SAAF sudhaar hota hai — chhupa hua badlaav NAHI. "
+                       "Gaur se dekhne par ya jaanch me edit pakda ja sakta hai.\n"
+                       "• Apne khud ke documents / form bharne ke liye theek hai.\n\n"
+                       "OCR karke editor kholein?",
+                       "This is a scanned/photo PDF (no real text). Like Adobe/WPS, "
+                       "OCR can make it editable.\n\n"
+                       "• New text uses a close substitute font.\n"
+                       "• This is a CLEAN correction — not a hidden change. An edit "
+                       "can still be noticed on close inspection or verification.\n"
+                       "• Fine for your own documents / filling forms.\n\n"
+                       "Run OCR and open the editor?"),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            if r != QtWidgets.QMessageBox.Yes:
+                return
+            scanned = True
         try:
-            dlg = PdfTextEditDialog(self, path)
+            dlg = PdfTextEditDialog(self, path, scanned=scanned)
             dlg.exec_()
         except Exception as exc:
             self._warn(self.L("Editor khul nahi paya:\n%s",
                               "Could not open editor:\n%s") % exc)
+
+    def _sample_bg(self, img, x0, y0, x1, y1):
+        """Rendered page image me line-box ke chaaro taraf ke pixels ka
+        median rang (kagaz/background) — whiteout box isi rang ka banega
+        taaki patch saaf lage. (r,g,b) 0..1 tuple lauta."""
+        try:
+            W, H = img.size
+            pad = 3
+            rings = []
+            top = img.crop((max(0, x0 - pad), max(0, y0 - pad - 2),
+                            min(W, x1 + pad), max(0, y0 - pad)))
+            bot = img.crop((max(0, x0 - pad), min(H, y1 + pad),
+                            min(W, x1 + pad), min(H, y1 + pad + 2)))
+            for c in (top, bot):
+                if c.width > 0 and c.height > 0:
+                    rings.append(np.asarray(c.convert("RGB")).reshape(-1, 3))
+            if not rings:
+                return (1, 1, 1)
+            arr = np.concatenate(rings, axis=0)
+            med = np.median(arr, axis=0) / 255.0
+            return (float(med[0]), float(med[1]), float(med[2]))
+        except Exception:
+            return (1, 1, 1)
+
+    def _ocr_line_spans(self, doc, page_no, dpi=200):
+        """Scanned page par OCR chalakar LINE-wise editable spans banao.
+        Har span: {id, text, bbox(pt), size, flags, color, origin, fill}.
+        bbox/origin PDF points me (72 dpi) hote hain."""
+        page = doc[page_no]
+        zoom = dpi / 72.0
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        data = pytesseract.image_to_data(
+            img, lang="eng+hin", output_type=pytesseract.Output.DICT)
+        lines = {}
+        n = len(data["text"])
+        for i in range(n):
+            w = (data["text"][i] or "").strip()
+            if not w:
+                continue
+            try:
+                conf = float(data["conf"][i])
+            except Exception:
+                conf = -1
+            if conf < 30:                    # bahut kamzor pehchaan chhodo
+                continue
+            key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+            lines.setdefault(key, []).append(
+                (data["left"][i], data["top"][i],
+                 data["width"][i], data["height"][i], w))
+        spans = []
+        for key, words in lines.items():
+            ws = sorted(words, key=lambda t: t[0])
+            text = " ".join(t[4] for t in ws)
+            x0 = min(t[0] for t in ws); y0 = min(t[1] for t in ws)
+            x1 = max(t[0] + t[2] for t in ws); y1 = max(t[1] + t[3] for t in ws)
+            fill = self._sample_bg(img, x0, y0, x1, y1)
+            h_pt = (y1 - y0) / zoom
+            size = max(6.0, h_pt * 0.86)
+            bx0, by0 = x0 / zoom, y0 / zoom
+            bx1, by1 = x1 / zoom, y1 / zoom
+            spans.append({
+                "id": key,
+                "text": text,
+                "bbox": (bx0, by0, bx1, by1),
+                "size": size,
+                "flags": 0,
+                "color": 0,                  # scanned text -> kaala maano
+                "font": "",
+                "origin": (bx0, by1 - h_pt * 0.18),
+                "fill": fill,
+            })
+        return spans
 
     def _add_pdf_tools_menu(self, menu, path):
         """Ek PDF par '📄 PDF Tools' submenu."""

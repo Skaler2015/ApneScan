@@ -99,21 +99,36 @@ def _find_span(doc, page_no, span_id):
     return None
 
 
-def replace_span(doc, page_no, span, new_text, fit=True):
+def replace_span(doc, page_no, span, new_text, fit=True,
+                 scanned=False, fill=(1, 1, 1)):
     """Ek span (purana text) ko new_text se badlo — usi jagah, usi size/rang.
-    span = page_spans() se aaya dict (ya usi shape ka).  Live doc par kaam
-    karta hai (save baad me).  fit=True: agar naya text chaura hai to size
-    thoda ghata kar bbox me fit karta hai.
+    span = page_spans() (digital) ya OCR-span (scanned) dict.
+
+    digital PDF (scanned=False): purane text ko redaction se hatate hain.
+    scanned PDF (scanned=True) : page ek tasveer hai — purane word ko 'fill'
+        rang (kagaz ka background) ke bhare box se dhak dete hain, phir uske
+        upar naya text likhte hain (bilkul Adobe/WPS ki tarah). NOTE: ye
+        ek SAAF sudhaar hai, koi chhupa hua/undetectable badlaav nahi —
+        gaur se dekhne par ya forensic jaanch me edit pakda ja sakta hai.
+    fit=True: naya text chaura ho to size thoda ghata kar bbox me fit.
     """
     page = doc[page_no]
     bbox = fitz.Rect(span["bbox"])
-    # 1) purana text hatao (safed redaction) — sirf isi span ke bbox par
-    page.add_redact_annot(bbox, fill=(1, 1, 1))
-    # images=0 => neeche ki tasveer (agar ho) ko na chhue
-    try:
-        page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
-    except Exception:
-        page.apply_redactions()
+
+    if scanned:
+        # tasveer wale word ko background-rang ke box se dhako (whiteout)
+        cover = bbox + (-1.5, -1.5, 1.5, 1.5)
+        try:
+            page.draw_rect(cover, color=fill, fill=fill, width=0)
+        except Exception:
+            page.draw_rect(cover, color=(1, 1, 1), fill=(1, 1, 1), width=0)
+    else:
+        # digital text ko redaction se hatao (sirf isi span ke bbox par)
+        page.add_redact_annot(bbox, fill=(1, 1, 1))
+        try:
+            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+        except Exception:
+            page.apply_redactions()
 
     if not new_text:
         return                              # sirf mitana tha
@@ -123,7 +138,7 @@ def replace_span(doc, page_no, span, new_text, fit=True):
     color = _color_rgb(span["color"])
     origin = fitz.Point(span["origin"])
 
-    # 2) naya text bbox me fit karne ke liye size adjust (agar zaroori)
+    # naya text bbox me fit karne ke liye size adjust (agar zaroori)
     if fit:
         avail = bbox.width
         if avail > 2:
@@ -131,7 +146,7 @@ def replace_span(doc, page_no, span, new_text, fit=True):
             if tl > avail:
                 size = max(4.0, size * (avail / tl) * 0.98)
 
-    # 3) naya text usi baseline par daalo
+    # naya text usi baseline par daalo
     page.insert_text(origin, new_text, fontname=fontname,
                      fontsize=size, color=color)
 
@@ -147,7 +162,9 @@ def apply_edits(src, out, edits):
     doc = fitz.open(src)
     try:
         for e in edits:
-            replace_span(doc, int(e["page"]), e["span"], e.get("new_text", ""))
+            replace_span(doc, int(e["page"]), e["span"], e.get("new_text", ""),
+                         scanned=e.get("scanned", False),
+                         fill=e.get("fill", (1, 1, 1)))
         doc.save(out, garbage=4, deflate=True)
     finally:
         doc.close()
