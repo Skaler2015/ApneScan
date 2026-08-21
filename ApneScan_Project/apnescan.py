@@ -85,6 +85,7 @@ from apnescan_lib.ocr_text import (
 from apnescan_lib.file_search import SearchEngine as FileSearchEngine, ENGINE as _search_engine
 # PDF tools engine — file→file operations for the My Files right-click menu.
 from apnescan_lib import pdf_tools as _pdftools
+from apnescan_lib import pdf_text_edit as _pdftext
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
@@ -252,7 +253,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "316"
+VERSION = "317"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8042,6 +8043,335 @@ class DocMemory(object):
             except Exception:
                 pass
         return added
+
+
+class _PdfEditCanvas(QtWidgets.QLabel):
+    """PDF text-editor ka page canvas — click par span-edit, hover par
+    editable text ke gird halka box dikhata hai."""
+    def __init__(self, dlg):
+        super().__init__()
+        self.dlg = dlg
+        self.setMouseTracking(True)
+        self.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
+        self.setStyleSheet("background:#e9ecf2;")
+        self._hover = None
+
+    def mousePressEvent(self, e):
+        try:
+            self.dlg._canvas_click(e.pos())
+        except Exception:
+            pass
+
+    def mouseMoveEvent(self, e):
+        try:
+            sp = self.dlg._span_at(e.pos())
+            self.setCursor(QtCore.Qt.IBeamCursor if sp else QtCore.Qt.ArrowCursor)
+            box = tuple(sp["bbox"]) if sp else None
+            if box != self._hover:
+                self._hover = box
+                self.update()
+        except Exception:
+            pass
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if not self._hover:
+            return
+        try:
+            z = self.dlg.zoom
+            p = QtGui.QPainter(self)
+            p.setRenderHint(QtGui.QPainter.Antialiasing)
+            r = QtCore.QRectF(self._hover[0] * z, self._hover[1] * z,
+                              (self._hover[2] - self._hover[0]) * z,
+                              (self._hover[3] - self._hover[1]) * z)
+            r.adjust(-2, -2, 2, 2)
+            p.setPen(QtGui.QPen(QtGui.QColor("#2563EB"), 1.4, QtCore.Qt.DashLine))
+            p.setBrush(QtGui.QColor(37, 99, 235, 28))
+            p.drawRoundedRect(r, 3, 3)
+            p.end()
+        except Exception:
+            pass
+
+
+class PdfTextEditDialog(QtWidgets.QDialog):
+    """Digital/native PDF ke ASLI text ko badalne wala editor.
+    Page par kisi bhi text par click karo -> wahin ek box khulta hai ->
+    naya likho -> Enter. Har edit usi jagah, usi size/rang me lagti hai.
+    (Scanned/photo-jaisi PDF par kaam nahi karta — us me asli text hi
+    nahi hota.)"""
+
+    def __init__(self, parent, src):
+        super().__init__(parent)
+        self.app = parent
+        self.src = src
+        self.zoom = 1.6
+        self.page_no = 0
+        self.spans = []
+        self.dirty = False
+        self._editor = None
+        self._edit_span = None
+        L = parent.L
+        self.setWindowTitle(L("PDF text badlo — %s", "Edit PDF text — %s")
+                            % os.path.basename(src))
+        self.resize(900, 780)
+        self.doc = fitz.open(src)
+
+        v = QtWidgets.QVBoxLayout(self)
+        v.setContentsMargins(8, 8, 8, 8)
+        v.setSpacing(6)
+
+        # ---- top toolbar ----
+        bar = QtWidgets.QHBoxLayout()
+        self.b_prev = QtWidgets.QPushButton("◀")
+        self.b_next = QtWidgets.QPushButton("▶")
+        self.b_prev.setFixedWidth(38); self.b_next.setFixedWidth(38)
+        self.b_prev.clicked.connect(lambda: self._go(-1))
+        self.b_next.clicked.connect(lambda: self._go(1))
+        self.lbl_page = QtWidgets.QLabel("")
+        self.lbl_page.setStyleSheet("font-weight:600;")
+        b_zin = QtWidgets.QPushButton("＋"); b_zout = QtWidgets.QPushButton("－")
+        b_zin.setFixedWidth(34); b_zout.setFixedWidth(34)
+        b_zin.clicked.connect(lambda: self._set_zoom(self.zoom * 1.2))
+        b_zout.clicked.connect(lambda: self._set_zoom(self.zoom / 1.2))
+        b_find = QtWidgets.QPushButton("🔎 " + L("Dhoondo & badlo", "Find & Replace"))
+        b_find.clicked.connect(self._find_replace)
+        bar.addWidget(self.b_prev); bar.addWidget(self.lbl_page); bar.addWidget(self.b_next)
+        bar.addStretch(1)
+        bar.addWidget(b_zout); bar.addWidget(b_zin)
+        bar.addSpacing(10); bar.addWidget(b_find)
+        v.addLayout(bar)
+
+        hint = QtWidgets.QLabel("💡 " + L(
+            "Kisi bhi text par click karke naya likho, phir Enter dabao.",
+            "Click any text to edit it, then press Enter."))
+        hint.setStyleSheet("color:#475569; padding:2px 4px;")
+        v.addWidget(hint)
+
+        # ---- scrollable page ----
+        self.scroll = QtWidgets.QScrollArea()
+        self.scroll.setWidgetResizable(False)
+        self.scroll.setAlignment(QtCore.Qt.AlignCenter)
+        self.scroll.setStyleSheet("QScrollArea{border:1px solid #cbd5e1;background:#e9ecf2;}")
+        self.canvas = _PdfEditCanvas(self)
+        self.scroll.setWidget(self.canvas)
+        v.addWidget(self.scroll, 1)
+
+        # ---- bottom buttons ----
+        bb = QtWidgets.QHBoxLayout()
+        self.lbl_status = QtWidgets.QLabel("")
+        self.lbl_status.setStyleSheet("color:#16A34A;font-weight:600;")
+        bb.addWidget(self.lbl_status); bb.addStretch(1)
+        b_savenew = QtWidgets.QPushButton("💾 " + L("Nayi PDF me save", "Save as new PDF"))
+        b_over = QtWidgets.QPushButton("♻ " + L("Isi file me save", "Overwrite original"))
+        b_close = QtWidgets.QPushButton(L("Band karo", "Close"))
+        b_savenew.clicked.connect(lambda: self._save(overwrite=False))
+        b_over.clicked.connect(lambda: self._save(overwrite=True))
+        b_close.clicked.connect(self._close_check)
+        for b in (b_savenew, b_over):
+            b.setStyleSheet("QPushButton{background:#2563EB;color:#fff;font-weight:600;"
+                            "padding:7px 14px;border-radius:7px;}"
+                            "QPushButton:hover{background:#1D4ED8;}")
+        bb.addWidget(b_close); bb.addWidget(b_over); bb.addWidget(b_savenew)
+        v.addLayout(bb)
+
+        self._render()
+
+    # ---------- rendering ----------
+    def _render(self):
+        page = self.doc[self.page_no]
+        mat = fitz.Matrix(self.zoom, self.zoom)
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        img = QtGui.QImage(pix.samples, pix.width, pix.height,
+                           pix.stride, QtGui.QImage.Format_RGB888)
+        self.canvas.setPixmap(QtGui.QPixmap.fromImage(img.copy()))
+        self.canvas.resize(pix.width, pix.height)
+        self.spans = _pdftext.page_spans(self.doc, self.page_no)
+        self.lbl_page.setText("  %s %d / %d  " % (
+            self.app.L("Page", "Page"), self.page_no + 1, self.doc.page_count))
+        self.b_prev.setEnabled(self.page_no > 0)
+        self.b_next.setEnabled(self.page_no < self.doc.page_count - 1)
+        self._kill_editor()
+
+    def _set_zoom(self, z):
+        self.zoom = max(0.5, min(4.0, z))
+        self._render()
+
+    def _go(self, d):
+        n = self.page_no + d
+        if 0 <= n < self.doc.page_count:
+            self.page_no = n
+            self._render()
+
+    # ---------- hit-testing ----------
+    def _span_at(self, qpos):
+        x = qpos.x() / self.zoom
+        y = qpos.y() / self.zoom
+        best = None
+        for sp in self.spans:
+            b = sp["bbox"]
+            if b[0] <= x <= b[2] and b[1] <= y <= b[3]:
+                return sp
+            # thoda margin (chhote text ke liye)
+            if b[0] - 2 <= x <= b[2] + 2 and b[1] - 3 <= y <= b[3] + 3:
+                best = sp
+        return best
+
+    def _canvas_click(self, qpos):
+        sp = self._span_at(qpos)
+        if sp:
+            self._open_editor(sp)
+        else:
+            self._kill_editor()
+
+    # ---------- inline edit box ----------
+    def _open_editor(self, sp):
+        self._kill_editor()
+        z = self.zoom
+        b = sp["bbox"]
+        ed = QtWidgets.QLineEdit(self.canvas)
+        ed.setText(sp["text"])
+        fs = max(9, int(sp["size"] * z * 0.9))
+        ed.setStyleSheet(
+            "QLineEdit{background:#FFFDE7;border:2px solid #2563EB;border-radius:3px;"
+            "padding:0 3px;font-size:%dpx;color:#111;}" % fs)
+        x = int(b[0] * z) - 3
+        y = int(b[1] * z) - 3
+        w = max(60, int((b[2] - b[0]) * z) + 40)
+        h = max(fs + 8, int((b[3] - b[1]) * z) + 8)
+        ed.setGeometry(x, y, w, h)
+        ed.show(); ed.setFocus(); ed.selectAll()
+        ed.returnPressed.connect(self._commit_editor)
+        self._editor = ed
+        self._edit_span = sp
+
+    def _kill_editor(self):
+        if self._editor is not None:
+            try:
+                self._editor.deleteLater()
+            except Exception:
+                pass
+        self._editor = None
+        self._edit_span = None
+
+    def _commit_editor(self):
+        if self._editor is None or self._edit_span is None:
+            return
+        new = self._editor.text()
+        old = self._edit_span["text"]
+        sp = self._edit_span
+        self._kill_editor()
+        if new == old:
+            return
+        try:
+            _pdftext.replace_span(self.doc, self.page_no, sp, new)
+            self.dirty = True
+            self.lbl_status.setText(self.app.L("● Badlaav hue (save karna baaki)",
+                                               "● Edited (unsaved)"))
+            self._render()
+        except Exception as exc:
+            self.app._warn(self.app.L("Text badalne me dikkat:\n%s",
+                                      "Could not edit text:\n%s") % exc)
+
+    # ---------- find & replace ----------
+    def _find_replace(self):
+        L = self.app.L
+        d = QtWidgets.QDialog(self)
+        d.setWindowTitle(L("Dhoondo aur badlo", "Find & Replace"))
+        fl = QtWidgets.QFormLayout(d)
+        e_find = QtWidgets.QLineEdit()
+        e_repl = QtWidgets.QLineEdit()
+        chk_all = QtWidgets.QCheckBox(L("Saare page (poori PDF)", "All pages"))
+        chk_all.setChecked(True)
+        fl.addRow(L("Ye dhoondo:", "Find:"), e_find)
+        fl.addRow(L("Isse badlo:", "Replace with:"), e_repl)
+        fl.addRow("", chk_all)
+        bx = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        bx.accepted.connect(d.accept); bx.rejected.connect(d.reject)
+        fl.addRow(bx)
+        if d.exec_() != QtWidgets.QDialog.Accepted:
+            return
+        find = e_find.text()
+        repl = e_repl.text()
+        if not find:
+            return
+        pages = range(self.doc.page_count) if chk_all.isChecked() else [self.page_no]
+        n = 0
+        try:
+            for pno in pages:
+                for sp in _pdftext.page_spans(self.doc, pno):
+                    if find in sp["text"]:
+                        _pdftext.replace_span(self.doc, pno, sp,
+                                              sp["text"].replace(find, repl))
+                        n += 1
+        except Exception as exc:
+            self.app._warn(self.app.L("Badalne me dikkat:\n%s",
+                                      "Replace failed:\n%s") % exc)
+            return
+        if n:
+            self.dirty = True
+            self.lbl_status.setText(self.app.L("● %d jagah badla (save baaki)" % n,
+                                               "● Replaced in %d place(s) (unsaved)" % n))
+        else:
+            self.app._toast(self.app.L("Kuch nahi mila.", "Nothing matched."))
+        self._render()
+
+    # ---------- save ----------
+    def _save(self, overwrite):
+        if not self.dirty:
+            self.app._toast(self.app.L("Koi badlaav nahi.", "No changes to save."))
+            return
+        L = self.app.L
+        try:
+            if overwrite:
+                d = os.path.dirname(self.src)
+                fd, tmp = tempfile.mkstemp(suffix=".pdf", dir=d); os.close(fd)
+                self.doc.save(tmp, garbage=4, deflate=True)
+                self.doc.close()
+                os.replace(tmp, self.src)
+                self.doc = fitz.open(self.src)
+                out = self.src
+            else:
+                out = self.app._unique_fs_path(
+                    os.path.splitext(self.src)[0] + " (edited).pdf")
+                self.doc.save(out, garbage=4, deflate=True)
+        except Exception as exc:
+            self.app._warn(L("Save nahi hua:\n%s", "Save failed:\n%s") % exc)
+            return
+        self.dirty = False
+        self.lbl_status.setText(L("✓ Save ho gaya", "✓ Saved"))
+        try:
+            self.app._invalidate_files_index(); self.app._refresh_files_root()
+        except Exception:
+            pass
+        self.app._toast(L("✓ Save: %s" % os.path.basename(out),
+                          "✓ Saved: %s" % os.path.basename(out)))
+        if not overwrite:
+            try:
+                self.app._open_path(os.path.dirname(out))
+            except Exception:
+                pass
+
+    def _close_check(self):
+        if self.dirty:
+            r = QtWidgets.QMessageBox.question(
+                self, self.app.L("Save karein?", "Save changes?"),
+                self.app.L("Badlaav save nahi hue. Save karke band karein?",
+                           "You have unsaved edits. Save before closing?"),
+                QtWidgets.QMessageBox.Save | QtWidgets.QMessageBox.Discard
+                | QtWidgets.QMessageBox.Cancel)
+            if r == QtWidgets.QMessageBox.Cancel:
+                return
+            if r == QtWidgets.QMessageBox.Save:
+                self._save(overwrite=False)
+        self.accept()
+
+    def closeEvent(self, e):
+        try:
+            self.doc.close()
+        except Exception:
+            pass
+        super().closeEvent(e)
 
 
 class ScannerWindow(QtWidgets.QMainWindow):
@@ -19098,10 +19428,43 @@ if the toggle is ticked).</p>
         self._pdf_run(lambda: _pdftools.page_numbers_file(path, out, (hdr or "").strip()),
                       self.L("Page-number PDF", "Numbered PDF"))
 
+    def _pdf_edit_text(self, path):
+        """Digital PDF ka ASLI text badlo (click karke edit)."""
+        if not HAS_FITZ:
+            self._warn(self.L("Ye feature ke liye PyMuPDF chahiye.",
+                              "This feature needs PyMuPDF."))
+            return
+        try:
+            has = _pdftext.has_text_layer(path)
+        except Exception as exc:
+            self._warn(self.L("PDF khul nahi payi:\n%s", "Could not open PDF:\n%s") % exc)
+            return
+        if not has:
+            QtWidgets.QMessageBox.information(
+                self, self.L("Scanned PDF", "Scanned PDF"),
+                self.L("Is PDF me asli (selectable) text nahi hai — ye "
+                       "scan/photo-jaisi PDF lagti hai. Ese me text seedha "
+                       "nahi badla ja sakta.\n\n(Text-edit sirf Word/print-"
+                       "se-bani digital PDF par chalta hai.)",
+                       "This PDF has no real (selectable) text — it looks "
+                       "like a scan/photo. Its text can't be edited directly.\n\n"
+                       "(Text editing works only on digital PDFs made from "
+                       "Word/print-to-PDF.)"))
+            return
+        try:
+            dlg = PdfTextEditDialog(self, path)
+            dlg.exec_()
+        except Exception as exc:
+            self._warn(self.L("Editor khul nahi paya:\n%s",
+                              "Could not open editor:\n%s") % exc)
+
     def _add_pdf_tools_menu(self, menu, path):
         """Ek PDF par '📄 PDF Tools' submenu."""
         pt = menu.addMenu("📄 " + self.L("PDF Tools", "PDF Tools"))
         L = self.L
+        pt.addAction("✏ " + L("Text badlo (digital PDF)…", "Edit text (digital PDF)…"),
+                     lambda: self._pdf_edit_text(path))
+        pt.addSeparator()
         pt.addAction("✂ " + L("Page nikaalo (extract)…", "Extract pages…"),
                      lambda: self._pdf_extract(path))
         pt.addAction("🗑 " + L("Page hatao…", "Delete pages…"),
