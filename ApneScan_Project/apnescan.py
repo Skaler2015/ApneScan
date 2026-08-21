@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "323"
+VERSION = "324"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -14969,7 +14969,13 @@ if the toggle is ticked).</p>
 
         def _col(caption, w, width=None):
             # chhota caption UPAR + control NEECHE — ribbon jaisi ek line
-            if width:
+            # (v324) combo apne content ke hisaab se poora chaura ho — text
+            # kabhi na kate; 'width' ab sirf MINIMUM hai (fixed nahi).
+            if isinstance(w, QtWidgets.QComboBox):
+                w.setSizeAdjustPolicy(QtWidgets.QComboBox.AdjustToContents)
+                if width:
+                    w.setMinimumWidth(width)
+            elif width:
                 w.setFixedWidth(width)
             _cbox = QtWidgets.QVBoxLayout(); _cbox.setContentsMargins(0, 0, 0, 0); _cbox.setSpacing(0)
             # mockup jaisa UPPERCASE chhota caption
@@ -15046,14 +15052,14 @@ if the toggle is ticked).</p>
         self.btn_adv.toggled.connect(self._toggle_adv_panel)
         # MAIN bar par sirf KAAM KI cheezein: Resolution + Bit depth
         self.cmb_dpi = QtWidgets.QComboBox(); self.cmb_dpi.addItems([d + " dpi" for d in RESOLUTIONS])
-        self.cmb_dpi.addItem(self.L("Custom… (apni dpi)", "Custom…"))
+        self.cmb_dpi.addItem(self.L("Custom…", "Custom…"))
         self.cmb_dpi.setCurrentText("300 dpi")
         self.cmb_dpi.currentTextChanged.connect(self._on_panel_dpi_changed)
         sb.addWidget(_col("Resolution", self.cmb_dpi, 88))
         self.cmb_depth = QtWidgets.QComboBox(); self.cmb_depth.addItems(["24-bit Colour", "Grayscale", "Black & White"]); self.cmb_depth.setCurrentText("Grayscale")
         sb.addWidget(_col("Color", self.cmb_depth, 110))
         # ✨ redesign: PAPER (page size) ab mockup jaisa MAIN bar par
-        self.cmb_pagesize = QtWidgets.QComboBox(); self.cmb_pagesize.addItems(["Auto (detect each page's size)", "A4 (210x297 mm)", "Letter", "Legal", "A5"])
+        self.cmb_pagesize = QtWidgets.QComboBox(); self.cmb_pagesize.addItems(["Auto", "A4", "Letter", "Legal", "A5"])
         self.cmb_pagesize.setToolTip("Auto = detect each page's real size (mixed sizes / ID card / half page too). A4/Letter/Legal = fixed size.")
         sb.addWidget(_col("Paper", self.cmb_pagesize, 96))
         # baaki sab ⚙ Advanced ke andar (default band)
