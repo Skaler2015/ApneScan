@@ -254,7 +254,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "320"
+VERSION = "321"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -19647,7 +19647,7 @@ if the toggle is ticked).</p>
         """Ek PDF par '📄 PDF Tools' submenu."""
         pt = menu.addMenu("📄 " + self.L("PDF Tools", "PDF Tools"))
         L = self.L
-        pt.addAction("✏ " + L("Text badlo (digital PDF)…", "Edit text (digital PDF)…"),
+        pt.addAction("✏ " + L("Text badlo (digital + scan)…", "Edit text (digital + scan)…"),
                      lambda: self._pdf_edit_text(path))
         pt.addSeparator()
         pt.addAction("✂ " + L("Page nikaalo (extract)…", "Extract pages…"),
@@ -24277,13 +24277,11 @@ if the toggle is ticked).</p>
                           (x + w) / dpi_scale, (y + h) / dpi_scale, t))
         return words
 
-    def _extract_tables_for_excel(self, src):
-        """PDF/pages se tables (rows x cols) nikaalo — HUBAHU sheet banane ke
-        liye. Digital PDF: PyMuPDF find_tables() (sabse sahi); na mile to
-        text-position se grid. Scanned PDF/pages: OCR (--psm 6) + column
-        clustering. Lauta: list of {page, rows}."""
-        tables = []
-        # ---- Case A: PDF file, PyMuPDF available ----
+    def _excel_sections(self, src):
+        """PDF/pages ko per-page 'sections' me nikaalo:
+        {page, header(grid), table(grid)}.  Digital: find_tables() + upar ka
+        header text; scanned/pages: OCR grid (header khaali)."""
+        # ---- Digital / PDF via PyMuPDF ----
         if src and HAS_FITZ:
             doc = fitz.open(src)
             try:
@@ -24293,20 +24291,21 @@ if the toggle is ticked).</p>
                 except Exception:
                     digital = False
                 if digital:
-                    tables = _pdftable.find_tables_digital(doc)
-                    if tables:
-                        return tables
-                    # table-lines na hon to bhi text-position se grid
+                    secs = _pdftable.digital_sections(doc)
+                    if any(s["table"] for s in secs):
+                        return secs
+                    # koi ruled table nahi -> har page text-position grid
+                    secs = []
                     for pno in range(doc.page_count):
                         words = _pdftable.page_words_digital(doc, pno)
                         g = _pdftable.words_to_grid(words)
-                        if g:
-                            tables.append({"page": pno, "rows": g})
-                    if tables:
-                        return tables
-                # scanned (ya kuch na mila) -> har page OCR
+                        secs.append({"page": pno, "header": [], "table": g})
+                    if any(s["table"] for s in secs):
+                        return secs
+                # scanned PDF -> har page OCR
                 if not tesseract_available():
-                    return tables
+                    return []
+                secs = []
                 for pno in range(doc.page_count):
                     page = doc[pno]
                     zoom = 200 / 72.0
@@ -24314,27 +24313,38 @@ if the toggle is ticked).</p>
                     im = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
                     words = self._ocr_table_words(im, dpi_scale=zoom)
                     g = _pdftable.words_to_grid(words)
-                    if g:
-                        tables.append({"page": pno, "rows": g})
-                return tables
+                    secs.append({"page": pno, "header": [], "table": g})
+                return secs
             finally:
                 doc.close()
-        # ---- Case B: no fitz, or scanned image pages already open ----
+        # ---- No fitz, or scanned image pages already open ----
         if not tesseract_available():
-            return tables
+            return []
         pages = (pdf_to_images(src, self._tmpdir) or []) if src else self._ordered_paths()
+        secs = []
         for pno, p in enumerate(pages):
             with Image.open(p) as im:
                 words = self._ocr_table_words(im)
             g = _pdftable.words_to_grid(words)
-            if g:
-                tables.append({"page": pno, "rows": g})
-        return tables
+            secs.append({"page": pno, "header": [], "table": g})
+        return secs
+
+    def _pdf_page_count_quick(self, src):
+        try:
+            if src and HAS_FITZ:
+                d = fitz.open(src); n = d.page_count; d.close(); return n
+            if src and HAS_OCR_LIBS:
+                return len(PdfReader(src).pages)
+            if not src:
+                return len(self._ordered_paths())
+        except Exception:
+            pass
+        return 1
 
     def pdf_to_excel(self, src=None):
-        """PDF ki table/sheet ko HUBAHU Excel me nikaalo (rows/cols sahi jagah).
-        Digital PDF me table seedhe padhi jaati hai; scanned PDF me OCR se.
-        src diya ho (My Files right-click) to seedha usi PDF par kaam."""
+        """PDF ki table/sheet ko HUBAHU Excel me nikaalo (rows/cols sahi jagah,
+        aur table ke upar ka bank/account header bhi). Kai page ho to poochte
+        hain: ek hi sheet ya har page alag. src diya ho to usi PDF par."""
         if not HAS_XLSX:
             self._warn(self.L("Iske liye openpyxl chahiye.",
                               "This needs openpyxl.")); return
@@ -24342,14 +24352,43 @@ if the toggle is ticked).</p>
             src = self._pick_pdf('Which PDF to convert to Excel?')
             if not src:
                 return
+        # ---- kai page? -> ek sheet ya har page alag poocho ----
+        combine = True
+        if self._pdf_page_count_quick(src) > 1:
+            box = QtWidgets.QMessageBox(self)
+            box.setWindowTitle(self.L("Excel kaise banayein?", "How to build the Excel?"))
+            box.setIcon(QtWidgets.QMessageBox.Question)
+            box.setText(self.L(
+                "Is PDF me kai page hain. Excel kis tarah banani hai?",
+                "This PDF has multiple pages. How should the Excel be built?"))
+            b_one = box.addButton(
+                self.L("Ek hi sheet me sab (recommended)", "All in one sheet (recommended)"),
+                QtWidgets.QMessageBox.AcceptRole)
+            b_each = box.addButton(
+                self.L("Har page ki alag sheet", "Separate sheet per page"),
+                QtWidgets.QMessageBox.RejectRole)
+            box.addButton(QtWidgets.QMessageBox.Cancel)
+            box.setDefaultButton(b_one)
+            box.exec_()
+            clicked = box.clickedButton()
+            if clicked is None or clicked not in (b_one, b_each):
+                return
+            combine = (clicked is b_one)
         default = (src[:-4] + ".xlsx") if src else self._build_filename(".xlsx")
         out, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, 'Save Excel', default, "Excel (*.xlsx)")
         if not out:
             return
+        title = (os.path.splitext(os.path.basename(src))[0][:31]
+                 if src else "Statement")
 
         def job():
-            tables = self._extract_tables_for_excel(src)
+            secs = self._excel_sections(src)
+            if not secs or not any(s.get("table") or s.get("header") for s in secs):
+                raise RuntimeError(self.L(
+                    "Is PDF me koi table/sheet nahi mili.",
+                    "No table/sheet found in this PDF."))
+            tables = _pdftable.compose_sheets(secs, combine, title=title)
             if not tables:
                 raise RuntimeError(self.L(
                     "Is PDF me koi table/sheet nahi mili.",

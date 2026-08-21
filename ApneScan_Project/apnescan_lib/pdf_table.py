@@ -57,6 +57,82 @@ def page_words_digital(doc, pno):
     return [(w[0], w[1], w[2], w[3], w[4]) for w in words if str(w[4]).strip()]
 
 
+def digital_sections(doc):
+    """Har page ko HUBAHU nikaalo: table(s) + table ke UPAR/NEECHE ka baaki
+    text (bank/account header jaisa) bhi. Lauta: list of dict
+    {page, header: grid, table: grid}.  header = table se bahar ke words ka
+    grid (key:value layout), table = main transaction grid."""
+    sections = []
+    for pno in range(doc.page_count):
+        page = doc[pno]
+        try:
+            tf = page.find_tables()
+        except Exception:
+            tf = None
+        tbls = sorted(getattr(tf, "tables", []) if tf else [],
+                      key=lambda t: t.bbox[1])
+        table_grid = []
+        top = None
+        bottom = None
+        if tbls:
+            # sabse bada table (sabse zyada rows) = main table
+            main = max(tbls, key=lambda t: len(t.extract()))
+            grid = main.extract()
+            table_grid = [[("" if c is None else str(c)).strip() for c in r]
+                          for r in grid]
+            table_grid = [r for r in table_grid if any(c for c in r)]
+            top, bottom = main.bbox[1], main.bbox[3]
+        # header/loose text = table ke bahar ke words (upar wale)
+        words = page_words_digital(doc, pno)
+        if top is not None:
+            loose = [w for w in words if (w[1] + w[3]) / 2.0 < top - 2]
+        else:
+            loose = words
+        header = words_to_grid(loose) if loose else []
+        sections.append({"page": pno, "header": header, "table": table_grid})
+    return sections
+
+
+def _norm_row(row):
+    return " ".join(str(c).strip().lower() for c in row if str(c).strip())
+
+
+def compose_sheets(sections, combine, title="Statement"):
+    """sections (list of {page, header, table}) ko sheets me badlo.
+    combine=True  -> SAB ek hi sheet me (page-1 header + table, aage ke
+                     pages ke sirf data rows; dobara aane wali column-header
+                     row hata di jaati hai).
+    combine=False -> har page ki apni sheet (uska header + table).
+    Lauta: list of {title/page, rows} (write_tables_xlsx ke liye)."""
+    if not combine:
+        out = []
+        for s in sections:
+            rows = list(s.get("header", [])) + list(s.get("table", []))
+            if rows:
+                out.append({"page": s["page"], "rows": rows})
+        return out
+    # ---- combine ----
+    rows = []
+    colhdr = None
+    first = True
+    for s in sections:
+        tbl = s.get("table", [])
+        if first:
+            rows.extend(s.get("header", []))     # page-1 ka poora header
+            if tbl:
+                colhdr = _norm_row(tbl[0])
+                rows.extend(tbl)                 # header-row samet
+            first = False
+        else:
+            if not tbl:
+                continue
+            body = tbl
+            if colhdr is not None and body and _norm_row(body[0]) == colhdr:
+                body = body[1:]                  # repeat column-header hatao
+            rows.extend(body)
+    return [{"title": title, "rows": rows}] if rows else []
+
+
 # --------------------------------------------------------------------------
 # 2) WORDS -> GRID  (scanned OCR ke liye bhi, digital fallback ke liye bhi)
 # --------------------------------------------------------------------------
@@ -208,9 +284,12 @@ def write_tables_xlsx(tables, out, header_bold=True, borders=True):
     for ti, tb in enumerate(tables, 1):
         rows = tb.get("rows", [])
         pg = tb.get("page")
-        name = ("Page %d" % (pg + 1)) if pg is not None else ("Table %d" % ti)
-        if len(tables) > 1 and pg is not None:
-            name = "P%d-T%d" % (pg + 1, ti)
+        if tb.get("title"):
+            name = str(tb["title"])
+        elif pg is not None:
+            name = "Page %d" % (pg + 1)
+        else:
+            name = "Table %d" % ti
         name = name[:31] or ("Sheet%d" % ti)
         base = name; k = 2
         while name in used:
@@ -224,7 +303,8 @@ def write_tables_xlsx(tables, out, header_bold=True, borders=True):
                 cell = ws.cell(row=ri, column=ci + 1, value=val)
                 if borders:
                     cell.border = _border()
-                cell.alignment = Alignment(vertical="center", wrap_text=False)
+                # wrap_text=True -> multi-line cell (jaise PDF me) waisa dikhe
+                cell.alignment = Alignment(vertical="center", wrap_text=True)
                 if header_bold and ri == 1:
                     cell.font = Font(bold=True)
         _autofit(ws, rows)
