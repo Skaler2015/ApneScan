@@ -86,6 +86,7 @@ from apnescan_lib.file_search import SearchEngine as FileSearchEngine, ENGINE as
 # PDF tools engine — file→file operations for the My Files right-click menu.
 from apnescan_lib import pdf_tools as _pdftools
 from apnescan_lib import pdf_text_edit as _pdftext
+from apnescan_lib import pdf_table as _pdftable
 
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
@@ -253,7 +254,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "318"
+VERSION = "319"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -24200,11 +24201,89 @@ if the toggle is ticked).</p>
             QtWidgets.QMessageBox.information(self, "Done", "File created:\n%s" % res)
         self._run_bg(job, done, "Creating Word… (OCR running)")
 
+    def _ocr_table_words(self, pil_img, dpi_scale=1.0):
+        """Ek page-image par table-friendly OCR (--psm 6) — har word position
+        ke saath: (x0,y0,x1,y1,text). Single-digit cell bhi rakhta hai."""
+        data = pytesseract.image_to_data(
+            pil_img.convert("RGB"), lang="eng+hin", config="--psm 6",
+            output_type=pytesseract.Output.DICT)
+        words = []
+        for i in range(len(data["text"])):
+            t = (data["text"][i] or "").strip()
+            if not t:
+                continue
+            try:
+                if float(data["conf"][i]) < 0:
+                    continue
+            except Exception:
+                pass
+            x, y = data["left"][i], data["top"][i]
+            w, h = data["width"][i], data["height"][i]
+            words.append((x / dpi_scale, y / dpi_scale,
+                          (x + w) / dpi_scale, (y + h) / dpi_scale, t))
+        return words
+
+    def _extract_tables_for_excel(self, src):
+        """PDF/pages se tables (rows x cols) nikaalo — HUBAHU sheet banane ke
+        liye. Digital PDF: PyMuPDF find_tables() (sabse sahi); na mile to
+        text-position se grid. Scanned PDF/pages: OCR (--psm 6) + column
+        clustering. Lauta: list of {page, rows}."""
+        tables = []
+        # ---- Case A: PDF file, PyMuPDF available ----
+        if src and HAS_FITZ:
+            doc = fitz.open(src)
+            try:
+                digital = False
+                try:
+                    digital = _pdftext.has_text_layer(src)
+                except Exception:
+                    digital = False
+                if digital:
+                    tables = _pdftable.find_tables_digital(doc)
+                    if tables:
+                        return tables
+                    # table-lines na hon to bhi text-position se grid
+                    for pno in range(doc.page_count):
+                        words = _pdftable.page_words_digital(doc, pno)
+                        g = _pdftable.words_to_grid(words)
+                        if g:
+                            tables.append({"page": pno, "rows": g})
+                    if tables:
+                        return tables
+                # scanned (ya kuch na mila) -> har page OCR
+                if not tesseract_available():
+                    return tables
+                for pno in range(doc.page_count):
+                    page = doc[pno]
+                    zoom = 200 / 72.0
+                    pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                    im = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                    words = self._ocr_table_words(im, dpi_scale=zoom)
+                    g = _pdftable.words_to_grid(words)
+                    if g:
+                        tables.append({"page": pno, "rows": g})
+                return tables
+            finally:
+                doc.close()
+        # ---- Case B: no fitz, or scanned image pages already open ----
+        if not tesseract_available():
+            return tables
+        pages = (pdf_to_images(src, self._tmpdir) or []) if src else self._ordered_paths()
+        for pno, p in enumerate(pages):
+            with Image.open(p) as im:
+                words = self._ocr_table_words(im)
+            g = _pdftable.words_to_grid(words)
+            if g:
+                tables.append({"page": pno, "rows": g})
+        return tables
+
     def pdf_to_excel(self, src=None):
-        """Bill/table wale pages ko OCR karke Excel me nikaalo (best-effort).
+        """PDF ki table/sheet ko HUBAHU Excel me nikaalo (rows/cols sahi jagah).
+        Digital PDF me table seedhe padhi jaati hai; scanned PDF me OCR se.
         src diya ho (My Files right-click) to seedha usi PDF par kaam."""
-        if not tesseract_available() or not HAS_XLSX:
-            self._warn("This needs Tesseract OCR + openpyxl."); return
+        if not HAS_XLSX:
+            self._warn(self.L("Iske liye openpyxl chahiye.",
+                              "This needs openpyxl.")); return
         if not src and not self._ordered_paths():
             src = self._pick_pdf('Which PDF to convert to Excel?')
             if not src:
@@ -24216,41 +24295,28 @@ if the toggle is ticked).</p>
             return
 
         def job():
-            pages = (pdf_to_images(src, self._tmpdir) or []) if src else self._ordered_paths()
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            for p in pages:
-                with Image.open(p) as im:
-                    data = pytesseract.image_to_data(
-                        im.convert("RGB"), lang="eng+hin",
-                        output_type=pytesseract.Output.DICT)
-                lines = {}
-                for i in range(len(data["text"])):
-                    w = (data["text"][i] or "").strip()
-                    if not w:
-                        continue
-                    key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
-                    lines.setdefault(key, []).append((data["left"][i], data["width"][i], w))
-                for key in sorted(lines):
-                    words = sorted(lines[key])
-                    cells, cur, last_end = [], [], None
-                    for left, width, w in words:
-                        if last_end is not None and left - last_end > 45:
-                            cells.append(" ".join(cur)); cur = []
-                        cur.append(w)
-                        last_end = left + width
-                    if cur:
-                        cells.append(" ".join(cur))
-                    ws.append(cells)
-                ws.append([])
-            wb.save(out)
+            tables = self._extract_tables_for_excel(src)
+            if not tables:
+                raise RuntimeError(self.L(
+                    "Is PDF me koi table/sheet nahi mili.",
+                    "No table/sheet found in this PDF."))
+            _pdftable.write_tables_xlsx(tables, out)
             return out
 
         def done(res):
             if isinstance(res, Exception):
-                self._warn("Failed to create Excel:\n%s" % res); return
-            QtWidgets.QMessageBox.information(self, "Done", "Excel created:\n%s" % res)
-        self._run_bg(job, done, "Creating Excel… (OCR running)")
+                self._warn(self.L("Excel nahi bani:\n%s",
+                                  "Failed to create Excel:\n%s") % res)
+                return
+            QtWidgets.QMessageBox.information(
+                self, self.L("Ho gaya", "Done"),
+                self.L("Excel ban gayi:\n%s", "Excel created:\n%s") % res)
+            try:
+                self._open_path(os.path.dirname(res))
+            except Exception:
+                pass
+        self._run_bg(job, done, self.L("Excel ban rahi… (table padh rahe)",
+                                       "Creating Excel… (reading table)"))
 
     def save_archival_pdf(self):
         """High-quality PDF + poora metadata (title/date/producer) — lambe samay
