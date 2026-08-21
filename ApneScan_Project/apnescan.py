@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "325"
+VERSION = "326"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -7277,12 +7277,22 @@ class SearchHLDelegate(QtWidgets.QStyledItemDelegate):
 class UrlListWidget(QtWidgets.QListWidget):
     """Search-results list — items ko FILE ki tarah kheencha ja sake, taaki
     search me mili file ko seedha doc-area me drag karke import kar sakein.
-    Sirf asli files (folder-header nahi) drag hoti hain."""
+    Sirf asli files (folder-header nahi) drag hoti hain.
+    (v326) Bahar se file DROP karne par bhi import ho — search-results par
+    drag-and-drop se import pehle kaam nahi karta tha (DragOnly tha)."""
+
+    # bahar se aayi files (import ke liye) — main window connect karta hai
+    filesDropped = QtCore.pyqtSignal(list)
+
+    _DROP_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff",
+                  ".webp", ".gif", ".heic", ".heif", ".pdf")
 
     def __init__(self):
         super().__init__()
-        self.setDragEnabled(True)
-        self.setDragDropMode(QtWidgets.QAbstractItemView.DragOnly)
+        self.setDragEnabled(True)                 # search-result ko bahar drag
+        self.setAcceptDrops(True)                 # bahar se file drop bhi le
+        self.setDragDropMode(QtWidgets.QAbstractItemView.DragDrop)
+        self.setDefaultDropAction(QtCore.Qt.CopyAction)
         self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
 
     def mimeData(self, items):
@@ -7295,6 +7305,44 @@ class UrlListWidget(QtWidgets.QListWidget):
         if urls:
             md.setUrls(urls)
         return md
+
+    def _external_files(self, e):
+        """Drop me aayi BAHAR ki (importable) files — khud ki list se
+        kheenchi file (self-drop) ko chhod do."""
+        try:
+            if e.source() is self:
+                return []
+        except Exception:
+            pass
+        md = e.mimeData()
+        if not md.hasUrls():
+            return []
+        out = []
+        for u in md.urls():
+            p = u.toLocalFile()
+            if p and os.path.isfile(p) and p.lower().endswith(self._DROP_EXTS):
+                out.append(p)
+        return out
+
+    def dragEnterEvent(self, e):
+        if self._external_files(e):
+            e.acceptProposedAction()
+        else:
+            super().dragEnterEvent(e)
+
+    def dragMoveEvent(self, e):
+        if self._external_files(e):
+            e.acceptProposedAction()
+        else:
+            super().dragMoveEvent(e)
+
+    def dropEvent(self, e):
+        files = self._external_files(e)
+        if files:
+            e.acceptProposedAction()
+            self.filesDropped.emit(files)
+        else:
+            super().dropEvent(e)
 
 
 # ===================== PHONE COMPANION (feature 9) =====================
@@ -15779,6 +15827,9 @@ if the toggle is ticked).</p>
         fp.addWidget(self.files_tree, 1)
         # search ke results (search karte hi tree ki jagah dikhte hain)
         self.files_results = UrlListWidget()      # yahan se file drag = import
+        # (v326) search-results par bahar se file DROP = seedha import
+        self.files_results.filesDropped.connect(
+            lambda files: self._start_import(files, "normal"))
         self.files_results.setWordWrap(True)      # naam kate nahi, agli line me
         self.files_results.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.files_results.setUniformItemSizes(False)
