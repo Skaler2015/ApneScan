@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "329"
+VERSION = "330"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -15847,9 +15847,15 @@ if the toggle is ticked).</p>
             "QToolButton:hover{border-color:#F59E0B;}")
         self.btn_save_search.clicked.connect(self._save_current_search)
         _srow.addWidget(self.btn_save_search)
-        # (v328) user request — search ke saath ke 🌐 (sab folder) / 📄 (PDF text) /
-        # ★ (save search) button WAPAS DIKHAO. Pehle v289 me "saaf look" ke liye
-        # chhupaye the; ab in ki zaroorat hai.
+        # (v330) user request — ye 🌐 / 📄 / ★ button DOBARA HATA diye (hang +
+        # saaf look). Objects zinda hain (reference safe). scope wapas current-
+        # folder par (poori 3.3GB library index karne se app ruk jaati thi).
+        self.btn_search_text.hide()
+        self.btn_scope.hide()
+        self.btn_save_search.hide()
+        # scope wapas current-folder (search_all reads the OPT, not the hidden
+        # button — poori 3.3GB library index karne se app ruk jaati thi).
+        self._opts["search_all_scope"] = False
         self._files_srow = _srow
         fp.addLayout(_srow)
         # ✨ (v192) Filter CHIPS — mockup jaise (Fav/Recent/Today/All);
@@ -15893,8 +15899,11 @@ if the toggle is ticked).</p>
         _chrow.addWidget(_btag)
         _chrow.addStretch(1)
         fp.addLayout(_chrow)
-        # (v328) user request — filter CHIP row (Fav/Recent/Today/All/Tag)
-        # WAPAS DIKHAO (v289 me "saaf look" ke liye chhupayi thi).
+        # (v330) user request — filter CHIP row (Fav/Recent/Today/All/Tag)
+        # DOBARA HATA di (hang + saaf look). Filter "All" par hi; objects zinda.
+        for _cb in self._mf_chips.values():
+            _cb.hide()
+        _btag.hide()
         # (v250) SORT buttons — Naam / Date / Size. Ek click = us hisaab se sort
         # (upar se niche); dobara click = ulta (niche se upar). Chalu sort par
         # teer (↑/↓) dikhta hai. Pasand save rehti hai.
