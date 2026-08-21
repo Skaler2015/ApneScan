@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "327"
+VERSION = "328"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -15609,12 +15609,9 @@ if the toggle is ticked).</p>
             "QToolButton:hover{border-color:#F59E0B;}")
         self.btn_save_search.clicked.connect(self._save_current_search)
         _srow.addWidget(self.btn_save_search)
-        # (v289) user request — search ke saath ke 📄 / 📂 / ★ button HATA diye
-        # (saaf look). Objects zinda hain (koi reference na toote); inside-text
-        # search band (btn checked=False), scope = current-folder default.
-        self.btn_search_text.hide()
-        self.btn_scope.hide()
-        self.btn_save_search.hide()
+        # (v328) user request — search ke saath ke 🌐 (sab folder) / 📄 (PDF text) /
+        # ★ (save search) button WAPAS DIKHAO. Pehle v289 me "saaf look" ke liye
+        # chhupaye the; ab in ki zaroorat hai.
         self._files_srow = _srow
         fp.addLayout(_srow)
         # ✨ (v192) Filter CHIPS — mockup jaise (Fav/Recent/Today/All);
@@ -15658,11 +15655,8 @@ if the toggle is ticked).</p>
         _chrow.addWidget(_btag)
         _chrow.addStretch(1)
         fp.addLayout(_chrow)
-        # (v289) user request — poori CHIP row (Fav/Recent/Today/All/Tag) HATA di
-        # (saaf look). Filter "All" par hi rehta; objects zinda (reference safe).
-        for _cb in self._mf_chips.values():
-            _cb.hide()
-        _btag.hide()
+        # (v328) user request — filter CHIP row (Fav/Recent/Today/All/Tag)
+        # WAPAS DIKHAO (v289 me "saaf look" ke liye chhupayi thi).
         # (v250) SORT buttons — Naam / Date / Size. Ek click = us hisaab se sort
         # (upar se niche); dobara click = ulta (niche se upar). Chalu sort par
         # teer (↑/↓) dikhta hai. Pasand save rehti hai.
@@ -20212,6 +20206,26 @@ if the toggle is ticked).</p>
     def _files_tree_menu(self, pos):
         idx = self.files_tree.indexAt(pos)
         menu = QtWidgets.QMenu(self)
+        # (v328) Kai FOLDER ek saath chune -> bulk folder actions
+        sel_dirs = self._selected_library_folders()
+        if len(sel_dirs) > 1:
+            menu.addAction(self.L("📁 %d folder le jao…" % len(sel_dirs),
+                                  "📁 Move %d folders…" % len(sel_dirs)),
+                           lambda: self._bulk_move_folders(sel_dirs, copy=False))
+            menu.addAction(self.L("📄 %d folder copy…" % len(sel_dirs),
+                                  "📄 Copy %d folders…" % len(sel_dirs)),
+                           lambda: self._bulk_move_folders(sel_dirs, copy=True))
+            menu.addAction(self.L("🗜 %d folder → ek ZIP…" % len(sel_dirs),
+                                  "🗜 %d folders → one ZIP…" % len(sel_dirs)),
+                           lambda: self._bulk_zip_folders(sel_dirs))
+            menu.addSeparator()
+            menu.addAction(self.L("🗑 %d folder delete (Recycle Bin)" % len(sel_dirs),
+                                  "🗑 Delete %d folders (Recycle Bin)" % len(sel_dirs)),
+                           lambda: self._bulk_delete_folders(sel_dirs))
+            menu.addSeparator()
+            menu.addAction(self.L("🗑 Recycle Bin…", "🗑 Recycle Bin…"), self.show_recycle_bin)
+            menu.exec_(self.files_tree.viewport().mapToGlobal(pos))
+            return
         # Kai files ek saath chuni hui? -> bulk actions
         sel_files = self._selected_library_files()
         if len(sel_files) > 1:
@@ -22241,6 +22255,102 @@ if the toggle is ticked).</p>
         except Exception:
             pass
         return out
+
+    # ---- (v328) Kai FOLDER ek saath chunkar bulk kaam ----
+    def _selected_library_folders(self):
+        out, seen = [], set()
+        try:
+            for idx in self.files_tree.selectionModel().selectedIndexes():
+                if idx.column() != 0:
+                    continue
+                p = self.files_model.filePath(idx)
+                if p and os.path.isdir(p) and p not in seen:
+                    seen.add(p); out.append(p)
+        except Exception:
+            pass
+        return out
+
+    def _bulk_move_folders(self, dirs, copy=False):
+        dest = QtWidgets.QFileDialog.getExistingDirectory(
+            self, self.L("Kaunse folder me?", "Into which folder?"),
+            self._panel_current_dir())
+        if not dest:
+            return
+
+        def job():
+            done = 0
+            for d in dirs:
+                try:
+                    base = os.path.basename(d.rstrip("/\\")) or "folder"
+                    dst = os.path.join(dest, base)
+                    k = 2
+                    while os.path.exists(dst):
+                        dst = os.path.join(dest, "%s %d" % (base, k)); k += 1
+                    # apne hi andar move/copy mat karo
+                    if os.path.abspath(dst).startswith(os.path.abspath(d) + os.sep):
+                        continue
+                    if copy:
+                        shutil.copytree(d, dst)
+                    else:
+                        shutil.move(d, dst)
+                    done += 1
+                except Exception:
+                    pass
+            return done
+
+        def on_done(res):
+            if isinstance(res, Exception):
+                self._warn("Failed:\n%s" % res); return
+            self.status.showMessage(
+                (self.L("📄 %d folder copy ho gaye", "📄 Copied %d folder(s)") if copy
+                 else self.L("📁 %d folder le jaaye gaye", "📁 Moved %d folder(s)")) % res, 5000)
+            self._invalidate_files_index(); self._refresh_files_root()
+        self._run_bg(job, on_done, self.L("Ho raha hai…", "Working…"))
+
+    def _bulk_delete_folders(self, dirs):
+        n = len(dirs)
+        if QtWidgets.QMessageBox.question(
+                self, "Delete",
+                self.L("%d folder Recycle Bin me daalein? (wapas la sakte hain)" % n,
+                       "Move %d folders to Recycle Bin? (restorable)" % n),
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            return
+        done = 0
+        for d in dirs:
+            try:
+                if self._trash_file(d):
+                    done += 1
+            except Exception:
+                pass
+        self.status.showMessage(self.L("🗑 %d folder Recycle Bin me" % done,
+                                       "🗑 %d folders moved to Recycle Bin" % done), 6000)
+        self._invalidate_files_index(); self._refresh_files_root()
+
+    def _bulk_zip_folders(self, dirs):
+        import zipfile
+        default = os.path.join(self._panel_current_dir() or self._files_root(), "folders.zip")
+        out, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("ZIP kahan save karein?", "Save ZIP"), default, "ZIP (*.zip)")
+        if not out:
+            return
+
+        def job():
+            with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+                for d in dirs:
+                    base = os.path.basename(d.rstrip("/\\")) or "folder"
+                    for dp, dns, fns in os.walk(d):
+                        for f in fns:
+                            fp = os.path.join(dp, f)
+                            z.write(fp, os.path.join(base, os.path.relpath(fp, d)))
+            return out
+
+        def on_done(res):
+            if isinstance(res, Exception):
+                self._warn("Failed:\n%s" % res); return
+            self._toast(self.L("✓ ZIP ban gayi", "✓ ZIP created"))
+            self._invalidate_files_index(); self._refresh_files_root()
+        self._run_bg(job, on_done, self.L("ZIP ban rahi…", "Making ZIP…"))
 
     # ---- (v274) naye bulk/single actions ----
     _IMPORTABLE_EXTS = (".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
