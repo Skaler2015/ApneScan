@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "345"
+VERSION = "346"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -10572,6 +10572,35 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 self._ev_flush()
         except Exception:
             pass
+        # (v346) SAB KUCH ginti me — user jo bhi kare (menu/nav/edit/button…)
+        # AAP analytics me count ho. 'feat:' yahan chhodo — wo _an_report se
+        # already gine jaate (double na ho).
+        try:
+            k = self._norm_action(name)
+            if k:
+                self._mycount(k, 1)
+        except Exception:
+            pass
+
+    def _norm_action(self, name):
+        """(v346) _ev_push ke naam ko AAP-analytics ke saaf key me badlo — SAB
+        kuch ginti me. 'feat:' (double), app-life aur warning/internal events
+        hi chhode jaate hain; baaki HAR action 'prefix:slug' me count hota hai."""
+        s = str(name or "")
+        if ":" in s:
+            pre, rest = s.split(":", 1)
+        else:
+            pre, rest = "act", s
+        rest = rest.strip()
+        if pre in ("app", "orient", "feat"):
+            return None                       # app-life/internal/feat (alag ginte)
+        low = (pre + ":" + rest).lower()
+        if "warn" in low or "auto-clean" in low or "autoinstall" in low \
+                or "no-tesseract" in low:
+            return None
+        slug = "".join(ch for ch in rest.lower().replace(" ", "-")
+                       if ch.isalnum() or ch in "-_")
+        return (pre + ":" + slug)[:24] if slug else None
 
     def _ev_flush(self):
         q = getattr(self, "_ev_q", None)
@@ -11384,6 +11413,28 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             return 0
 
+    # curated naam (saaf label) — jo miss ho uska naam key se khud ban jaata
+    _METRIC_LABELS = {
+        "editor": "Editor", "rotate": "Rotate", "crop": "Crop",
+        "delete": "Delete", "deskew": "Deskew", "reorder": "Reorder",
+        "quicklook": "Quick look", "note": "Note", "tag": "Tag",
+        "refer": "Refer", "donate": "Donate", "share": "Share",
+        "watermark": "Watermark", "stamp": "Stamp", "redact": "Redact",
+    }
+    _METRIC_PALETTE = ["#4F46E5", "#DC2626", "#EA580C", "#0D9488", "#9333EA",
+                       "#2563EB", "#16A34A", "#DB2777", "#0891B2", "#CA8A04",
+                       "#7C3AED", "#059669", "#BE185D", "#D97706"]
+
+    def _metric_style(self, key):
+        """Kisi bhi mycounts key ke liye (label, colour) — dynamic metric."""
+        base = str(key).split(":", 1)[-1] if ":" in str(key) else str(key)
+        base = base.replace("-", " ").replace("_", " ").strip()
+        lab = self._METRIC_LABELS.get(base.lower().replace(" ", ""),
+                                      base.title() or str(key))
+        # rang key se pakka (har baar wahi rang)
+        idx = sum(ord(c) for c in str(key)) % len(self._METRIC_PALETTE)
+        return (lab[:16], self._METRIC_PALETTE[idx])
+
     @staticmethod
     def _short_num(n):
         """Bade number chhote: 4906->4.9k, 1240000->12.4L, 3Cr… (column patla)."""
@@ -11434,6 +11485,15 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 ("ID Card",               "#DB2777", None, None, "idcard"),
                 (L("Search", "Search"),   "#64748B", None, None, "search"),
             ]
+            # (v346) DYNAMIC: aur jo bhi kaam user ne kiya (menu/nav/edit/button
+            # ya koi naya feat) — mycounts me hai par upar list me nahi — usko bhi
+            # ek metric bana do. Isse 'sab kuch' ginti me aata hai aur top-10 me
+            # aa sakta hai (jab kaafi baar hua ho).
+            covered = {m[4] for m in METRICS}
+            for k in (self._config.get("mycounts") or {}):
+                if k not in covered:
+                    lab, colr = self._metric_style(k)
+                    METRICS.append((lab, colr, None, None, k))
             # ② period toggle (AAP column): aaj / hafta / mahina / sab
             period = getattr(self, "_world_period", "today")
             days = {"today": 1, "week": 7, "month": 30, "all": None}.get(period, 1)
