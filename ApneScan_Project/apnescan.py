@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "336"
+VERSION = "337"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -22494,38 +22494,70 @@ if the toggle is ticked).</p>
         self._render_files_results(res)
 
     def _show_recent_files(self):
-        """(v335) 'Recent Files' ab ek POPUP me khulta hai — haal ki gatividhi
-        FOLDER ke hisaab se: pehle folder ka naam, phir us folder me kya hua
-        (kaunsi file BANI ya BADLI aur kab). Naya sabse upar."""
+        """(v335) 'Recent Files' ek POPUP me — haal ki gatividhi FOLDER ke
+        hisaab se: pehle folder ka naam, phir us folder me kya hua (kaunsi file
+        BANI ya BADLI aur kab). Naya sabse upar.
+        (v337) POPUP TURANT khulta hai ('⏳ ला रहे…' ke saath) — poori library
+        ka scan background me. Result 45s cache — dobara khola to instant."""
+        # 1) dialog turant dikhao (khaali, loading) — user ko der na lage
+        dlg = self._open_recent_dialog()
+        self._recent_dlg = dlg           # GC se bachao (non-modal)
+        dlg.show(); dlg.raise_(); dlg.activateWindow()
+
+        # 2) haal ka cache taaza ho to seedha bhar do (koi scan nahi)
+        cached = getattr(self, "_recent_cache", None)
+        if cached and (time.time() - cached[0] < 45):
+            self._fill_recent(dlg, cached[1])
+            return
+
+        # 3) warna background me TEZ scan (os.scandir — Windows par stat free)
         root = self._files_root()
 
         def job():
-            items = []
-            try:
-                for dp, dns, fn in os.walk(root):
-                    # chhupe/system folders chhodo (tez + saaf)
-                    dns[:] = [d for d in dns if not d.startswith(".")]
-                    for f in fn:
-                        if f.lower().endswith(self._FILE_EXTS):
-                            p = os.path.join(dp, f)
-                            try:
-                                st = os.stat(p)
-                                items.append((st.st_mtime, st.st_ctime,
-                                              st.st_size, p))
-                            except Exception:
-                                pass
-                    if len(items) >= 20000:
-                        break
-            except Exception:
-                pass
-            items.sort(reverse=True)           # naya (mtime) sabse upar
-            return items[:150]
+            return self._scan_recent_fast(root)
 
         def done(res):
             if isinstance(res, Exception) or not isinstance(res, list):
                 return
-            self._open_recent_dialog(res)
-        self._run_bg(job, done, self.L("Haal ki files…", "Recent files…"))
+            self._recent_cache = (time.time(), res)
+            try:
+                if dlg.isVisible():
+                    self._fill_recent(dlg, res)
+            except Exception:
+                pass
+        self._run_bg_quiet(job, done)
+
+    def _scan_recent_fast(self, root, limit=150, cap=15000, budget=5.0):
+        """os.scandir se TEZ recursive scan — DirEntry.stat() Windows par bina
+        alag syscall ke aata hai (os.walk+os.stat se kai guna tez). Sabse naye
+        `limit` items lautao. cap/budget se bahut badi library par bhi na atke."""
+        items = []
+        exts = self._FILE_EXTS
+        t0 = time.time()
+        stack = [root]
+        seen = 0
+        while stack:
+            d = stack.pop()
+            try:
+                with os.scandir(d) as it:
+                    for e in it:
+                        try:
+                            if e.is_dir(follow_symlinks=False):
+                                if not e.name.startswith("."):
+                                    stack.append(e.path)
+                            elif e.name.lower().endswith(exts):
+                                st = e.stat()
+                                items.append((st.st_mtime, st.st_ctime,
+                                              st.st_size, e.path))
+                                seen += 1
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            if seen >= cap or (time.time() - t0) > budget:
+                break
+        items.sort(reverse=True)             # naya (mtime) sabse upar
+        return items[:limit]
 
     def _recent_when(self, mt):
         """mtime -> 'abhi / X min pehle / aaj HH:MM / kal / DD-MM-YYYY'."""
@@ -22552,20 +22584,9 @@ if the toggle is ticked).</p>
         except Exception:
             return ""
 
-    def _open_recent_dialog(self, items):
-        """items = [(mtime, ctime, size, path), …] naya-sabse-upar.
-        Folder-wise group karke ek saaf popup me dikhao."""
-        _ICON = {".pdf": "📕", ".docx": "📘", ".doc": "📘", ".xlsx": "📗",
-                 ".xls": "📗", ".jpg": "🖼", ".jpeg": "🖼", ".png": "🖼",
-                 ".tif": "🖼", ".tiff": "🖼", ".txt": "📄", ".zip": "🗜"}
-        # folder ke hisaab se group — pehli baar jis kram me mila (=naya upar)
-        groups, order = {}, []
-        for mt, ct, sz, p in items:
-            fol = os.path.dirname(p)
-            if fol not in groups:
-                groups[fol] = []; order.append(fol)
-            groups[fol].append((mt, ct, sz, p))
-
+    def _open_recent_dialog(self):
+        """Popup ka DHAANCHA banao (khaali, '⏳ ला रहे…' ke saath) aur lauta do —
+        data _fill_recent() se baad me bhara jaata hai (turant khulta hai)."""
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(self.L("Recent Files — haal ki gatividhi",
                                   "Recent Files — recent activity"))
@@ -22578,16 +22599,12 @@ if the toggle is ticked).</p>
                    "🕒 What happened recently — grouped by folder"))
         head.setStyleSheet("font-size:16px;font-weight:800;color:#0F172A")
         v.addWidget(head)
-        sub = QtWidgets.QLabel(
-            self.L("%d file · %d folder — naya sabse upar. Double-click = kholo."
-                   % (len(items), len(order)),
-                   "%d files · %d folders — newest first. Double-click to open."
-                   % (len(items), len(order))))
+        sub = QtWidgets.QLabel(self.L("⏳ ला रहे हैं…", "⏳ Loading…"))
         sub.setStyleSheet("color:#64748B;font-size:12.5px")
         v.addWidget(sub)
 
         ed = QtWidgets.QLineEdit()
-        ed.setPlaceholderText(self.L("🔍 naam/folder se chhaanто…",
+        ed.setPlaceholderText(self.L("🔍 naam/folder se chhaanto…",
                                      "🔍 Filter by name or folder…"))
         ed.setStyleSheet("padding:7px 10px;border:1px solid #E2E8F0;"
                          "border-radius:9px;font-size:13px")
@@ -22606,39 +22623,15 @@ if the toggle is ticked).</p>
             "QTreeWidget::item{padding:4px 2px}"
             "QHeaderView::section{background:#F1F5F9;color:#475569;"
             "font-weight:700;border:0;padding:6px 8px}")
-
-        for fol in order:
-            rows = groups[fol]
-            newest = max(r[0] for r in rows)
-            top = QtWidgets.QTreeWidgetItem([
-                "📁  " + (os.path.basename(fol) or fol),
-                self.L("%d badlav" % len(rows), "%d changes" % len(rows)),
-                self._recent_when(newest)])
-            _tf = top.font(0); _tf.setBold(True); top.setFont(0, _tf)
-            top.setForeground(0, QtGui.QColor("#4F46E5"))
-            top.setToolTip(0, fol)
-            top.setData(0, QtCore.Qt.UserRole, fol)
-            top.setData(0, QtCore.Qt.UserRole + 1, "dir")
-            tree.addTopLevelItem(top)
-            for mt, ct, sz, p in rows:
-                ext = os.path.splitext(p)[1].lower()
-                # BANI vs BADLI: ctime~mtime => nayi bani; warna badli.
-                # (Windows par ctime = banne ka samay — isliye sahi rehta hai.)
-                if abs(mt - ct) <= 3:
-                    did = self.L("🟢 bani", "🟢 created")
-                else:
-                    did = self.L("✏️ badli", "✏️ edited")
-                kb = sz / 1024.0
-                szs = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024))
-                ch = QtWidgets.QTreeWidgetItem([
-                    "    " + _ICON.get(ext, "📄") + "  " + os.path.basename(p),
-                    did, self._recent_when(mt)])
-                ch.setToolTip(0, p + "   ·   " + szs)
-                ch.setData(0, QtCore.Qt.UserRole, p)
-                ch.setData(0, QtCore.Qt.UserRole + 1, "file")
-                top.addChild(ch)
-            top.setExpanded(True)
+        _load = QtWidgets.QTreeWidgetItem([
+            self.L("⏳ haal ki gatividhi aa rahi hai…",
+                   "⏳ loading recent activity…"), "", ""])
+        _load.setFlags(QtCore.Qt.NoItemFlags)
+        _load.setForeground(0, QtGui.QColor("#94A3B8"))
+        tree.addTopLevelItem(_load)
         v.addWidget(tree, 1)
+        dlg._recent_tree = tree
+        dlg._recent_sub = sub
 
         def _filter(txt):
             t = txt.strip().lower()
@@ -22688,11 +22681,9 @@ if the toggle is ticked).</p>
             if not path:
                 return
             if it.data(0, QtCore.Qt.UserRole + 1) == "file":
-                # file chuni ho -> Explorer me wahi file select karke dikhao
-                self._reveal_in_explorer(path)
+                self._reveal_in_explorer(path)   # Explorer me file select
             else:
-                # folder chuna ho -> woh folder seedha khol do
-                self._open_path(path)
+                self._open_path(path)            # folder seedha kholo
         b_fold.clicked.connect(_open_folder)
         bc = QtWidgets.QPushButton(self.L("Band karo", "Close"))
         bc.clicked.connect(dlg.accept)
@@ -22700,15 +22691,69 @@ if the toggle is ticked).</p>
         row.addWidget(b_open); row.addWidget(b_fold)
         row.addStretch(1); row.addWidget(bc)
         v.addLayout(row)
+        return dlg
 
+    def _fill_recent(self, dlg, items):
+        """Scan ke natije (items) se popup ki tree bharo — folder ke hisaab se."""
+        try:
+            tree = dlg._recent_tree; sub = dlg._recent_sub
+        except Exception:
+            return
+        _ICON = {".pdf": "📕", ".docx": "📘", ".doc": "📘", ".xlsx": "📗",
+                 ".xls": "📗", ".jpg": "🖼", ".jpeg": "🖼", ".png": "🖼",
+                 ".tif": "🖼", ".tiff": "🖼", ".txt": "📄", ".zip": "🗜"}
+        groups, order = {}, []
+        for mt, ct, sz, p in items:
+            fol = os.path.dirname(p)
+            if fol not in groups:
+                groups[fol] = []; order.append(fol)
+            groups[fol].append((mt, ct, sz, p))
+
+        tree.setUpdatesEnabled(False)
+        tree.clear()
+        for fol in order:
+            rows = groups[fol]
+            newest = max(r[0] for r in rows)
+            top = QtWidgets.QTreeWidgetItem([
+                "📁  " + (os.path.basename(fol) or fol),
+                self.L("%d badlav" % len(rows), "%d changes" % len(rows)),
+                self._recent_when(newest)])
+            _tf = top.font(0); _tf.setBold(True); top.setFont(0, _tf)
+            top.setForeground(0, QtGui.QColor("#4F46E5"))
+            top.setToolTip(0, fol)
+            top.setData(0, QtCore.Qt.UserRole, fol)
+            top.setData(0, QtCore.Qt.UserRole + 1, "dir")
+            tree.addTopLevelItem(top)
+            for mt, ct, sz, p in rows:
+                ext = os.path.splitext(p)[1].lower()
+                # BANI vs BADLI: ctime~mtime => nayi bani; warna badli.
+                if abs(mt - ct) <= 3:
+                    did = self.L("🟢 bani", "🟢 created")
+                else:
+                    did = self.L("✏️ badli", "✏️ edited")
+                kb = sz / 1024.0
+                szs = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024))
+                ch = QtWidgets.QTreeWidgetItem([
+                    "    " + _ICON.get(ext, "📄") + "  " + os.path.basename(p),
+                    did, self._recent_when(mt)])
+                ch.setToolTip(0, p + "   ·   " + szs)
+                ch.setData(0, QtCore.Qt.UserRole, p)
+                ch.setData(0, QtCore.Qt.UserRole + 1, "file")
+                top.addChild(ch)
+            top.setExpanded(True)
         if not order:
-            empty = QtWidgets.QLabel(
+            empty = QtWidgets.QTreeWidgetItem([
                 self.L("अभी कोई हाल की फ़ाइल नहीं मिली।",
-                       "No recent files found yet."))
-            empty.setAlignment(QtCore.Qt.AlignCenter)
-            empty.setStyleSheet("color:#94A3B8;padding:30px")
-            v.insertWidget(3, empty)
-        dlg.exec_()
+                       "No recent files found yet."), "", ""])
+            empty.setFlags(QtCore.Qt.NoItemFlags)
+            empty.setForeground(0, QtGui.QColor("#94A3B8"))
+            tree.addTopLevelItem(empty)
+        tree.setUpdatesEnabled(True)
+        sub.setText(
+            self.L("%d file · %d folder — naya sabse upar. Double-click = kholo."
+                   % (len(items), len(order)),
+                   "%d files · %d folders — newest first. Double-click to open."
+                   % (len(items), len(order))))
 
     def _update_folder_info(self):
         """Is folder me kitni files + kul size — chhoti patti me dikhao."""
