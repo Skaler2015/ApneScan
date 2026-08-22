@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "342"
+VERSION = "343"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -22866,36 +22866,74 @@ if the toggle is ticked).</p>
                 pass
         self._run_bg_quiet(job, done)
 
-    def _scan_recent_fast(self, root, limit=150, cap=15000, budget=5.0):
-        """os.scandir se TEZ recursive scan — DirEntry.stat() Windows par bina
-        alag syscall ke aata hai (os.walk+os.stat se kai guna tez). Sabse naye
-        `limit` items lautao. cap/budget se bahut badi library par bhi na atke."""
-        items = []
+    def _scan_recent_fast(self, root, limit=150, top_dirs=80, budget=14.0):
+        """(v343) HAAL me update HUE folder dhoondo — poori library me se (kisi
+        bhi parent me se), na ki sirf pehle scan hue subtree me se.
+
+        Pehle SIRF FOLDERS ki mtime jama karo (har file stat nahi — Z: network
+        drive par bhi bahut tez). Folder ki mtime tab badalti hai jab usme koi
+        file BANTI/BADALTI/rename hoti hai — yानी 'haal me kuch hua'. In folders
+        ko naye-se-purane lagao, top-N recently-updated folders chuno, phir SIRF
+        unhi ki files stat karke naya-sabse-upar lauta do.
+        BFS (breadth-first) taaki budget khatam ho to bhi HAR parent ke folder
+        dikhein — ek hi subtree me na atke."""
         exts = self._FILE_EXTS
         t0 = time.time()
-        stack = [root]
-        seen = 0
-        while stack:
-            d = stack.pop()
+        # 1) sab folders + unki mtime (BFS; entry.stat() Windows/SMB par free)
+        dirs = []                       # (mtime, path)
+        try:
+            dirs.append((os.stat(root).st_mtime, root))
+        except Exception:
+            dirs.append((0, root))
+        q = [root]; qi = 0
+        while qi < len(q):
+            d = q[qi]; qi += 1
             try:
                 with os.scandir(d) as it:
                     for e in it:
                         try:
-                            if e.is_dir(follow_symlinks=False):
-                                if not e.name.startswith("."):
-                                    stack.append(e.path)
-                            elif e.name.lower().endswith(exts):
-                                st = e.stat()
-                                items.append((st.st_mtime, st.st_ctime,
-                                              st.st_size, e.path))
-                                seen += 1
+                            if e.is_dir(follow_symlinks=False) and not e.name.startswith("."):
+                                try:
+                                    dm = e.stat().st_mtime
+                                except Exception:
+                                    dm = 0
+                                dirs.append((dm, e.path))
+                                q.append(e.path)
                         except Exception:
                             pass
             except Exception:
                 pass
-            if seen >= cap or (time.time() - t0) > budget:
+            if (time.time() - t0) > budget:
                 break
-        items.sort(reverse=True)             # naya (mtime) sabse upar
+        # 2) sabse haal me chhue folder pehle -> top-N
+        dirs.sort(key=lambda x: x[0], reverse=True)
+        top = []
+        seen = set()
+        for _m, d in dirs:
+            if d in seen:
+                continue
+            seen.add(d); top.append(d)
+            if len(top) >= top_dirs:
+                break
+        # 3) sirf in folders ki files stat karo (kam I/O -> tez)
+        items = []
+        for d in top:
+            try:
+                with os.scandir(d) as it:
+                    for e in it:
+                        try:
+                            if (not e.is_dir(follow_symlinks=False)
+                                    and e.name.lower().endswith(exts)):
+                                st = e.stat()
+                                items.append((st.st_mtime, st.st_ctime,
+                                              st.st_size, e.path))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            if (time.time() - t0) > budget * 1.6:
+                break
+        items.sort(key=lambda x: x[0], reverse=True)   # naya (file mtime) upar
         return items[:limit]
 
     def _recent_when(self, mt):
