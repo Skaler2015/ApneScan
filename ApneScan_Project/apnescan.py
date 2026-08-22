@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "344"
+VERSION = "345"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11289,6 +11289,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
             for k, v in meta.items():
                 if v not in (None, ""):
                     p[k] = str(v)[:40]
+        # (v345) AAP (You) ki apni ginti bhi badhao — World Analytics ke liye
+        try:
+            if action == "scan":
+                self._mycount("scan", 1)
+            if feat:
+                self._mycount(feat, 1)         # print bhi feat="print" se
+            elif imp:
+                self._mycount("import", int(imp))
+            elif prt:
+                self._mycount("print", int(prt))
+        except Exception:
+            pass
         self._an_fetch(p, self._an_apply)
 
     def _an_wv(self, key):
@@ -11307,6 +11319,86 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             return 0
 
+    # ---- (v345) AAP (You) ki apni per-feature ginti — local, daily buckets ----
+    _MY_ALIAS = {"phonescan": "phone", "phoneimport": "phone",
+                 "sendphone": "phone", "ocr_hand": "ocr",
+                 "ocr_hand_online": "ocr"}
+
+    def _mycount(self, feat, n=1):
+        """ApneScan me KIYE kaam ki apni ginti — 'World Analytics' ke AAP column
+        ke liye. {feat: {"t": total, "YYYY-MM-DD": n}}. 40 din se purane din
+        prune. Save halka rakhne ke liye ~2s throttle."""
+        try:
+            feat = self._MY_ALIAS.get(str(feat), str(feat))[:24]
+            n = int(n)
+            if not feat or n <= 0:
+                return
+            mc = self._config.setdefault("mycounts", {})
+            rec = mc.setdefault(feat, {})
+            day = datetime.datetime.now().strftime("%Y-%m-%d")
+            rec[day] = int(rec.get(day, 0)) + n
+            rec["t"] = int(rec.get("t", 0)) + n
+            cutoff = (datetime.datetime.now()
+                      - datetime.timedelta(days=40)).strftime("%Y-%m-%d")
+            for k in list(rec.keys()):
+                if k != "t" and k < cutoff:
+                    del rec[k]
+            now = time.time()
+            if now - getattr(self, "_mycounts_saved", 0) > 2:
+                save_config(self._config)
+                self._mycounts_saved = now
+            try:
+                self._an_update_box()          # widget turant taaza
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _my_sum(self, feat, days=None):
+        """AAP ki ginti: days=None -> all-time total; warna last `days` din (aaj=1)."""
+        try:
+            rec = (self._config.get("mycounts") or {}).get(feat)
+            if not rec:
+                return 0
+            if not days:
+                return int(rec.get("t", 0))
+            now = datetime.datetime.now(); tot = 0
+            for i in range(days):
+                k = (now - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+                tot += int(rec.get(k, 0))
+            return tot
+        except Exception:
+            return 0
+
+    def _my_range(self, feat, start, count):
+        """start din pehle se count din tak ka jod (trend ke liye)."""
+        try:
+            rec = (self._config.get("mycounts") or {}).get(feat)
+            if not rec:
+                return 0
+            now = datetime.datetime.now(); tot = 0
+            for i in range(start, start + count):
+                k = (now - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+                tot += int(rec.get(k, 0))
+            return tot
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _short_num(n):
+        """Bade number chhote: 4906->4.9k, 1240000->12.4L, 3Cr… (column patla)."""
+        try:
+            n = int(n)
+        except Exception:
+            return "0"
+        if n >= 10000000:
+            return "%.1fCr" % (n / 10000000.0)
+        if n >= 100000:
+            return "%.1fL" % (n / 100000.0)
+        if n >= 1000:
+            return "%.1fk" % (n / 1000.0)
+        return str(n)
+
     def _update_world_lbl(self):
         """(v257) Sidebar (storage box ke upar) me duniya ke live counters:
         Total/Today scan + Import + Print + WhatsApp + Rename + Phone scan."""
@@ -11318,76 +11410,130 @@ class ScannerWindow(QtWidgets.QMainWindow):
         except Exception:
             pass
         try:
-            wv = self._an_wv
             rawv = self._an_rawv
-            # (v261) 3-column TABLE — col1: analytics ka naam, col2: World Total,
-            # col3: Aaj (Today) ka total. Har metric ki dono value ek saath.
-            # (v262) column headers CLICKABLE — single click par us column se sort,
-            # dobara click par direction ulta (upar-se-niche / niche-se-upar).
-            # rows = (icon, label, total_key, today_key, icon_colour)
-            rows = [
-                ("🖨", self.L("Scan", "Scan"),    "total",     "today",           "#4F46E5"),
-                ("💾", self.L("PDF Save", "PDF Save"), "pdfs",  "pdfs_today",      "#DC2626"),
-                ("📥", self.L("Import", "Import"), "imports",   "imports_today",   "#EA580C"),
-                ("🖨", "Print",                    "prints",    "prints_today",    "#2563EB"),
-                ("🟢", "WhatsApp",                 "whatsapps", "whatsapps_today", "#16A34A"),
-                ("✏", "Rename",                    "renames",   "renames_today",   "#9333EA"),
-                ("📱", self.L("Phone", "Phone"),   "phones",    "phones_today",    "#DB2777"),
+            short = self._short_num
+            L = self.L
+            # (v345) metric registry: (label, colour, world_total, world_today, my_feat)
+            METRICS = [
+                (L("Scan", "Scan"),       "#4F46E5", "total",     "today",           "scan"),
+                (L("PDF Save", "PDF Save"), "#DC2626", "pdfs",    "pdfs_today",      "save"),
+                (L("Import", "Import"),   "#EA580C", "imports",   "imports_today",   "import"),
+                ("Print",                 "#2563EB", "prints",    "prints_today",    "print"),
+                ("WhatsApp",              "#16A34A", "whatsapps", "whatsapps_today", "whatsapp"),
+                ("Rename",                "#9333EA", "renames",   "renames_today",   "rename"),
+                (L("Phone", "Phone"),     "#DB2777", "phones",    "phones_today",    "phone"),
+                ("Email",                 "#0EA5E9", None, None, "email"),
+                ("Compress",              "#0D9488", None, None, "compress"),
+                ("OCR",                   "#7C3AED", None, None, "ocr"),
+                ("Merge",                 "#D97706", None, None, "merge"),
+                ("Split",                 "#CA8A04", None, None, "split"),
+                ("Sign",                  "#059669", None, None, "sign"),
+                ("Watermark",             "#0891B2", None, None, "watermark"),
+                ("Stamp",                 "#BE185D", None, None, "stamp"),
+                (L("Protect", "Protect"), "#4338CA", None, None, "password"),
+                ("ID Card",               "#DB2777", None, None, "idcard"),
+                (L("Search", "Search"),   "#64748B", None, None, "search"),
             ]
-            # sort state: (column, descending). default = Aaj (Today), bada upar.
-            scol, sdesc = getattr(self, "_world_sort", ("today", True))
-            if scol == "name":
-                rows.sort(key=lambda r: r[1].lower(), reverse=sdesc)
-            elif scol == "today":
-                rows.sort(key=lambda r: rawv(r[3]), reverse=sdesc)
-            else:  # "world"
-                rows.sort(key=lambda r: rawv(r[2]), reverse=sdesc)
+            # ② period toggle (AAP column): aaj / hafta / mahina / sab
+            period = getattr(self, "_world_period", "today")
+            days = {"today": 1, "week": 7, "month": 30, "all": None}.get(period, 1)
+
+            def wtot(m):
+                return rawv(m[2]) if m[2] else 0
+
+            def wtoday(m):
+                return rawv(m[3]) if m[3] else 0
+
+            def you(m):
+                return self._my_sum(m[4], days)
+
+            # ④ TOP-10 auto: chune column se sort (default 'top' = combined),
+            #    upar-se-niche, sabse pehle 10 hi dikhao (badlaav par khud badle).
+            scol, sdesc = getattr(self, "_world_sort", ("top", True))
+
+            def sval(m):
+                if scol == "name":
+                    return m[0].lower()
+                if scol == "you":
+                    return you(m)
+                if scol == "world":
+                    return wtot(m)
+                if scol == "today":
+                    return wtoday(m)
+                return wtot(m) if m[2] else self._my_sum(m[4], None)   # 'top'
+            rows = sorted(METRICS, key=sval, reverse=sdesc)[:10]
 
             def _arw(col):
-                # active column par direction arrow, warna khaali
-                if col == scol:
-                    return " ▼" if sdesc else " ▲"
-                return ""
+                return (" ▼" if sdesc else " ▲") if col == scol else ""
 
-            # (v264) REDESIGN — chhoti font + slim colour-dot (emoji ki jagah).
-            # (v266) font aur chhoti (8px) + padding kam => teeno column ek saath
-            # poore dikhein, kuch cut na ho. white-space:nowrap => kabhi wrap nahi.
             h = ['<table width="100%" cellspacing="0" cellpadding="1" '
                  'style="font-size:8px;">']
-            # heading
-            h.append('<tr><td colspan="3" style="padding:0px 2px 2px;">'
-                     '<b style="color:#4338CA;font-size:9.5px;">🌍 %s</b></td></tr>'
-                     % self.L("Duniya", "World"))
-            # column headers (Name | World | Today) — clickable links.
-            # white-space:nowrap => koi bhi text/number kabhi wrap nahi hoga.
+            # ⑥ heading + RANK badge
+            rank = rawv("rank")
+            rankhtml = ""
+            if rank > 0:
+                rankhtml = ('&nbsp;<span style="background:#F59E0B;color:#FFFFFF;'
+                            'font-size:7.5px;padding:0px 4px;">🏆 %s #%d</span>'
+                            % (L("आप", "You"), rank))
+            h.append('<tr><td colspan="4" style="padding:0px 2px 1px;">'
+                     '<b style="color:#4338CA;font-size:9.5px;">🌍 %s</b>%s</td></tr>'
+                     % (L("Duniya", "World"), rankhtml))
+            # ⑤ summary line
+            h.append('<tr><td colspan="4" style="padding:0px 2px 2px;color:#475569;'
+                     'font-size:7.5px;white-space:nowrap;">%s <b>%s</b> · %s <b>%s</b> · '
+                     '<b>%s</b> PDF</td></tr>'
+                     % (L("scan", "scan"), short(rawv("total")),
+                        L("आज", "today"), short(rawv("today")), short(rawv("pdfs"))))
+            # ② period chips
+            def _chip(pk, txt):
+                on = (pk == period)
+                bg = "#4F46E5" if on else "#EEF2FF"
+                fg = "#FFFFFF" if on else "#4338CA"
+                return ('<a href="wper:%s" style="text-decoration:none;">'
+                        '<span style="background:%s;color:%s;font-size:7.5px;'
+                        'padding:1px 5px;">%s</span></a>&nbsp;' % (pk, bg, fg, txt))
+            h.append('<tr><td colspan="4" style="padding:0px 2px 3px;">'
+                     + _chip("today", L("आज", "Today")) + _chip("week", L("हफ्ता", "Week"))
+                     + _chip("month", L("महीना", "Month")) + _chip("all", L("सब", "All"))
+                     + '</td></tr>')
+            # column headers (clickable)
             def _hcell(col, text, align):
                 return ('<td align="%s" bgcolor="#4F46E5" '
                         'style="color:#FFFFFF;font-size:7.5px;padding:2px 3px;'
                         'white-space:nowrap;">'
                         '<a href="wsort:%s" style="color:#FFFFFF;text-decoration:none;">'
-                        '<b>%s%s</b></a></td>'
-                        % (align, col, text, _arw(col)))
-            h.append(
-                '<tr>'
-                + _hcell("name", self.L("Analytics", "Analytics"), "left")
-                + _hcell("world", self.L("World", "World"), "right")
-                + _hcell("today", self.L("Aaj", "Today"), "right")
-                + '</tr>')
-            for i, (ic, lab, tkey, dkey, col) in enumerate(rows):
+                        '<b>%s%s</b></a></td>' % (align, col, text, _arw(col)))
+            h.append('<tr>'
+                     + _hcell("name", L("Analytics", "Analytics"), "left")
+                     + _hcell("you", L("आप", "You"), "right")
+                     + _hcell("world", L("World", "World"), "right")
+                     + _hcell("today", L("आज", "Today"), "right")
+                     + '</tr>')
+            for i, m in enumerate(rows):
+                lab, col = m[0], m[1]
                 bg = "#F1F3FC" if (i % 2 == 0) else "#FFFFFF"
-                # value me comma ki jagah non-breaking rakho — number kabhi na tute
-                vt = wv(tkey).replace(",", "&#8239;")
-                vd = wv(dkey).replace(",", "&#8239;")
+                yv = you(m)
+                # ③ trend (AAP: is period vs pichhla same-length period)
+                tr = ""
+                if days:
+                    cur = yv; prev = self._my_range(m[4], days, days)
+                    if cur > prev:
+                        tr = ' <span style="color:#16A34A;">▲</span>'
+                    elif cur < prev:
+                        tr = ' <span style="color:#DC2626;">▼</span>'
+                wv_s = short(wtot(m)) if m[2] else "—"
+                td_s = short(wtoday(m)) if m[3] else "—"
                 h.append(
                     '<tr>'
-                    '<td bgcolor="%s" style="color:#374151;padding:2px 3px;'
-                    'white-space:nowrap;">'
+                    '<td bgcolor="%s" style="color:#374151;padding:2px 3px;white-space:nowrap;">'
                     '<span style="color:%s;font-size:9px;">&#9679;</span>&nbsp;%s</td>'
-                    '<td bgcolor="%s" align="right" style="padding:2px 3px;'
-                    'white-space:nowrap;"><b style="color:#111827;">%s</b></td>'
-                    '<td bgcolor="%s" align="right" style="padding:2px 3px;'
-                    'white-space:nowrap;"><b style="color:#0D9488;">%s</b></td>'
-                    '</tr>' % (bg, col, lab, bg, vt, bg, vd))
+                    '<td bgcolor="%s" align="right" style="padding:2px 3px;white-space:nowrap;">'
+                    '<b style="color:#4F46E5;">%s</b>%s</td>'
+                    '<td bgcolor="%s" align="right" style="padding:2px 3px;white-space:nowrap;">'
+                    '<b style="color:#111827;">%s</b></td>'
+                    '<td bgcolor="%s" align="right" style="padding:2px 3px;white-space:nowrap;">'
+                    '<b style="color:#0D9488;">%s</b></td>'
+                    '</tr>' % (bg, col, lab, bg, short(yv), tr, bg, wv_s, bg, td_s))
             h.append('</table>')
             lbl.setText("".join(h))
         except Exception:
@@ -11396,13 +11542,21 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _world_sort_click(self, link):
         """(v262) World table column header click — us column se sort; agar
         wahi column dobara click ho to direction ulta kar do."""
+        s = str(link)
+        # (v345) period chip (aaj/hafta/mahina/sab)
+        if s.startswith("wper:"):
+            p = s.split(":", 1)[1]
+            if p in ("today", "week", "month", "all"):
+                self._world_period = p
+                self._update_world_lbl()
+            return
         try:
-            col = str(link).split(":", 1)[1] if ":" in str(link) else str(link)
+            col = s.split(":", 1)[1] if ":" in s else s
         except Exception:
             return
-        if col not in ("name", "world", "today"):
+        if col not in ("name", "you", "world", "today", "top"):
             return
-        scol, sdesc = getattr(self, "_world_sort", ("today", True))
+        scol, sdesc = getattr(self, "_world_sort", ("top", True))
         if col == scol:
             sdesc = not sdesc            # same column → direction toggle
         else:
@@ -19940,6 +20094,8 @@ if the toggle is ticked).</p>
                 self._warn(self.L("Import fail ho gaya", "Import failed"))
                 return
             n = len(made)
+            if n:
+                self._mycount("import", n)       # (v345) AAP analytics
             for _p in made:                     # (v344) Recent Files ke liye
                 self._log_activity(_p, "import")
             self._invalidate_files_index()      # nayi files turant search me aayein
