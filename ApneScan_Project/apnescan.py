@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "331"
+VERSION = "332"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8615,25 +8615,20 @@ class SavePreviewDialog(QtWidgets.QDialog):
         L = self.app.L
         w = QtWidgets.QFrame()
         w.setStyleSheet("QFrame{border:1px solid #e5e7eb;border-radius:9px;}")
+        # (v332) sab EK hi line me: [naam] … [~size · pages] [Max size box]
         h = QtWidgets.QHBoxLayout(w); h.setContentsMargins(11, 9, 11, 9); h.setSpacing(11)
-        mid = QtWidgets.QVBoxLayout(); mid.setSpacing(4)
         ed = QtWidgets.QLineEdit((d.get("name") or "").strip())
         ed.setPlaceholderText(L("File ka naam…", "File name…"))
-        ed.setStyleSheet("border:1px solid #cbd5e1;border-radius:6px;padding:5px 8px;"
+        ed.setStyleSheet("border:1px solid #cbd5e1;border-radius:6px;padding:6px 8px;"
                          "font-weight:600;font-size:13px;")
-        mid.addWidget(ed)
-        # PROMINENT size (bada, gehra) + chhota page/status
-        srow = QtWidgets.QHBoxLayout(); srow.setSpacing(9)
+        h.addWidget(ed, 1)
+        # size (bada, gehra) — Max size box ke JUST PEHLE, usi line me
         size = QtWidgets.QLabel("…")
-        size.setStyleSheet("color:#0D9488;font-size:18px;font-weight:800;border:none;")
-        pages = QtWidgets.QLabel(L("%d page" % len(d["paths"]), "%d pages" % len(d["paths"])))
-        pages.setStyleSheet("color:#94a3b8;font-size:11px;border:none;")
-        status = QtWidgets.QLabel("")
-        status.setStyleSheet("border:none;font-size:11px;font-weight:700;")
-        srow.addWidget(size); srow.addWidget(pages); srow.addWidget(status); srow.addStretch(1)
-        mid.addLayout(srow)
-        h.addLayout(mid, 1)
-        # max-size: KHAALI box jisme aap KB likho
+        size.setTextFormat(QtCore.Qt.RichText)
+        size.setStyleSheet("border:none;")
+        size.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        h.addWidget(size)
+        # max-size: KHAALI box jisme aap KB likho (caption upar)
         mxwrap = QtWidgets.QVBoxLayout(); mxwrap.setSpacing(2)
         cap = QtWidgets.QLabel(L("Max size (KB)", "Max size (KB)"))
         cap.setStyleSheet("color:#0D9488;font-size:9px;font-weight:700;border:none;")
@@ -8649,8 +8644,7 @@ class SavePreviewDialog(QtWidgets.QDialog):
         mx.textChanged.connect(lambda _t, ix=i: (self._refresh_row(ix), self._refresh_total()))
         mxwrap.addWidget(cap); mxwrap.addWidget(mx)
         h.addLayout(mxwrap)
-        self._rows.append({"name": ed, "size": size, "pages": pages,
-                           "status": status, "max": mx})
+        self._rows.append({"name": ed, "size": size, "max": mx})
         return w
 
     @staticmethod
@@ -8691,20 +8685,23 @@ class SavePreviewDialog(QtWidgets.QDialog):
 
     def _refresh_row(self, i):
         r = self._rows[i]; L = self.app.L
+        n = len(self.docs[i]["paths"])
         est = self._est.get(i)
         mx_kb = self._row_max(r)
         if est is None:
-            r["size"].setText("…"); r["status"].setText("")
+            r["size"].setText("<span style='color:#94a3b8;font-size:11px'>…</span>")
             return
-        r["size"].setText("~" + self._pretty(est))
+        # sab EK label me (rich text): bada size + chhota pages + status
+        html = ("<span style='color:#0D9488;font-size:17px;font-weight:800'>~%s</span>"
+                "&nbsp;<span style='color:#94a3b8;font-size:11px'>%s</span>"
+                % (self._pretty(est), L("%d page" % n, "%d pages" % n)))
         if mx_kb > 0 and est > mx_kb * 1024:
-            r["status"].setText(L("→ ≤ %d KB banegi ✓" % mx_kb, "→ ≤ %d KB ✓" % mx_kb))
-            r["status"].setStyleSheet("border:none;color:#0D9488;font-size:11px;font-weight:700;")
+            html += ("&nbsp;<span style='color:#0D9488;font-size:11px;font-weight:700'>%s</span>"
+                     % L("→ ≤ %d KB ✓" % mx_kb, "→ ≤ %d KB ✓" % mx_kb))
         elif mx_kb > 0:
-            r["status"].setText(L("limit me ✓", "under ✓"))
-            r["status"].setStyleSheet("border:none;color:#16a34a;font-size:11px;font-weight:700;")
-        else:
-            r["status"].setText("")
+            html += ("&nbsp;<span style='color:#16a34a;font-size:11px;font-weight:700'>%s</span>"
+                     % L("limit me ✓", "under ✓"))
+        r["size"].setText(html)
 
     def _refresh_total(self):
         L = self.app.L
