@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "332"
+VERSION = "333"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8749,6 +8749,8 @@ class SavePreviewDialog(QtWidgets.QDialog):
                 jobs.append((name, d["paths"], self._row_max(self._rows[i])))
         folder = self.folder
         app = self.app
+        # save hone par thumbnail se hataane ke liye ORIGINAL page paths
+        saved_pages = [p for (_n, pths, _m) in jobs for p in pths]
 
         def job():
             saved = []
@@ -8778,6 +8780,12 @@ class SavePreviewDialog(QtWidgets.QDialog):
             app._invalidate_files_index(); app._refresh_files_root()
             try:
                 app._panel_show(folder)
+            except Exception:
+                pass
+            # (v333) drag-drop save ke baad WAHI pages thumbnail se hata do
+            # (Ctrl+Z se wapas aa jaate hain; files disk par rehti hain)
+            try:
+                app._auto_clear_saved(saved_pages, force=True)
             except Exception:
                 pass
             app._toast(L("✓ %d PDF save ho gayi" % len(res), "✓ Saved %d PDF(s)" % len(res)))
@@ -28721,11 +28729,12 @@ if the toggle is ticked).</p>
         except Exception:
             pass
 
-    def _auto_clear_saved(self, paths):
+    def _auto_clear_saved(self, paths, force=False):
         """(Setting: clear_after_save) PDF save hote hi WAHI pages thumbnail
         area se apne aap hat jaate hain — Ctrl+Z poora batch WAPAS le aata
-        hai (delete_page wala hi undo-system; files disk par rehti hain)."""
-        if not self._opts.get("clear_after_save") or not paths:
+        hai (delete_page wala hi undo-system; files disk par rehti hain).
+        force=True -> setting chahe jo ho, hata do (drag-drop save ke liye)."""
+        if (not force and not self._opts.get("clear_after_save")) or not paths:
             return
         try:
             want = set(paths)
