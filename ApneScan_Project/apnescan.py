@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "351"
+VERSION = "352"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -20349,8 +20349,11 @@ if the toggle is ticked).</p>
                 self.status.showMessage(
                     "📁 %s — %d files, %.1f MB" %
                     (os.path.basename(p) or p, len(files), sz / 1048576.0), 4000)
-            elif os.path.isfile(p):
+                self._hide_preview_panel()       # (v352) folder par preview nahi
+            elif os.path.isfile(p) and self._is_previewable(p):
                 self._preview_file_in_panel(p)   # PDF/image ka preview panel me
+            else:
+                self._hide_preview_panel()       # (v352) preview na ho to chhupao
         except Exception:
             pass
 
@@ -22085,10 +22088,13 @@ if the toggle is ticked).</p>
 
     def _on_result_clicked(self, it):
         """Search-result par EK click: document ho to uska preview panel me
-        dikhao (PDF ka pehla page / image seedha). Folder par kuch nahi."""
+        dikhao (PDF ka pehla page / image seedha). (v352) preview na ho
+        (folder ya doosri file-type) to preview panel chhupa do."""
         p = it.data(QtCore.Qt.UserRole)
-        if p and os.path.isfile(p):
+        if p and os.path.isfile(p) and self._is_previewable(p):
             self._preview_file_in_panel(p)
+        else:
+            self._hide_preview_panel()
 
     def _pdf_text_cached(self, path):
         """PDF ke andar ka text (pehle 15 page) — content-search ke liye.
@@ -22209,10 +22215,37 @@ if the toggle is ticked).</p>
         dpitxt = ("%d dpi" % int(dpi[0])) if (dpi and dpi[0]) else "—"
         return dpitxt, mode
 
+    def _is_previewable(self, path):
+        """(v352) Kya is file ka preview ban sakta hai? (image ya PDF)."""
+        try:
+            ext = os.path.splitext(path)[1].lower()
+        except Exception:
+            return False
+        if ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff",
+                   ".bmp", ".gif", ".webp"):
+            return True
+        return ext == ".pdf" and HAS_FITZ
+
+    def _hide_preview_panel(self):
+        """(v352) Preview panel chhupa do (jab dikhane layak kuch na ho)."""
+        try:
+            pp = getattr(self, "preview_panel", None)
+            if pp is not None and pp.isVisible():
+                self._pv_file_path = None       # chal rahe render ko rado karo
+                pp.setVisible(False)
+                self._opts["ui_preview"] = False
+                self._place_an_box()
+        except Exception:
+            pass
+
     def _preview_file_in_panel(self, path):
         """Preview panel me is file ki jhalak dikhao (band ho to khol do).
-        Multi-page PDF ke SAARE pages neeche-neeche dikhte hain (scroll)."""
+        Multi-page PDF ke SAARE pages neeche-neeche dikhte hain (scroll).
+        (v352) preview na ban sake to panel chhupa do."""
         if not getattr(self, "preview_panel", None):
+            return
+        if not (path and os.path.isfile(path) and self._is_previewable(path)):
+            self._hide_preview_panel()
             return
         if not self.preview_panel.isVisible():
             self.preview_panel.setVisible(True)
