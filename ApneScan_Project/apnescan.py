@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "347"
+VERSION = "349"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -23106,15 +23106,29 @@ if the toggle is ticked).</p>
             self._fill_recent(dlg, cached[1])
             return
 
-        # 3) (v344) Recent ab ApneScan ke ACTIVITY LOG se banti hai — यानी जो
-        # aapने is software me KIYA (save/import/rename). Koi library-scan nahi.
+        # 3) (v344) activity LOG (aapne app me jo KIYA — save/import/rename) +
+        # (v349) library ke HAAL me bane/badle folder (jo bhi ApneScan se save
+        # hue — poori library aapke app ka hi kaam hai). Dono MILAKE, taaki sirf
+        # abhi-abhi wala ek folder nahi, saare haal ke folder dikhein.
         log = list(getattr(self, "_activity", []) or [])
         if not log and getattr(self, "_recent", None):
-            # pehli baar (log khaali) — purane saves se seed, taaki khaali na ho
             log = [{"t": None, "p": p, "a": "save"} for p in self._recent]
+        root = self._files_root()
 
         def job():
-            return self._recent_items_from_log(log)
+            items = self._recent_items_from_log(log)     # (t, act, size, path)
+            seen = set(p for (_t, _a, _s, p) in items)
+            try:
+                for mt, ct, sz, p in self._scan_recent_fast(root):
+                    if p in seen:
+                        continue
+                    seen.add(p)
+                    act = "save" if abs(mt - ct) <= 3 else "edit"
+                    items.append((mt, act, sz, p))
+            except Exception:
+                pass
+            items.sort(key=lambda x: x[0], reverse=True)
+            return items[:200]
 
         def done(res):
             if isinstance(res, Exception) or not isinstance(res, list):
