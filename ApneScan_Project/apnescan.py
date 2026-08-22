@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "338"
+VERSION = "339"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8591,6 +8591,7 @@ class SavePreviewDialog(QtWidgets.QDialog):
         area.setStyleSheet("QScrollArea{border:1px solid #e2e8f0;border-radius:8px;}")
         inner = QtWidgets.QWidget()
         il = QtWidgets.QVBoxLayout(inner); il.setSpacing(0); il.setContentsMargins(4, 4, 4, 4)
+        self._inner_layout = il          # (v339) size ke hisaab se resort ke liye
         self._rows = []
         for i, d in enumerate(self.docs):
             il.addWidget(self._make_row(i, d))
@@ -8659,7 +8660,8 @@ class SavePreviewDialog(QtWidgets.QDialog):
                         "Type KB here — the PDF will be made SMALLER than this. Empty = full."))
         mx.textChanged.connect(lambda _t, ix=i: (self._refresh_row(ix), self._refresh_total()))
         h.addWidget(mx)
-        self._rows.append({"name": ed, "size": size, "max": mx})
+        self._rows.append({"name": ed, "size": size, "max": mx,
+                           "frame": w, "num": num})
         return w
 
     @staticmethod
@@ -8691,7 +8693,30 @@ class SavePreviewDialog(QtWidgets.QDialog):
             for i in range(len(self.docs)):
                 self._refresh_row(i)
             self._refresh_total()
+            self._resort_rows()          # (v339) sabse badi size sabse upar
         self.app._run_bg_quiet(job, done)
+
+    def _resort_rows(self):
+        """(v339) Rows ko SIZE ke hisaab se lagao — sabse badi PDF sabse UPAR.
+        Sirf visual kram badalta hai (index/naam/max sab jude rehte hain).
+        Number bhi naye kram se (1 = sabse badi)."""
+        il = getattr(self, "_inner_layout", None)
+        if il is None or len(self._rows) < 2:
+            return
+        est = getattr(self, "_est", {}) or {}
+        order = sorted(range(len(self._rows)),
+                       key=lambda i: (est.get(i) or 0), reverse=True)
+        if order == list(range(len(self._rows))):
+            # (renumber to be safe) — par kram pehle se sahi hai
+            for pos, i in enumerate(order):
+                self._rows[i]["num"].setText("%d." % (pos + 1))
+            return
+        # sab frames layout se hatao, phir naye kram me wapas (stretch aakhir me)
+        for r in self._rows:
+            il.removeWidget(r["frame"])
+        for pos, i in enumerate(order):
+            il.insertWidget(pos, self._rows[i]["frame"])
+            self._rows[i]["num"].setText("%d." % (pos + 1))
 
     @staticmethod
     def _pretty(b):
