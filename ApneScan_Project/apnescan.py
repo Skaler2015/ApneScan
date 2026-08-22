@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "333"
+VERSION = "334"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -22480,14 +22480,42 @@ if the toggle is ticked).</p>
 
     def _show_recent_files(self):
         """Haal me bani/badli files — naye sabse upar (poore scope me)."""
+        # (v334) Sidebar se "Recent Files" dabate hi pehle My Files panel KHULE —
+        # warna natije chhupe hue widget me jaate the aur "kuch nahi dikhta" tha.
+        try:
+            if hasattr(self, "files_panel") and not self.files_panel.isVisible():
+                self.toggle_files_panel()
+        except Exception:
+            pass
         scope = self._panel_current_dir()
         if not (scope and os.path.isdir(scope)):
             scope = self._files_root()
         idx = self._files_index_ready(scope)
         if idx is None:
-            self.status.showMessage(self.L("Taiyaari… phir se dabao.",
-                                           "Indexing… tap again."), 2000)
+            # (v334) Index abhi ban raha — "phir dabao" ke bajaye khud dobara
+            # koshish karo, aur panel me saaf "Taiyaari…" dikhao (blank nahi).
+            try:
+                self.files_results.clear()
+                _w = QtWidgets.QListWidgetItem(
+                    self.L("⏳ Taiyaari… haal ki files aa rahi hain",
+                           "⏳ Indexing… loading recent files"))
+                _w.setFlags(QtCore.Qt.NoItemFlags)
+                _w.setTextAlignment(QtCore.Qt.AlignHCenter)
+                _w.setForeground(QtGui.QColor("#94A3B8"))
+                self.files_results.addItem(_w)
+                self.files_tree.hide(); self.files_results.show()
+            except Exception:
+                pass
+            tries = getattr(self, "_recent_wait_tries", 0)
+            if tries < 40:                       # ~20s tak intezaar, phir chhodo
+                self._recent_wait_tries = tries + 1
+                QtCore.QTimer.singleShot(500, self._show_recent_files)
+            else:
+                self._recent_wait_tries = 0
+                self.status.showMessage(self.L("Taiyaari me der — phir se dabao.",
+                                               "Indexing slow — tap again."), 3000)
             return
+        self._recent_wait_tries = 0
         files = [e[1] for e in idx if e[0] == "file"]
 
         def job():
