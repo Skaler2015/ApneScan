@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "339"
+VERSION = "340"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8525,6 +8525,38 @@ class PdfTextEditDialog(QtWidgets.QDialog):
         super().closeEvent(e)
 
 
+class _DragGrip(QtWidgets.QLabel):
+    """(v340) Save-preview me row ka ⠿ handle — pakadkar upar-neeche khisko."""
+    pressed = QtCore.pyqtSignal()
+    moved = QtCore.pyqtSignal(QtCore.QPoint)
+    released = QtCore.pyqtSignal()
+
+    def __init__(self):
+        super().__init__("⠿")
+        self.setCursor(QtCore.Qt.OpenHandCursor)
+        self.setStyleSheet("color:#cbd5e1;font-size:15px;border:none;")
+        self.setFixedWidth(16)
+        self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setToolTip(self.tr("Drag — kram badlo"))
+        self._down = False
+
+    def mousePressEvent(self, e):
+        if e.button() == QtCore.Qt.LeftButton:
+            self._down = True
+            self.setCursor(QtCore.Qt.ClosedHandCursor)
+            self.pressed.emit()
+
+    def mouseMoveEvent(self, e):
+        if self._down:
+            self.moved.emit(e.globalPos())
+
+    def mouseReleaseEvent(self, e):
+        if self._down:
+            self._down = False
+            self.setCursor(QtCore.Qt.OpenHandCursor)
+            self.released.emit()
+
+
 class SavePreviewDialog(QtWidgets.QDialog):
     """(v329) Thumbnail → My Files drop par SAVE se PEHLE preview.
     Har banne wali PDF ka NAAM (badla ja sake) + anumaanit SIZE dikhata hai;
@@ -8553,14 +8585,26 @@ class SavePreviewDialog(QtWidgets.QDialog):
         v = QtWidgets.QVBoxLayout(self)
         v.setSpacing(9)
 
-        hdr = QtWidgets.QLabel(L(
-            "💾 %d document save honge  ·  folder: %s" % (len(self.docs), os.path.basename(folder) or folder),
-            "💾 Saving %d document(s)  ·  folder: %s" % (len(self.docs), os.path.basename(folder) or folder)))
-        hdr.setStyleSheet("font-weight:700;font-size:14px;")
-        v.addWidget(hdr)
+        self._sort_mode = "size_desc"           # (v340) default: badi size upar
+        self._hdr = QtWidgets.QLabel("")
+        self._hdr.setStyleSheet("font-weight:700;font-size:14px;")
+        v.addWidget(self._hdr)
 
-        # ---- global bar: colour + preset max-size + one-PDF ----
+        # ---- global bar: sort + colour + preset max-size ----
         gb = QtWidgets.QHBoxLayout(); gb.setSpacing(6)
+        # (v340) ① Sort dropdown
+        gb.addWidget(QtWidgets.QLabel(L("Kram:", "Sort:")))
+        self.cmb_sort = QtWidgets.QComboBox()
+        self.cmb_sort.addItems([
+            L("Size — badi upar", "Size — big first"),
+            L("Size — chhoti upar", "Size — small first"),
+            L("Naam (A→Z)", "Name (A→Z)"),
+            L("Pages — zyada upar", "Pages — most first"),
+            L("Khud lagaya", "Manual"),
+        ])
+        self.cmb_sort.currentIndexChanged.connect(lambda _i: self._apply_sort())
+        gb.addWidget(self.cmb_sort)
+        gb.addSpacing(10)
         gb.addWidget(QtWidgets.QLabel(L("Rang:", "Colour:")))
         self.cmb_colour = QtWidgets.QComboBox()
         self.cmb_colour.addItems([L("Colour", "Colour"), L("Grayscale", "Grayscale"),
@@ -8598,8 +8642,10 @@ class SavePreviewDialog(QtWidgets.QDialog):
         il.addStretch(1)
         area.setWidget(inner)
         # kam-se-kam ~10 row ki jagah pakki karo (chhoti list par bhi saaf dikhe)
-        area.setMinimumHeight(min(11, max(len(self.docs), 3)) * 31 + 12)
+        area.setMinimumHeight(min(11, max(len(self.docs), 3)) * 34 + 12)
         v.addWidget(area, 1)
+        self._update_header()
+        self._sync_remove_buttons()
 
         # ---- total + buttons ----
         self.lbl_total = QtWidgets.QLabel("")
@@ -8619,8 +8665,11 @@ class SavePreviewDialog(QtWidgets.QDialog):
         bb.addWidget(b_cancel); bb.addWidget(self.b_save)
         v.addLayout(bb)
 
-        # sizes background me estimate karo
+        # (v340) ⑧ pichhli setting yaad — colour/one-PDF/password/sort laut aao
+        self._load_prefs()
+        # (v340) ④ thumbnails + sizes background me
         QtCore.QTimer.singleShot(60, self._estimate_all)
+        QtCore.QTimer.singleShot(80, self._load_thumbs)
 
     # ---------- row ----------
     def _make_row(self, i, d):
@@ -8629,11 +8678,23 @@ class SavePreviewDialog(QtWidgets.QDialog):
         # patli bottom-line se alag, kam padding. [# naam … ~size·pages Max KB]
         w = QtWidgets.QFrame()
         w.setStyleSheet("QFrame{border:none;border-bottom:1px solid #eef2f7;}")
-        h = QtWidgets.QHBoxLayout(w); h.setContentsMargins(6, 3, 6, 3); h.setSpacing(8)
+        h = QtWidgets.QHBoxLayout(w); h.setContentsMargins(6, 3, 6, 3); h.setSpacing(7)
+        # ③ drag handle
+        grip = _DragGrip()
+        grip.pressed.connect(lambda ix=i: self._drag_start(ix))
+        grip.moved.connect(self._drag_move)
+        grip.released.connect(self._drag_end)
+        h.addWidget(grip)
         num = QtWidgets.QLabel("%d." % (i + 1))
         num.setStyleSheet("color:#94a3b8;font-size:12px;font-weight:700;border:none;")
-        num.setFixedWidth(20); num.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        num.setFixedWidth(18); num.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
         h.addWidget(num)
+        # ④ pehle page ki jhalak (thumbnail)
+        thumb = QtWidgets.QLabel()
+        thumb.setFixedSize(26, 32)
+        thumb.setScaledContents(True)
+        thumb.setStyleSheet("border:1px solid #e2e8f0;border-radius:3px;background:#f8fafc;")
+        h.addWidget(thumb)
         ed = QtWidgets.QLineEdit((d.get("name") or "").strip())
         ed.setPlaceholderText(L("File ka naam…", "File name…"))
         ed.setStyleSheet("border:1px solid #cbd5e1;border-radius:6px;padding:4px 8px;"
@@ -8660,8 +8721,17 @@ class SavePreviewDialog(QtWidgets.QDialog):
                         "Type KB here — the PDF will be made SMALLER than this. Empty = full."))
         mx.textChanged.connect(lambda _t, ix=i: (self._refresh_row(ix), self._refresh_total()))
         h.addWidget(mx)
-        self._rows.append({"name": ed, "size": size, "max": mx,
-                           "frame": w, "num": num})
+        # ⑤ is save se hatao (✕)
+        rm = QtWidgets.QPushButton("✕")
+        rm.setCursor(QtCore.Qt.PointingHandCursor)
+        rm.setFixedSize(22, 22)
+        rm.setToolTip(L("Is save se hatao", "Remove from this save"))
+        rm.setStyleSheet("QPushButton{border:none;color:#ef4444;font-size:13px;font-weight:800;"
+                         "border-radius:11px;}QPushButton:hover{background:#fee2e2;}")
+        rm.clicked.connect(lambda _c=False, ix=i: self._remove_row(ix))
+        h.addWidget(rm)
+        self._rows.append({"name": ed, "size": size, "max": mx, "frame": w,
+                           "num": num, "thumb": thumb, "rm": rm, "removed": False})
         return w
 
     @staticmethod
@@ -8696,27 +8766,200 @@ class SavePreviewDialog(QtWidgets.QDialog):
             self._resort_rows()          # (v339) sabse badi size sabse upar
         self.app._run_bg_quiet(job, done)
 
-    def _resort_rows(self):
-        """(v339) Rows ko SIZE ke hisaab se lagao — sabse badi PDF sabse UPAR.
-        Sirf visual kram badalta hai (index/naam/max sab jude rehte hain).
-        Number bhi naye kram se (1 = sabse badi)."""
+    # ---------- ① sort / order helpers ----------
+    def _visual_order(self):
+        """Rows ke index, jaise abhi layout me upar-se-neeche lage hain."""
         il = getattr(self, "_inner_layout", None)
-        if il is None or len(self._rows) < 2:
+        if il is None:
+            return list(range(len(self._rows)))
+        order = []
+        for k in range(il.count()):
+            w = il.itemAt(k).widget()
+            if w is None:
+                continue
+            for i, r in enumerate(self._rows):
+                if r["frame"] is w:
+                    order.append(i); break
+        return order
+
+    def _active_indices(self):
+        """Bina-hataye rows, visual (upar-se-neeche) kram me."""
+        return [i for i in self._visual_order() if not self._rows[i].get("removed")]
+
+    def _renumber(self):
+        n = 0
+        for i in self._visual_order():
+            if self._rows[i].get("removed"):
+                continue
+            n += 1
+            self._rows[i]["num"].setText("%d." % n)
+
+    def _apply_sort(self):
+        self._sort_mode = {0: "size_desc", 1: "size_asc", 2: "name",
+                           3: "pages", 4: "manual"}.get(
+                               self.cmb_sort.currentIndex(), "size_desc")
+        self._resort_rows()
+
+    def _resort_rows(self, mode=None):
+        """(v340) Rows ko chune kram me lagao — size(badi/chhoti)/naam/pages, ya
+        'manual' (drag). Sirf VISUAL kram badalta hai; naam/max/est sab jude
+        rehte hain. Hataye rows sabse neeche. Number naye kram se."""
+        il = getattr(self, "_inner_layout", None)
+        if il is None or not self._rows:
+            return
+        mode = mode or getattr(self, "_sort_mode", "size_desc")
+        if mode == "manual":
+            self._renumber()          # kram jaisa hai waisa hi — sirf number
             return
         est = getattr(self, "_est", {}) or {}
-        order = sorted(range(len(self._rows)),
-                       key=lambda i: (est.get(i) or 0), reverse=True)
-        if order == list(range(len(self._rows))):
-            # (renumber to be safe) — par kram pehle se sahi hai
-            for pos, i in enumerate(order):
-                self._rows[i]["num"].setText("%d." % (pos + 1))
-            return
-        # sab frames layout se hatao, phir naye kram me wapas (stretch aakhir me)
+
+        def keyf(i):
+            r = self._rows[i]
+            removed = 1 if r.get("removed") else 0     # hataye sabse neeche
+            if mode == "size_desc":
+                k = -(est.get(i) or 0)
+            elif mode == "size_asc":
+                k = (est.get(i) or 0)
+            elif mode == "name":
+                k = r["name"].text().strip().lower()
+            elif mode == "pages":
+                k = -len(self.docs[i]["paths"])
+            else:
+                k = 0
+            return (removed, k)
+        order = sorted(range(len(self._rows)), key=keyf)
         for r in self._rows:
             il.removeWidget(r["frame"])
         for pos, i in enumerate(order):
             il.insertWidget(pos, self._rows[i]["frame"])
-            self._rows[i]["num"].setText("%d." % (pos + 1))
+        self._renumber()
+
+    # ---------- ③ drag reorder ----------
+    def _drag_start(self, i):
+        self._drag_i = i
+
+    def _drag_move(self, gpos):
+        i = getattr(self, "_drag_i", None)
+        if i is None:
+            return
+        target = None
+        for j, r in enumerate(self._rows):
+            if r.get("removed") or j == i:
+                continue
+            fr = r["frame"]
+            tl = fr.mapToGlobal(QtCore.QPoint(0, 0))
+            if QtCore.QRect(tl, fr.size()).contains(gpos):
+                target = j; break
+        if target is None:
+            return
+        il = self._inner_layout
+        dragged = self._rows[i]["frame"]
+        tgt = self._rows[target]["frame"]
+        pos = il.indexOf(tgt)
+        if il.indexOf(dragged) == pos:
+            return
+        il.removeWidget(dragged)
+        il.insertWidget(il.indexOf(tgt), dragged)
+        # drag = manual mode
+        self._sort_mode = "manual"
+        try:
+            self.cmb_sort.blockSignals(True)
+            self.cmb_sort.setCurrentIndex(4)
+            self.cmb_sort.blockSignals(False)
+        except Exception:
+            pass
+        self._renumber()
+
+    def _drag_end(self):
+        self._drag_i = None
+
+    # ---------- ⑤ remove from this save ----------
+    def _remove_row(self, i):
+        if len(self._active_indices()) <= 1:
+            return                     # aakhri file na hataayein
+        self._rows[i]["removed"] = True
+        self._rows[i]["frame"].hide()
+        self._renumber()
+        self._refresh_total()
+        self._update_header()
+        self._sync_remove_buttons()
+
+    def _sync_remove_buttons(self):
+        """Sirf 1 file bache to ✕ band (aakhri na hate)."""
+        only = len(self._active_indices()) <= 1
+        for r in self._rows:
+            if not r.get("removed"):
+                r["rm"].setEnabled(not only)
+
+    def _update_header(self):
+        L = self.app.L
+        n = len(self._active_indices())
+        base = os.path.basename(self.folder) or self.folder
+        self._hdr.setText(L("💾 %d document save honge  ·  folder: %s" % (n, base),
+                            "💾 Saving %d document(s)  ·  folder: %s" % (n, base)))
+
+    # ---------- ④ thumbnails ----------
+    def _load_thumbs(self):
+        docs = self.docs
+
+        def job():
+            out = {}
+            for i, d in enumerate(docs):
+                try:
+                    first = (d.get("paths") or [None])[0]
+                    if not first:
+                        continue
+                    img = QtGui.QImage(first)
+                    if not img.isNull():
+                        out[i] = img.scaled(52, 64, QtCore.Qt.KeepAspectRatioByExpanding,
+                                            QtCore.Qt.SmoothTransformation)
+                except Exception:
+                    pass
+            return out
+
+        def done(res):
+            if isinstance(res, Exception) or not isinstance(res, dict):
+                return
+            for i, img in res.items():
+                try:
+                    self._rows[i]["thumb"].setPixmap(QtGui.QPixmap.fromImage(img))
+                except Exception:
+                    pass
+        self.app._run_bg_quiet(job, done)
+
+    # ---------- ⑧ remember settings ----------
+    def _save_prefs(self):
+        try:
+            o = self.app._opts
+            o["sp_colour"] = self.cmb_colour.currentIndex()
+            o["sp_one"] = bool(self.chk_one.isChecked())
+            o["sp_pw"] = bool(self.chk_pw.isChecked())
+            o["sp_sort"] = self.cmb_sort.currentIndex()
+            self.app._save_opts()
+        except Exception:
+            pass
+
+    def _load_prefs(self):
+        try:
+            o = self.app._opts
+            if "sp_colour" in o:
+                self.cmb_colour.setCurrentIndex(int(o["sp_colour"]))
+            if len(self.docs) > 1 and "sp_one" in o:
+                self.chk_one.setChecked(bool(o["sp_one"]))
+            if "sp_pw" in o:
+                self.chk_pw.setChecked(bool(o["sp_pw"]))
+            if "sp_sort" in o:
+                idx = int(o["sp_sort"])
+                self.cmb_sort.blockSignals(True)
+                self.cmb_sort.setCurrentIndex(idx)
+                self.cmb_sort.blockSignals(False)
+                self._sort_mode = {0: "size_desc", 1: "size_asc", 2: "name",
+                                   3: "pages", 4: "manual"}.get(idx, "size_desc")
+                # naam/pages turant lag sakte hain (size estimate ke baad khud lagega)
+                if self._sort_mode in ("name", "pages"):
+                    self._resort_rows()
+        except Exception:
+            pass
 
     @staticmethod
     def _pretty(b):
@@ -8745,16 +8988,18 @@ class SavePreviewDialog(QtWidgets.QDialog):
 
     def _refresh_total(self):
         L = self.app.L
-        vals = [self._est.get(i) for i in range(len(self.docs))]
+        active = self._active_indices()
+        vals = [self._est.get(i) for i in active]
         if any(v is None for v in vals):
             self.lbl_total.setText(L("Kul size gin rahe…", "Estimating total…"))
             return
         tot = 0
-        for i, v in enumerate(vals):
+        for i in active:
+            v = self._est.get(i) or 0
             mx = self._row_max(self._rows[i])
             tot += min(v, mx * 1024) if mx > 0 and v > mx * 1024 else v
-        self.lbl_total.setText(L("Kul: %d PDF  ·  ~%s" % (len(self.docs), self._pretty(tot)),
-                                 "Total: %d PDF  ·  ~%s" % (len(self.docs), self._pretty(tot))))
+        self.lbl_total.setText(L("Kul: %d PDF  ·  ~%s" % (len(active), self._pretty(tot)),
+                                 "Total: %d PDF  ·  ~%s" % (len(active), self._pretty(tot))))
 
     def _apply_preset(self, kb):
         for r in self._rows:
@@ -8766,9 +9011,13 @@ class SavePreviewDialog(QtWidgets.QDialog):
     # ---------- save ----------
     def _do_save(self):
         L = self.app.L
+        self._save_prefs()               # ⑧ ye settings agli baar yaad rahein
+        active = self._active_indices()  # ⑤ hataye rows chhodo, VISUAL kram me
+        if not active:
+            return
         colour = ("gray" if self.cmb_colour.currentIndex() == 1
                   else "bw" if self.cmb_colour.currentIndex() == 2 else "color")
-        one = self.chk_one.isChecked() and len(self.docs) > 1
+        one = self.chk_one.isChecked() and len(active) > 1
         pw = None
         if self.chk_pw.isChecked():
             pw, ok = QtWidgets.QInputDialog.getText(
@@ -8776,17 +9025,17 @@ class SavePreviewDialog(QtWidgets.QDialog):
                 L("PDF ka password:", "PDF password:"), QtWidgets.QLineEdit.Password)
             if not ok or not pw:
                 return
-        # rows se naam + max jama karo
+        # rows se naam + max jama karo (upar-se-neeche kram me)
         jobs = []
         if one:
-            allpaths = [p for d in self.docs for p in d["paths"]]
-            name = (self._rows[0]["name"].text().strip() or "scan")
-            mx = max((self._row_max(self._rows[i]) for i in range(len(self.docs))), default=0)
+            allpaths = [p for i in active for p in self.docs[i]["paths"]]
+            name = (self._rows[active[0]]["name"].text().strip() or "scan")
+            mx = max((self._row_max(self._rows[i]) for i in active), default=0)
             jobs.append((name, allpaths, mx))
         else:
-            for i, d in enumerate(self.docs):
+            for i in active:
                 name = (self._rows[i]["name"].text().strip() or "scan")
-                jobs.append((name, d["paths"], self._row_max(self._rows[i])))
+                jobs.append((name, self.docs[i]["paths"], self._row_max(self._rows[i])))
         folder = self.folder
         app = self.app
         # save hone par thumbnail se hataane ke liye ORIGINAL page paths
