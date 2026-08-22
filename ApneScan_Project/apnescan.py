@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "346"
+VERSION = "347"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11521,7 +11521,17 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 if scol == "today":
                     return wtoday(m)
                 return wtot(m) if m[2] else self._my_sum(m[4], None)   # 'top'
-            rows = sorted(METRICS, key=sval, reverse=sdesc)[:10]
+
+            # (v347) 0-वाले अपने-आप HATAO — jisme World/aaj/AAP me se kahin bhi
+            # kuch ho wahi dikhao. Ginti aate hi khud judta hai, 0 hote hi hat
+            # jaata (poori tarah automated).
+            def _keep(m):
+                # is period me kahin bhi kuch ho -> dikhao; poora 0 -> hatao
+                return wtot(m) > 0 or wtoday(m) > 0 or you(m) > 0
+            shown = [m for m in METRICS if _keep(m)]
+            if not shown:                       # sab 0 (offline/naya) — khaali na ho
+                shown = METRICS
+            rows = sorted(shown, key=sval, reverse=sdesc)[:10]
 
             def _arw(col):
                 return (" ▼" if sdesc else " ▲") if col == scol else ""
