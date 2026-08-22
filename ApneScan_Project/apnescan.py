@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "337"
+VERSION = "338"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -22585,12 +22585,13 @@ if the toggle is ticked).</p>
             return ""
 
     def _open_recent_dialog(self):
-        """Popup ka DHAANCHA banao (khaali, '⏳ ला रहे…' ke saath) aur lauta do —
-        data _fill_recent() se baad me bhara jaata hai (turant khulta hai)."""
+        """(v338) DESIGN C — 2-PANE: baayein sab folder (ek saath 9-12), daayein
+        chune folder ki files. Dhaancha turant khulta hai; data _fill_recent()
+        se baad me bharta hai. folder par click = daayein uski files."""
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(self.L("Recent Files — haal ki gatividhi",
                                   "Recent Files — recent activity"))
-        dlg.resize(760, 560)
+        dlg.resize(880, 590)
         v = QtWidgets.QVBoxLayout(dlg)
         v.setContentsMargins(16, 14, 16, 14); v.setSpacing(10)
 
@@ -22610,81 +22611,129 @@ if the toggle is ticked).</p>
                          "border-radius:9px;font-size:13px")
         v.addWidget(ed)
 
-        tree = QtWidgets.QTreeWidget()
-        tree.setHeaderLabels([self.L("File / Folder", "File / Folder"),
-                              self.L("Kya hua", "What"),
-                              self.L("Kab", "When")])
-        tree.setRootIsDecorated(True)
-        tree.setColumnWidth(0, 420); tree.setColumnWidth(1, 130)
-        tree.setAlternatingRowColors(True)
-        tree.setStyleSheet(
-            "QTreeWidget{border:1px solid #E2E8F0;border-radius:10px;"
-            "font-size:13px;outline:0}"
-            "QTreeWidget::item{padding:4px 2px}"
-            "QHeaderView::section{background:#F1F5F9;color:#475569;"
-            "font-weight:700;border:0;padding:6px 8px}")
-        _load = QtWidgets.QTreeWidgetItem([
-            self.L("⏳ haal ki gatividhi aa rahi hai…",
-                   "⏳ loading recent activity…"), "", ""])
-        _load.setFlags(QtCore.Qt.NoItemFlags)
-        _load.setForeground(0, QtGui.QColor("#94A3B8"))
-        tree.addTopLevelItem(_load)
-        v.addWidget(tree, 1)
-        dlg._recent_tree = tree
-        dlg._recent_sub = sub
+        # ---- 2-pane split: baayein folder-list, daayein file-list ----
+        split = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        split.setChildrenCollapsible(False)
+        split.setStyleSheet("QSplitter::handle{background:transparent;width:10px}")
 
+        left = QtWidgets.QListWidget()
+        left.setStyleSheet(
+            "QListWidget{border:1px solid #E2E8F0;border-radius:10px;background:#fff;"
+            "outline:0;font-size:13px}"
+            "QListWidget::item{border-bottom:1px solid #F1F5F9}"
+            "QListWidget::item:selected{background:#EEF2FF;border-left:3px solid #4F46E5}")
+        left.setUniformItemSizes(False)
+        left.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        split.addWidget(left)
+
+        rightw = QtWidgets.QWidget()
+        rlay = QtWidgets.QVBoxLayout(rightw); rlay.setContentsMargins(0, 0, 0, 0); rlay.setSpacing(0)
+        rhead = QtWidgets.QLabel(self.L("किसी folder पर क्लिक करें →",
+                                        "Select a folder →"))
+        rhead.setStyleSheet("background:#F5F3FF;color:#4F46E5;font-weight:800;"
+                            "font-size:13px;padding:9px 12px;border:1px solid #E2E8F0;"
+                            "border-top-left-radius:10px;border-top-right-radius:10px;"
+                            "border-bottom:0")
+        rlay.addWidget(rhead)
+        files = QtWidgets.QTreeWidget()
+        files.setHeaderHidden(True)
+        files.setRootIsDecorated(False)
+        files.setColumnCount(3)
+        files.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        _fh = files.header()
+        _fh.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        _fh.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+        _fh.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+        _fh.setStretchLastSection(False)
+        files.setStyleSheet(
+            "QTreeWidget{border:1px solid #E2E8F0;border-top:0;font-size:13px;"
+            "border-bottom-left-radius:10px;border-bottom-right-radius:10px;outline:0}"
+            "QTreeWidget::item{padding:5px 6px;border-bottom:1px solid #F1F5F9}")
+        rlay.addWidget(files, 1)
+        split.addWidget(rightw)
+        left.setMinimumWidth(300)
+        split.setSizes([360, 500])
+        v.addWidget(split, 1)
+
+        dlg._recent_left = left
+        dlg._recent_files = files
+        dlg._recent_rhead = rhead
+        dlg._recent_sub = sub
+        dlg._recent_groups = {}
+
+        # loading placeholder (baayein)
+        _lo = QtWidgets.QListWidgetItem(self.L("⏳ ला रहे हैं…", "⏳ loading…"))
+        _lo.setFlags(QtCore.Qt.NoItemFlags)
+        _lo.setForeground(QtGui.QColor("#94A3B8"))
+        left.addItem(_lo)
+
+        # ---- folder chunte hi daayein files bharo ----
+        left.currentItemChanged.connect(
+            lambda cur, prev: self._recent_show_folder(dlg, cur))
+
+        def _open_folder_in_files(folder):
+            if not folder:
+                return
+            try:
+                if hasattr(self, "files_panel") and not self.files_panel.isVisible():
+                    self.toggle_files_panel()
+                self._panel_show(folder)
+            except Exception:
+                pass
+            dlg.accept()
+        left.itemDoubleClicked.connect(
+            lambda it: _open_folder_in_files(it.data(QtCore.Qt.UserRole) if it else None))
+        files.itemDoubleClicked.connect(
+            lambda it, col: (it and it.data(0, QtCore.Qt.UserRole)
+                             and self._open_path(it.data(0, QtCore.Qt.UserRole))))
+
+        # ---- filter: folder-naam ya uske andar ki kisi file se ----
         def _filter(txt):
             t = txt.strip().lower()
-            for i in range(tree.topLevelItemCount()):
-                top = tree.topLevelItem(i)
-                any_vis = False
-                fol_hit = t in top.text(0).lower()
-                for j in range(top.childCount()):
-                    c = top.child(j)
-                    vis = (not t) or fol_hit or (t in c.text(0).lower())
-                    c.setHidden(not vis)
-                    any_vis = any_vis or vis
-                top.setHidden(bool(t) and not any_vis and not fol_hit)
-                if t and any_vis:
-                    top.setExpanded(True)
+            first_vis = None
+            for i in range(left.count()):
+                it = left.item(i)
+                fol = it.data(QtCore.Qt.UserRole)
+                if not fol:
+                    continue
+                hit = (not t) or (t in os.path.basename(fol).lower())
+                if not hit and t:
+                    for _m, _c, _s, p in dlg._recent_groups.get(fol, []):
+                        if t in os.path.basename(p).lower():
+                            hit = True; break
+                it.setHidden(not hit)
+                if hit and first_vis is None:
+                    first_vis = it
+            # agar chuni hui folder chhup gayi to pehli dikhti hui chuno
+            cur = left.currentItem()
+            if first_vis is not None and (cur is None or cur.isHidden()):
+                left.setCurrentItem(first_vis)
         ed.textChanged.connect(_filter)
 
-        def _activate(it):
-            if it is None:
-                return
-            path = it.data(0, QtCore.Qt.UserRole)
-            kind = it.data(0, QtCore.Qt.UserRole + 1)
-            if not path:
-                return
-            if kind == "file":
-                self._open_path(path)
-            else:                                # folder -> My Files me kholo
-                try:
-                    if hasattr(self, "files_panel") and not self.files_panel.isVisible():
-                        self.toggle_files_panel()
-                    self._panel_show(path)
-                except Exception:
-                    pass
-                dlg.accept()
-        tree.itemDoubleClicked.connect(lambda it, col: _activate(it))
-
+        # ---- buttons ----
         row = QtWidgets.QHBoxLayout()
         b_open = QtWidgets.QPushButton(self.L("Kholo", "Open"))
-        b_open.clicked.connect(lambda: _activate(tree.currentItem()))
+
+        def _do_open():
+            fit = files.currentItem()
+            if fit is not None and fit.data(0, QtCore.Qt.UserRole):
+                self._open_path(fit.data(0, QtCore.Qt.UserRole)); return
+            lit = left.currentItem()
+            if lit is not None:
+                _open_folder_in_files(lit.data(QtCore.Qt.UserRole))
+        b_open.clicked.connect(_do_open)
+
         b_fold = QtWidgets.QPushButton(self.L("Folder kholo", "Open folder"))
 
-        def _open_folder():
-            it = tree.currentItem()
-            if it is None:
-                return
-            path = it.data(0, QtCore.Qt.UserRole)
-            if not path:
-                return
-            if it.data(0, QtCore.Qt.UserRole + 1) == "file":
-                self._reveal_in_explorer(path)   # Explorer me file select
-            else:
-                self._open_path(path)            # folder seedha kholo
-        b_fold.clicked.connect(_open_folder)
+        def _do_open_folder():
+            fit = files.currentItem()
+            if fit is not None and fit.data(0, QtCore.Qt.UserRole):
+                self._reveal_in_explorer(fit.data(0, QtCore.Qt.UserRole)); return
+            lit = left.currentItem()
+            if lit is not None and lit.data(QtCore.Qt.UserRole):
+                self._open_path(lit.data(QtCore.Qt.UserRole))
+        b_fold.clicked.connect(_do_open_folder)
+
         bc = QtWidgets.QPushButton(self.L("Band karo", "Close"))
         bc.clicked.connect(dlg.accept)
         bc.setDefault(True)
@@ -22693,66 +22742,105 @@ if the toggle is ticked).</p>
         v.addLayout(row)
         return dlg
 
-    def _fill_recent(self, dlg, items):
-        """Scan ke natije (items) se popup ki tree bharo — folder ke hisaab se."""
+    def _recent_folder_row_widget(self, name, count, when):
+        """Baayein folder-list ki ek do-line row: naam + (N badlav · kab)."""
+        w = QtWidgets.QWidget()
+        lay = QtWidgets.QVBoxLayout(w)
+        lay.setContentsMargins(11, 7, 11, 7); lay.setSpacing(2)
+        n = QtWidgets.QLabel("📁  " + name)
+        n.setStyleSheet("font-weight:700;color:#4F46E5;font-size:12.5px;border:none;background:transparent")
+        n.setToolTip(name)
+        meta = QtWidgets.QHBoxLayout(); meta.setContentsMargins(0, 0, 0, 0); meta.setSpacing(6)
+        c = QtWidgets.QLabel(self.L("%d badlav" % count, "%d changes" % count))
+        c.setStyleSheet("color:#64748B;font-size:11px;border:none;background:transparent")
+        t = QtWidgets.QLabel(when)
+        t.setStyleSheet("color:#94A3B8;font-size:11px;border:none;background:transparent")
+        meta.addWidget(c); meta.addStretch(1); meta.addWidget(t)
+        lay.addWidget(n); lay.addLayout(meta)
+        return w
+
+    def _recent_show_folder(self, dlg, item):
+        """Baayein chuni folder ki files daayein pane me dikhao."""
         try:
-            tree = dlg._recent_tree; sub = dlg._recent_sub
+            files = dlg._recent_files; rhead = dlg._recent_rhead
         except Exception:
             return
+        if item is None:
+            return
+        folder = item.data(QtCore.Qt.UserRole)
+        rows = dlg._recent_groups.get(folder, []) if folder else []
         _ICON = {".pdf": "📕", ".docx": "📘", ".doc": "📘", ".xlsx": "📗",
                  ".xls": "📗", ".jpg": "🖼", ".jpeg": "🖼", ".png": "🖼",
                  ".tif": "🖼", ".tiff": "🖼", ".txt": "📄", ".zip": "🗜"}
+        rhead.setText("📁  %s — %s" % (
+            os.path.basename(folder) or folder,
+            self.L("%d file" % len(rows), "%d files" % len(rows))))
+        files.setUpdatesEnabled(False); files.clear()
+        for mt, ct, sz, p in rows:
+            ext = os.path.splitext(p)[1].lower()
+            did = (self.L("🟢 bani", "🟢 created") if abs(mt - ct) <= 3
+                   else self.L("✏️ badli", "✏️ edited"))
+            kb = sz / 1024.0
+            szs = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024))
+            it = QtWidgets.QTreeWidgetItem([
+                _ICON.get(ext, "📄") + "  " + os.path.basename(p),
+                did, self._recent_when(mt)])
+            it.setForeground(1, QtGui.QColor("#0B6B62"))
+            it.setForeground(2, QtGui.QColor("#64748B"))
+            it.setTextAlignment(2, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+            it.setToolTip(0, p + "   ·   " + szs)
+            it.setData(0, QtCore.Qt.UserRole, p)
+            files.addTopLevelItem(it)
+        files.setUpdatesEnabled(True)
+
+    def _fill_recent(self, dlg, items):
+        """Scan ke natije se 2-pane bharo — baayein folder-list, phir pehli chuni."""
+        try:
+            left = dlg._recent_left; sub = dlg._recent_sub
+        except Exception:
+            return
         groups, order = {}, []
         for mt, ct, sz, p in items:
             fol = os.path.dirname(p)
             if fol not in groups:
                 groups[fol] = []; order.append(fol)
             groups[fol].append((mt, ct, sz, p))
+        dlg._recent_groups = groups
 
-        tree.setUpdatesEnabled(False)
-        tree.clear()
+        left.setUpdatesEnabled(False)
+        left.clear()
         for fol in order:
             rows = groups[fol]
             newest = max(r[0] for r in rows)
-            top = QtWidgets.QTreeWidgetItem([
-                "📁  " + (os.path.basename(fol) or fol),
-                self.L("%d badlav" % len(rows), "%d changes" % len(rows)),
-                self._recent_when(newest)])
-            _tf = top.font(0); _tf.setBold(True); top.setFont(0, _tf)
-            top.setForeground(0, QtGui.QColor("#4F46E5"))
-            top.setToolTip(0, fol)
-            top.setData(0, QtCore.Qt.UserRole, fol)
-            top.setData(0, QtCore.Qt.UserRole + 1, "dir")
-            tree.addTopLevelItem(top)
-            for mt, ct, sz, p in rows:
-                ext = os.path.splitext(p)[1].lower()
-                # BANI vs BADLI: ctime~mtime => nayi bani; warna badli.
-                if abs(mt - ct) <= 3:
-                    did = self.L("🟢 bani", "🟢 created")
-                else:
-                    did = self.L("✏️ badli", "✏️ edited")
-                kb = sz / 1024.0
-                szs = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024))
-                ch = QtWidgets.QTreeWidgetItem([
-                    "    " + _ICON.get(ext, "📄") + "  " + os.path.basename(p),
-                    did, self._recent_when(mt)])
-                ch.setToolTip(0, p + "   ·   " + szs)
-                ch.setData(0, QtCore.Qt.UserRole, p)
-                ch.setData(0, QtCore.Qt.UserRole + 1, "file")
-                top.addChild(ch)
-            top.setExpanded(True)
+            it = QtWidgets.QListWidgetItem()
+            it.setData(QtCore.Qt.UserRole, fol)
+            w = self._recent_folder_row_widget(
+                os.path.basename(fol) or fol, len(rows), self._recent_when(newest))
+            # width 0 => item poori pane-chaudai le (naam na kate, koi H-scroll na aaye)
+            it.setSizeHint(QtCore.QSize(0, w.sizeHint().height()))
+            left.addItem(it)
+            left.setItemWidget(it, w)
+        left.setUpdatesEnabled(True)
+
         if not order:
-            empty = QtWidgets.QTreeWidgetItem([
+            it = QtWidgets.QListWidgetItem(
                 self.L("अभी कोई हाल की फ़ाइल नहीं मिली।",
-                       "No recent files found yet."), "", ""])
-            empty.setFlags(QtCore.Qt.NoItemFlags)
-            empty.setForeground(0, QtGui.QColor("#94A3B8"))
-            tree.addTopLevelItem(empty)
-        tree.setUpdatesEnabled(True)
+                       "No recent files found yet."))
+            it.setFlags(QtCore.Qt.NoItemFlags)
+            it.setForeground(QtGui.QColor("#94A3B8"))
+            left.addItem(it)
+            try:
+                dlg._recent_files.clear()
+                dlg._recent_rhead.setText(self.L("कुछ नहीं", "Nothing yet"))
+            except Exception:
+                pass
+        else:
+            left.setCurrentRow(0)          # pehli folder khud chuni -> daayein files
+
         sub.setText(
-            self.L("%d file · %d folder — naya sabse upar. Double-click = kholo."
+            self.L("%d file · %d folder — naya sabse upar. Bायें folder chuno."
                    % (len(items), len(order)),
-                   "%d files · %d folders — newest first. Double-click to open."
+                   "%d files · %d folders — newest first. Pick a folder on the left."
                    % (len(items), len(order))))
 
     def _update_folder_info(self):
