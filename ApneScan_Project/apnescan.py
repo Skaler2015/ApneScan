@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "340"
+VERSION = "341"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8706,6 +8706,12 @@ class SavePreviewDialog(QtWidgets.QDialog):
         size.setStyleSheet("border:none;")
         size.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
         h.addWidget(size)
+        # (v341) size-band pill (chhoti/theek/badi/bhari/bahut-bhari)
+        pill = QtWidgets.QLabel("")
+        pill.setAlignment(QtCore.Qt.AlignCenter)
+        pill.setStyleSheet("border:none;")
+        pill.setVisible(False)
+        h.addWidget(pill)
         # max-size: chhota ek-line box (inline "Max KB" label ke saath)
         mxlbl = QtWidgets.QLabel(L("Max KB", "Max KB"))
         mxlbl.setStyleSheet("color:#0D9488;font-size:10px;font-weight:700;border:none;")
@@ -8730,8 +8736,9 @@ class SavePreviewDialog(QtWidgets.QDialog):
                          "border-radius:11px;}QPushButton:hover{background:#fee2e2;}")
         rm.clicked.connect(lambda _c=False, ix=i: self._remove_row(ix))
         h.addWidget(rm)
-        self._rows.append({"name": ed, "size": size, "max": mx, "frame": w,
-                           "num": num, "thumb": thumb, "rm": rm, "removed": False})
+        self._rows.append({"name": ed, "size": size, "pill": pill, "max": mx,
+                           "frame": w, "num": num, "thumb": thumb, "rm": rm,
+                           "removed": False})
         return w
 
     @staticmethod
@@ -8966,18 +8973,39 @@ class SavePreviewDialog(QtWidgets.QDialog):
         kb = b / 1024.0
         return ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024.0))
 
+    @staticmethod
+    def _size_band(b):
+        """(v341) bytes -> (colour, hindi-label, en-label). Thresholds:
+        <1MB chhoti · 1-3MB theek · 3-5MB badi · 5-10MB bhari · 10MB+ bahut-bhari."""
+        mb = b / 1048576.0
+        if mb < 1:
+            return ("#16a34a", "छोटी", "small")
+        if mb < 3:
+            return ("#0d9488", "ठीक", "ok")
+        if mb < 5:
+            return ("#d97706", "बड़ी", "big")
+        if mb < 10:
+            return ("#ea580c", "भारी", "heavy")
+        return ("#dc2626", "बहुत भारी", "very heavy")
+
     def _refresh_row(self, i):
         r = self._rows[i]; L = self.app.L
         n = len(self.docs[i]["paths"])
         est = self._est.get(i)
         mx_kb = self._row_max(r)
+        pill = r.get("pill")
         if est is None:
             r["size"].setText("<span style='color:#94a3b8;font-size:11px'>…</span>")
+            if pill is not None:
+                pill.setVisible(False)
             return
-        # sab EK label me (rich text): bada size + chhota pages + status
-        html = ("<span style='color:#0D9488;font-size:17px;font-weight:800'>~%s</span>"
+        # (v341) SIZE ka rang uski band ke hisaab se + gol bindu + pattitag
+        colour, hi, en = self._size_band(est)
+        html = ("<span style='color:%s;font-size:13px'>●</span>&nbsp;"
+                "<span style='color:%s;font-size:17px;font-weight:800'>~%s</span>"
                 "&nbsp;<span style='color:#94a3b8;font-size:11px'>%s</span>"
-                % (self._pretty(est), L("%d page" % n, "%d pages" % n)))
+                % (colour, colour, self._pretty(est),
+                   L("%d page" % n, "%d pages" % n)))
         if mx_kb > 0 and est > mx_kb * 1024:
             html += ("&nbsp;<span style='color:#0D9488;font-size:11px;font-weight:700'>%s</span>"
                      % L("→ ≤ %d KB ✓" % mx_kb, "→ ≤ %d KB ✓" % mx_kb))
@@ -8985,6 +9013,11 @@ class SavePreviewDialog(QtWidgets.QDialog):
             html += ("&nbsp;<span style='color:#16a34a;font-size:11px;font-weight:700'>%s</span>"
                      % L("limit me ✓", "under ✓"))
         r["size"].setText(html)
+        if pill is not None:
+            pill.setText(" " + L(hi, en) + " ")
+            pill.setStyleSheet("background:%s;color:#fff;font-size:10px;font-weight:800;"
+                               "border-radius:8px;padding:1px 8px;border:none;" % colour)
+            pill.setVisible(True)
 
     def _refresh_total(self):
         L = self.app.L
@@ -8998,8 +9031,12 @@ class SavePreviewDialog(QtWidgets.QDialog):
             v = self._est.get(i) or 0
             mx = self._row_max(self._rows[i])
             tot += min(v, mx * 1024) if mx > 0 and v > mx * 1024 else v
-        self.lbl_total.setText(L("Kul: %d PDF  ·  ~%s" % (len(active), self._pretty(tot)),
-                                 "Total: %d PDF  ·  ~%s" % (len(active), self._pretty(tot))))
+        tcol = self._size_band(tot)[0]        # (v341) kul size bhi band-rang me
+        self.lbl_total.setText(L(
+            "Kul: %d PDF  ·  <span style='color:%s;font-weight:800'>~%s</span>"
+            % (len(active), tcol, self._pretty(tot)),
+            "Total: %d PDF  ·  <span style='color:%s;font-weight:800'>~%s</span>"
+            % (len(active), tcol, self._pretty(tot))))
 
     def _apply_preset(self, kb):
         for r in self._rows:
