@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "349"
+VERSION = "350"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8650,13 +8650,6 @@ class SavePreviewDialog(QtWidgets.QDialog):
             gb.addWidget(b)
         gb.addStretch(1)
         v.addLayout(gb)
-        _o2 = QtWidgets.QHBoxLayout()
-        self.chk_one = QtWidgets.QCheckBox(L("Sab ek hi PDF me", "All in one PDF"))
-        self.chk_one.setChecked(len(self.docs) == 1)
-        self.chk_one.setEnabled(len(self.docs) > 1)
-        self.chk_pw = QtWidgets.QCheckBox(L("Password lagao", "Password-protect"))
-        _o2.addWidget(self.chk_one); _o2.addWidget(self.chk_pw); _o2.addStretch(1)
-        v.addLayout(_o2)
 
         # ---- doc rows ----
         area = QtWidgets.QScrollArea(); area.setWidgetResizable(True)
@@ -8967,8 +8960,6 @@ class SavePreviewDialog(QtWidgets.QDialog):
         try:
             o = self.app._opts
             o["sp_colour"] = self.cmb_colour.currentIndex()
-            o["sp_one"] = bool(self.chk_one.isChecked())
-            o["sp_pw"] = bool(self.chk_pw.isChecked())
             o["sp_sort"] = self.cmb_sort.currentIndex()
             self.app._save_opts()
         except Exception:
@@ -8979,10 +8970,6 @@ class SavePreviewDialog(QtWidgets.QDialog):
             o = self.app._opts
             if "sp_colour" in o:
                 self.cmb_colour.setCurrentIndex(int(o["sp_colour"]))
-            if len(self.docs) > 1 and "sp_one" in o:
-                self.chk_one.setChecked(bool(o["sp_one"]))
-            if "sp_pw" in o:
-                self.chk_pw.setChecked(bool(o["sp_pw"]))
             if "sp_sort" in o:
                 idx = int(o["sp_sort"])
                 self.cmb_sort.blockSignals(True)
@@ -9082,25 +9069,12 @@ class SavePreviewDialog(QtWidgets.QDialog):
             return
         colour = ("gray" if self.cmb_colour.currentIndex() == 1
                   else "bw" if self.cmb_colour.currentIndex() == 2 else "color")
-        one = self.chk_one.isChecked() and len(active) > 1
         pw = None
-        if self.chk_pw.isChecked():
-            pw, ok = QtWidgets.QInputDialog.getText(
-                self, L("Password", "Password"),
-                L("PDF ka password:", "PDF password:"), QtWidgets.QLineEdit.Password)
-            if not ok or not pw:
-                return
-        # rows se naam + max jama karo (upar-se-neeche kram me)
+        # har document apni alag PDF (upar-se-neeche kram me) — naam + max
         jobs = []
-        if one:
-            allpaths = [p for i in active for p in self.docs[i]["paths"]]
-            name = (self._rows[active[0]]["name"].text().strip() or "scan")
-            mx = max((self._row_max(self._rows[i]) for i in active), default=0)
-            jobs.append((name, allpaths, mx))
-        else:
-            for i in active:
-                name = (self._rows[i]["name"].text().strip() or "scan")
-                jobs.append((name, self.docs[i]["paths"], self._row_max(self._rows[i])))
+        for i in active:
+            name = (self._rows[i]["name"].text().strip() or "scan")
+            jobs.append((name, self.docs[i]["paths"], self._row_max(self._rows[i])))
         folder = self.folder
         app = self.app
         # save hone par thumbnail se hataane ke liye ORIGINAL page paths
