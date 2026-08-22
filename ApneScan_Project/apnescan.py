@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "341"
+VERSION = "342"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8555,6 +8555,34 @@ class _DragGrip(QtWidgets.QLabel):
             self._down = False
             self.setCursor(QtCore.Qt.OpenHandCursor)
             self.released.emit()
+
+
+class _ElideLabel(QtWidgets.QLabel):
+    """(v342) Ek-line label jo jagah kam ho to text chhota kar de (…).
+    ElideLeft => shuru me '…', path ka aakhri (kaam ka) hissa dikhe."""
+    def __init__(self, text="", mode=QtCore.Qt.ElideLeft):
+        super().__init__()
+        self._full = text or ""
+        self._mode = mode
+        self.setToolTip(self._full)
+        self._apply()
+
+    def setFullText(self, text):
+        self._full = text or ""
+        self.setToolTip(self._full)
+        self._apply()
+
+    def _apply(self):
+        try:
+            fm = self.fontMetrics()
+            w = max(10, self.width())
+            self.setText(fm.elidedText(self._full, self._mode, w))
+        except Exception:
+            self.setText(self._full)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._apply()
 
 
 class SavePreviewDialog(QtWidgets.QDialog):
@@ -22946,6 +22974,12 @@ if the toggle is ticked).</p>
                             "border-top-left-radius:10px;border-top-right-radius:10px;"
                             "border-bottom:0")
         rlay.addWidget(rhead)
+        # (v342) header ke neeche chune folder ka PURA path
+        rurl = _ElideLabel("", QtCore.Qt.ElideLeft)
+        rurl.setStyleSheet("background:#FAF9FF;color:#8A93A3;font-size:10.5px;"
+                           "padding:4px 12px 7px;border:1px solid #E2E8F0;border-top:0;"
+                           "border-bottom:0")
+        rlay.addWidget(rurl)
         files = QtWidgets.QTreeWidget()
         files.setHeaderHidden(True)
         files.setRootIsDecorated(False)
@@ -22969,6 +23003,7 @@ if the toggle is ticked).</p>
         dlg._recent_left = left
         dlg._recent_files = files
         dlg._recent_rhead = rhead
+        dlg._recent_rurl = rurl
         dlg._recent_sub = sub
         dlg._recent_groups = {}
 
@@ -23053,21 +23088,24 @@ if the toggle is ticked).</p>
         v.addLayout(row)
         return dlg
 
-    def _recent_folder_row_widget(self, name, count, when):
-        """Baayein folder-list ki ek do-line row: naam + (N badlav · kab)."""
+    def _recent_folder_row_widget(self, name, count, when, path=""):
+        """Baayein folder-list ki row: naam + PURA PATH + (N badlav · kab)."""
         w = QtWidgets.QWidget()
         lay = QtWidgets.QVBoxLayout(w)
-        lay.setContentsMargins(11, 7, 11, 7); lay.setSpacing(2)
+        lay.setContentsMargins(11, 6, 11, 6); lay.setSpacing(1)
         n = QtWidgets.QLabel("📁  " + name)
         n.setStyleSheet("font-weight:700;color:#4F46E5;font-size:12.5px;border:none;background:transparent")
         n.setToolTip(name)
+        # (v342) folder ka PURA path — naam ke neeche, halka grey (lamba ho to …)
+        u = _ElideLabel(path, QtCore.Qt.ElideLeft)
+        u.setStyleSheet("color:#8A93A3;font-size:10px;border:none;background:transparent")
         meta = QtWidgets.QHBoxLayout(); meta.setContentsMargins(0, 0, 0, 0); meta.setSpacing(6)
         c = QtWidgets.QLabel(self.L("%d badlav" % count, "%d changes" % count))
         c.setStyleSheet("color:#64748B;font-size:11px;border:none;background:transparent")
         t = QtWidgets.QLabel(when)
         t.setStyleSheet("color:#94A3B8;font-size:11px;border:none;background:transparent")
         meta.addWidget(c); meta.addStretch(1); meta.addWidget(t)
-        lay.addWidget(n); lay.addLayout(meta)
+        lay.addWidget(n); lay.addWidget(u); lay.addLayout(meta)
         return w
 
     def _recent_show_folder(self, dlg, item):
@@ -23086,6 +23124,10 @@ if the toggle is ticked).</p>
         rhead.setText("📁  %s — %s" % (
             os.path.basename(folder) or folder,
             self.L("%d file" % len(rows), "%d files" % len(rows))))
+        try:
+            dlg._recent_rurl.setFullText("📂 " + (folder or ""))   # (v342) pura path
+        except Exception:
+            pass
         files.setUpdatesEnabled(False); files.clear()
         for mt, ct, sz, p in rows:
             ext = os.path.splitext(p)[1].lower()
@@ -23126,7 +23168,8 @@ if the toggle is ticked).</p>
             it = QtWidgets.QListWidgetItem()
             it.setData(QtCore.Qt.UserRole, fol)
             w = self._recent_folder_row_widget(
-                os.path.basename(fol) or fol, len(rows), self._recent_when(newest))
+                os.path.basename(fol) or fol, len(rows),
+                self._recent_when(newest), fol)
             # width 0 => item poori pane-chaudai le (naam na kate, koi H-scroll na aaye)
             it.setSizeHint(QtCore.QSize(0, w.sizeHint().height()))
             left.addItem(it)
