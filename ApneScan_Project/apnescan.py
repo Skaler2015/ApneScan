@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "343"
+VERSION = "344"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9269,6 +9269,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._opts = dict(DEFAULT_OPTIONS)
         self._opts.update(self._config.get("options", {}))
         self._recent = self._config.get("recent", [])
+        # (v344) ApneScan me KIYE gaye kaam ka log — Recent Files isi se banti hai
+        # (filesystem scan nahi). Har entry: {"t": epoch, "p": path, "a": act}.
+        self._activity = self._config.get("activity", [])
         self._used_claims = set(self._config.get("used_claims", []))
         self._barcode_tried = False
         self._dirty = False
@@ -9432,6 +9435,31 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._recent = self._recent[:12]
         self._config["recent"] = self._recent; save_config(self._config)
         self._refresh_recent_menu()
+
+    def _log_activity(self, path, act="save"):
+        """(v344) ApneScan me abhi jo KIYA (save/import/rename/edit) usko log
+        karo — 'Recent Files' popup isi se banti hai (poori library scan nahi).
+        Newest sabse aage; last ~800 rakhe jaate hain."""
+        try:
+            if not path:
+                return
+            p = os.path.abspath(path)
+            try:
+                t = os.path.getmtime(p)      # asli file-time (sahi 'kab')
+            except Exception:
+                t = time.time()
+            lst = getattr(self, "_activity", None)
+            if lst is None:
+                lst = self._activity = []
+            # wahi path dobara -> purani entry hatao (naya sabse aage)
+            lst = [e for e in lst if e.get("p") != p]
+            lst.insert(0, {"t": t, "p": p, "a": act})
+            self._activity = lst[:800]
+            self._config["activity"] = self._activity
+            save_config(self._config)
+            self._recent_cache = None        # Recent Files agli baar taaza bane
+        except Exception:
+            pass
 
     # ---- menu + shortcuts ----
     def _ma(self, menu, text, slot, tip="", sc=None):
@@ -19892,7 +19920,7 @@ if the toggle is ticked).</p>
         """Chuni gayi files ko folder me copy karo (naam takraye to _2, _3…);
         background me, UI nahi rukti."""
         def job():
-            done = 0
+            made = []
             for src in files:
                 try:
                     stem, ext = os.path.splitext(os.path.basename(src))
@@ -19902,15 +19930,18 @@ if the toggle is ticked).</p>
                         dst = os.path.join(folder, "%s_%d%s" % (stem, k, ext))
                         k += 1
                     shutil.copy2(src, dst)
-                    done += 1
+                    made.append(dst)
                 except Exception:
                     pass
-            return done
+            return made
 
-        def on_done(n):
-            if isinstance(n, Exception):
+        def on_done(made):
+            if isinstance(made, Exception):
                 self._warn(self.L("Import fail ho gaya", "Import failed"))
                 return
+            n = len(made)
+            for _p in made:                     # (v344) Recent Files ke liye
+                self._log_activity(_p, "import")
             self._invalidate_files_index()      # nayi files turant search me aayein
             try:
                 idx = self.files_model.index(folder)
@@ -22843,17 +22874,21 @@ if the toggle is ticked).</p>
         self._recent_dlg = dlg           # GC se bachao (non-modal)
         dlg.show(); dlg.raise_(); dlg.activateWindow()
 
-        # 2) haal ka cache taaza ho to seedha bhar do (koi scan nahi)
+        # 2) haal ka cache taaza ho to seedha bhar do
         cached = getattr(self, "_recent_cache", None)
-        if cached and (time.time() - cached[0] < 45):
+        if cached and (time.time() - cached[0] < 30):
             self._fill_recent(dlg, cached[1])
             return
 
-        # 3) warna background me TEZ scan (os.scandir — Windows par stat free)
-        root = self._files_root()
+        # 3) (v344) Recent ab ApneScan ke ACTIVITY LOG se banti hai — यानी जो
+        # aapने is software me KIYA (save/import/rename). Koi library-scan nahi.
+        log = list(getattr(self, "_activity", []) or [])
+        if not log and getattr(self, "_recent", None):
+            # pehli baar (log khaali) — purane saves se seed, taaki khaali na ho
+            log = [{"t": None, "p": p, "a": "save"} for p in self._recent]
 
         def job():
-            return self._scan_recent_fast(root)
+            return self._recent_items_from_log(log)
 
         def done(res):
             if isinstance(res, Exception) or not isinstance(res, list):
@@ -22865,6 +22900,40 @@ if the toggle is ticked).</p>
             except Exception:
                 pass
         self._run_bg_quiet(job, done)
+
+    def _recent_items_from_log(self, log):
+        """Activity-log entries -> (t, act, size, path) list; jo file ab bhi
+        mojood hai wahi, naya-sabse-upar. (Sirf logged paths stat hote hain —
+        poori library nahi, isliye tez.)"""
+        items = []
+        seen = set()
+        for e in log:
+            p = e.get("p")
+            if not p or p in seen:
+                continue
+            seen.add(p)
+            try:
+                if not os.path.isfile(p):
+                    continue
+                st = os.stat(p)
+                size = st.st_size
+                t = e.get("t") or st.st_mtime
+            except Exception:
+                continue
+            items.append((t, e.get("a") or "save", size, p))
+            if len(items) >= 200:
+                break
+        items.sort(key=lambda x: x[0], reverse=True)
+        return items
+
+    def _act_label(self, act):
+        """(v344) activity-code -> dikhne wala 'kya hua' label."""
+        return {
+            "save":   self.L("🟢 बनाई",     "🟢 created"),
+            "import": self.L("📥 लाई",      "📥 imported"),
+            "rename": self.L("✏️ नाम बदला", "✏️ renamed"),
+            "edit":   self.L("✏️ बदली",     "✏️ edited"),
+        }.get(act, self.L("• अपडेट", "• updated"))
 
     def _scan_recent_fast(self, root, limit=150, top_dirs=80, budget=14.0):
         """(v343) HAAL me update HUE folder dhoondo — poori library me se (kisi
@@ -23167,15 +23236,14 @@ if the toggle is ticked).</p>
         except Exception:
             pass
         files.setUpdatesEnabled(False); files.clear()
-        for mt, ct, sz, p in rows:
+        for t, act, sz, p in rows:
             ext = os.path.splitext(p)[1].lower()
-            did = (self.L("🟢 bani", "🟢 created") if abs(mt - ct) <= 3
-                   else self.L("✏️ badli", "✏️ edited"))
+            did = self._act_label(act)            # (v344) ApneScan me kya kiya
             kb = sz / 1024.0
             szs = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024))
             it = QtWidgets.QTreeWidgetItem([
                 _ICON.get(ext, "📄") + "  " + os.path.basename(p),
-                did, self._recent_when(mt)])
+                did, self._recent_when(t)])
             it.setForeground(1, QtGui.QColor("#0B6B62"))
             it.setForeground(2, QtGui.QColor("#64748B"))
             it.setTextAlignment(2, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
@@ -23318,6 +23386,7 @@ if the toggle is ticked).</p>
         new = self._unique_fs_path(new, is_dir=False, exclude=path)
         try:
             os.rename(path, new)
+            self._log_activity(new, "rename")     # (v344) Recent Files ke liye
         except Exception as exc:
             self._warn("Rename failed: %s" % exc)
 
@@ -29327,6 +29396,7 @@ if the toggle is ticked).</p>
             pass
         # recent
         self._add_recent(out)
+        self._log_activity(out, "save")       # (v344) Recent Files ke liye
         # used claims (duplicate detection)
         if claim:
             self._used_claims.add(claim)
