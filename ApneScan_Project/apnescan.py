@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "350"
+VERSION = "351"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -23089,14 +23089,23 @@ if the toggle is ticked).</p>
             log = [{"t": None, "p": p, "a": "save"} for p in self._recent]
         root = self._files_root()
 
+        def _nkey(p):
+            # (v351) alag-alag slash (\ vs /) / case ko ek karo — warna wahi
+            # file/folder do baar dikhta tha (log abspath vs scan path)
+            try:
+                return os.path.normcase(os.path.normpath(p))
+            except Exception:
+                return p
+
         def job():
             items = self._recent_items_from_log(log)     # (t, act, size, path)
-            seen = set(p for (_t, _a, _s, p) in items)
+            seen = set(_nkey(p) for (_t, _a, _s, p) in items)
             try:
                 for mt, ct, sz, p in self._scan_recent_fast(root):
-                    if p in seen:
+                    k = _nkey(p)
+                    if k in seen:
                         continue
-                    seen.add(p)
+                    seen.add(k)
                     act = "save" if abs(mt - ct) <= 3 else "edit"
                     items.append((mt, act, sz, p))
             except Exception:
@@ -23473,11 +23482,19 @@ if the toggle is ticked).</p>
         except Exception:
             return
         groups, order = {}, []
+        _key2disp = {}          # (v351) normalized folder-key -> display path
         for mt, ct, sz, p in items:
             fol = os.path.dirname(p)
-            if fol not in groups:
-                groups[fol] = []; order.append(fol)
-            groups[fol].append((mt, ct, sz, p))
+            try:
+                fkey = os.path.normcase(os.path.normpath(fol))
+            except Exception:
+                fkey = fol
+            disp = _key2disp.get(fkey)
+            if disp is None:
+                disp = os.path.normpath(fol)     # \ vs / ek jaisa
+                _key2disp[fkey] = disp
+                groups[disp] = []; order.append(disp)
+            groups[disp].append((mt, ct, sz, p))
         dlg._recent_groups = groups
 
         left.setUpdatesEnabled(False)
