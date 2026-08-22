@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "335"
+VERSION = "336"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -8540,7 +8540,16 @@ class SavePreviewDialog(QtWidgets.QDialog):
         self._est = {}            # index -> HD size (bytes) ya None (compute ho raha)
         L = app.L
         self.setWindowTitle(L("Save — pehle dekho", "Save — preview"))
-        self.resize(620, 500)
+        # (v336) Itni oonchi khulo ki kam-se-kam 10 files EK saath dikhein
+        # (row ~30px). Zyada docs par bhi screen se bahar na jaaye — screen ke
+        # hisaab se seemit, baaki scroll me.
+        _rows_show = max(1, min(len(docs), 11))
+        _need_h = 250 + _rows_show * 31
+        try:
+            _avail = QtWidgets.QApplication.desktop().availableGeometry(self).height()
+        except Exception:
+            _avail = 900
+        self.resize(660, min(_need_h, _avail - 70))
         v = QtWidgets.QVBoxLayout(self)
         v.setSpacing(9)
 
@@ -8581,12 +8590,14 @@ class SavePreviewDialog(QtWidgets.QDialog):
         area = QtWidgets.QScrollArea(); area.setWidgetResizable(True)
         area.setStyleSheet("QScrollArea{border:1px solid #e2e8f0;border-radius:8px;}")
         inner = QtWidgets.QWidget()
-        il = QtWidgets.QVBoxLayout(inner); il.setSpacing(6); il.setContentsMargins(6, 6, 6, 6)
+        il = QtWidgets.QVBoxLayout(inner); il.setSpacing(0); il.setContentsMargins(4, 4, 4, 4)
         self._rows = []
         for i, d in enumerate(self.docs):
             il.addWidget(self._make_row(i, d))
         il.addStretch(1)
         area.setWidget(inner)
+        # kam-se-kam ~10 row ki jagah pakki karo (chhoti list par bhi saaf dikhe)
+        area.setMinimumHeight(min(11, max(len(self.docs), 3)) * 31 + 12)
         v.addWidget(area, 1)
 
         # ---- total + buttons ----
@@ -8613,37 +8624,41 @@ class SavePreviewDialog(QtWidgets.QDialog):
     # ---------- row ----------
     def _make_row(self, i, d):
         L = self.app.L
+        # (v336) COMPACT ek-line row taaki 10+ files ek saath dikhein —
+        # patli bottom-line se alag, kam padding. [# naam … ~size·pages Max KB]
         w = QtWidgets.QFrame()
-        w.setStyleSheet("QFrame{border:1px solid #e5e7eb;border-radius:9px;}")
-        # (v332) sab EK hi line me: [naam] … [~size · pages] [Max size box]
-        h = QtWidgets.QHBoxLayout(w); h.setContentsMargins(11, 9, 11, 9); h.setSpacing(11)
+        w.setStyleSheet("QFrame{border:none;border-bottom:1px solid #eef2f7;}")
+        h = QtWidgets.QHBoxLayout(w); h.setContentsMargins(6, 3, 6, 3); h.setSpacing(8)
+        num = QtWidgets.QLabel("%d." % (i + 1))
+        num.setStyleSheet("color:#94a3b8;font-size:12px;font-weight:700;border:none;")
+        num.setFixedWidth(20); num.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        h.addWidget(num)
         ed = QtWidgets.QLineEdit((d.get("name") or "").strip())
         ed.setPlaceholderText(L("File ka naam…", "File name…"))
-        ed.setStyleSheet("border:1px solid #cbd5e1;border-radius:6px;padding:6px 8px;"
+        ed.setStyleSheet("border:1px solid #cbd5e1;border-radius:6px;padding:4px 8px;"
                          "font-weight:600;font-size:13px;")
         h.addWidget(ed, 1)
-        # size (bada, gehra) — Max size box ke JUST PEHLE, usi line me
+        # size (bada, gehra) — Max box ke JUST PEHLE, usi line me
         size = QtWidgets.QLabel("…")
         size.setTextFormat(QtCore.Qt.RichText)
         size.setStyleSheet("border:none;")
         size.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
         h.addWidget(size)
-        # max-size: KHAALI box jisme aap KB likho (caption upar)
-        mxwrap = QtWidgets.QVBoxLayout(); mxwrap.setSpacing(2)
-        cap = QtWidgets.QLabel(L("Max size (KB)", "Max size (KB)"))
-        cap.setStyleSheet("color:#0D9488;font-size:9px;font-weight:700;border:none;")
-        cap.setAlignment(QtCore.Qt.AlignCenter)
+        # max-size: chhota ek-line box (inline "Max KB" label ke saath)
+        mxlbl = QtWidgets.QLabel(L("Max KB", "Max KB"))
+        mxlbl.setStyleSheet("color:#0D9488;font-size:10px;font-weight:700;border:none;")
+        mxlbl.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        h.addWidget(mxlbl)
         mx = QtWidgets.QLineEdit()
-        mx.setPlaceholderText(L("likho…", "type…"))
+        mx.setPlaceholderText("—")
         mx.setValidator(QtGui.QIntValidator(0, 51200, mx))
-        mx.setFixedWidth(104); mx.setAlignment(QtCore.Qt.AlignRight)
-        mx.setStyleSheet("border:2px solid #0D9488;border-radius:8px;padding:7px 9px;"
-                         "font-size:15px;font-weight:800;background:#f0fdfa;color:#0f172a;")
+        mx.setFixedWidth(70); mx.setAlignment(QtCore.Qt.AlignRight)
+        mx.setStyleSheet("border:1.5px solid #0D9488;border-radius:6px;padding:4px 7px;"
+                         "font-size:13px;font-weight:800;background:#f0fdfa;color:#0f172a;")
         mx.setToolTip(L("Yahan KB likho — itne se KAM ki PDF banegi. Khaali = poora (koi limit nahi).",
                         "Type KB here — the PDF will be made SMALLER than this. Empty = full."))
         mx.textChanged.connect(lambda _t, ix=i: (self._refresh_row(ix), self._refresh_total()))
-        mxwrap.addWidget(cap); mxwrap.addWidget(mx)
-        h.addLayout(mxwrap)
+        h.addWidget(mx)
         self._rows.append({"name": ed, "size": size, "max": mx})
         return w
 
