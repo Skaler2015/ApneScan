@@ -59,6 +59,11 @@ function default_data() {
         // naye admin features ke liye
         'auditLog'=>array(),      // (3) admin actions history
         'featDaily'=>array(),     // (18) feature adoption over time [date][feat]=count
+        // (v348) HAR-KAAM ki ginti — app ke har action (menu/nav/edit/button…)
+        // ka worldwide total + roz ka + kitne alag users. evbatch se bharta hai.
+        'actions'=>array(),        // [action]=total count
+        'actionsDaily'=>array(),   // [date][action]=count
+        'actionUsers'=>array(),    // [action]=[client,…] (unique, cap)
         'reqHours'=>array(),      // (26) requests per hour (load)
         'sizeDaily'=>array(),     // (26) data-file size trend
         // rename analytics ka privacy-safe meta (koi asli naam nahi — sirf ginti)
@@ -172,6 +177,26 @@ function maybe_backup($file, &$d) {
 function today_str() { return date('Y-m-d'); }
 function hour_key()  { return date('Y-m-d-H'); }
 function bump(&$arr, $key, $by=1) { $key=trim((string)$key); if($key==='')return; $arr[$key]=(isset($arr[$key])?intval($arr[$key]):0)+$by; }
+// (v348) app ke event-naam ko 'sab-kuch' analytics ki saaf key me badlo.
+// app-life/warning/internal chhodo; feat: -> saaf naam; baaki 'prefix:slug'.
+function an_norm_action($name) {
+    $s = (string)$name;
+    if (strpos($s, ':') !== false) { list($pre, $rest) = explode(':', $s, 2); }
+    else { $pre = 'act'; $rest = $s; }
+    $rest = trim($rest);
+    if ($pre === 'app' || $pre === 'orient') return '';
+    $low = strtolower($pre . ':' . $rest);
+    if (strpos($low,'warn')!==false || strpos($low,'auto-clean')!==false
+        || strpos($low,'autoinstall')!==false || strpos($low,'no-tesseract')!==false) return '';
+    if ($pre === 'feat') {
+        $map = array('save-pdf'=>'save','save'=>'save','print'=>'print',
+                     'import'=>'import','scan'=>'scan','editor'=>'editor');
+        $r = strtolower($rest); return isset($map[$r]) ? $map[$r] : $r;
+    }
+    $slug = preg_replace('/[^\p{L}\p{N}_-]+/u', '', strtolower(str_replace(' ', '-', $rest)));
+    if ($slug === '') return '';
+    return substr($pre . ':' . $slug, 0, 32);
+}
 
 // user ka asli IP (CDN/proxy ke peeche bhi)
 function client_ip() {
@@ -976,6 +1001,16 @@ if (isset($_GET['admin'])) {
     $S['unusual']=($S['dailyAvg']>=3 && $S['today']>=3*$S['dailyAvg']);
     // features / scanners / settings
     $S['features']=isset($d['features'])?$d['features']:array();
+    // (v348) SAB-KUCH: har action ki ginti (total + aaj + unique users), top 60
+    $__acts=isset($d['actions'])&&is_array($d['actions'])?$d['actions']:array();
+    arsort($__acts); $__acts=array_slice($__acts,0,60,true);
+    $__aToday=isset($d['actionsDaily'][$today])&&is_array($d['actionsDaily'][$today])?$d['actionsDaily'][$today]:array();
+    $__aUsers=array();
+    foreach($__acts as $ak=>$_v){ $__aUsers[$ak]=isset($d['actionUsers'][$ak])?count($d['actionUsers'][$ak]):0; }
+    $S['actions']=$__acts;
+    $S['actionsToday']=$__aToday;
+    $S['actionUsers']=$__aUsers;
+    $S['actionsTotalKinds']=count(isset($d['actions'])?$d['actions']:array());
     $S['scanners']=isset($d['scanners'])?$d['scanners']:array();
     $S['dpis']=isset($d['dpis'])?$d['dpis']:array();
     $S['colors']=isset($d['colors'])?$d['colors']:array();
@@ -1757,6 +1792,12 @@ if (isset($_GET['admin'])) {
   <div class="card"><h3><span class="em">🌍</span> Impact — ApneScan ne duniya me kya kiya</h3>
     <div class="kpis" id="impact"></div>
   </div>
+  <!-- (v348) SAB-KUCH: har action (menu/nav/edit/button/feature) ki worldwide ginti -->
+  <div class="card"><h3><span class="em">🧭</span> Sab Actions — har kaam ki ginti (worldwide)
+    <span style="color:var(--mut);font-weight:500;font-size:11px">— app me user jo bhi kare (menu/nav/edit/button/tool) sab yahan; <span id="actKinds">0</span> tarah ke kaam</span></h3>
+    <input id="actSearch" class="no-print" placeholder="🔍 action dhoondo…" style="width:100%;margin-bottom:8px">
+    <div style="overflow:auto;max-height:460px"><table id="actTable"></table></div>
+  </div>
   <div class="grid">
     <div class="card"><h3><span class="em">🧰</span> Feature usage (kitni baar)</h3><div id="featC"></div></div>
     <div class="card"><h3><span class="em">📥</span> Feature adoption (% users)</h3><div id="featA"></div></div>
@@ -2286,6 +2327,22 @@ bars('cos',obj2rows(D.scansByCountry),true);
 bars('ve',obj2rows(D.versions),false,function(k){return 'v'+k;});
 bars('me',Object.keys(D.methods||{}).map(function(k){var n={escl:'Network',wia:'USB',twain:'TWAIN',naps2:'NAPS2'}[k]||k;return [n,D.methods[k]];}).sort(function(a,b){return b[1]-a[1];}),false);
 bars('ft',obj2rows(D.features),false,function(k){var n={ocr:'OCR',compress:'Compress',share:'Share',whatsapp:'WhatsApp',email:'Email',print:'Print',import:'Import',merge:'Merge',split:'Split',rotate:'Rotate',sign:'Sign',protect:'Password'}[k];return n||k;});
+// (v348) SAB ACTIONS — har kaam ki ginti (worldwide): total + aaj + unique users
+(function(){
+  var acts=D.actions||{}, aT=D.actionsToday||{}, aU=D.actionUsers||{};
+  var kEl=document.getElementById('actKinds'); if(kEl) kEl.textContent=(D.actionsTotalKinds||Object.keys(acts).length).toLocaleString();
+  var rows=Object.keys(acts).map(function(k){return [k,acts[k],aT[k]||0,aU[k]||0];}).sort(function(a,b){return b[1]-a[1];});
+  function lbl(k){var pre='',rest=k;if(k.indexOf(':')>=0){var p=k.split(':');pre=p[0];rest=p.slice(1).join(':');}
+    var name=rest.replace(/[-_]/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();});
+    var tag=pre?(' <span style="font-size:9px;color:var(--mut);border:1px solid var(--line);border-radius:5px;padding:0 4px">'+esc(pre)+'</span>'):'';
+    return esc(name)+tag;}
+  function draw(q){q=(q||'').toLowerCase();var t=document.getElementById('actTable');if(!t)return;
+    var fr=rows.filter(function(r){return !q||r[0].toLowerCase().indexOf(q)>=0;});
+    if(!fr.length){t.innerHTML='<tr><td style="color:var(--mut);font-size:12px">— abhi koi data nahi (app naye version se bhejegi) —</td></tr>';return;}
+    t.innerHTML='<tr><th style="text-align:left">Action</th><th style="text-align:right">Total</th><th style="text-align:right">Aaj</th><th style="text-align:right">Users</th></tr>'+
+      fr.map(function(r){return '<tr><td>'+lbl(r[0])+'</td><td style="text-align:right"><b>'+r[1].toLocaleString()+'</b></td><td style="text-align:right;color:#0D9488"><b>'+(r[2]||0).toLocaleString()+'</b></td><td style="text-align:right;color:var(--mut)">'+(r[3]||0).toLocaleString()+'</td></tr>';}).join('');}
+  draw('');var s=document.getElementById('actSearch');if(s)s.addEventListener('input',function(){draw(this.value);});
+})();
 bars('sm',obj2rows(D.scanners),false);
 // scan settings combined
 (function(){var box=document.getElementById('ss');var h='';
@@ -3708,6 +3765,19 @@ if ($action === 'scan') {
             if ($en === '') continue;
             $lines .= json_encode(array('t'=>$et,'c'=>substr((string)$client,0,40),
                 'u'=>$unm,'e'=>$en), JSON_UNESCAPED_UNICODE)."\n";
+            // (v348) SAB-KUCH ANALYTICS: har action ki worldwide ginti (total +
+            // roz ka + unique users). Noise (app-life/warning/internal) chhodo.
+            $ak = an_norm_action($en);
+            if ($ak !== '') {
+                bump($d['actions'], $ak, 1);
+                if(!isset($d['actionsDaily'][$today])||!is_array($d['actionsDaily'][$today])) $d['actionsDaily'][$today]=array();
+                bump($d['actionsDaily'][$today], $ak, 1);
+                if(!isset($d['actionUsers'][$ak])||!is_array($d['actionUsers'][$ak])) $d['actionUsers'][$ak]=array();
+                if($client!=='' && !in_array($client,$d['actionUsers'][$ak],true)){
+                    $d['actionUsers'][$ak][]=$client;
+                    $d['actionUsers'][$ak]=array_slice($d['actionUsers'][$ak],-3000);
+                }
+            }
             $d['recentEvents'][] = array('t'=>$et,'client'=>substr((string)$client,0,40),'u'=>$unm,'feat'=>$en);
             if (isset($d['clients'][$client])) {
                 if(!isset($d['clients'][$client]['ev'])||!is_array($d['clients'][$client]['ev']))$d['clients'][$client]['ev']=array();
@@ -3717,6 +3787,9 @@ if ($action === 'scan') {
         }
         $d['recentEvents'] = array_slice($d['recentEvents'],-400);
         if ($lines !== '') @file_put_contents($edir.'/events-'.date('Y-m-d',$now).'.jsonl', $lines, FILE_APPEND|LOCK_EX);
+        // (v348) actionsDaily/actions ki size seemit rakho (memory/file halki)
+        if(count($d['actionsDaily'])>40){ ksort($d['actionsDaily']); $d['actionsDaily']=array_slice($d['actionsDaily'],-35,null,true); }
+        if(count($d['actions'])>600){ arsort($d['actions']); $d['actions']=array_slice($d['actions'],0,500,true); }
     }
 } else if ($action === 'crash') {
     $_cv = substr(isset($_REQUEST['v'])?$_REQUEST['v']:'',0,10);
