@@ -90,12 +90,16 @@ jobs:
         run: |
           V=$(grep -m1 -oP 'VERSION = "\K[0-9]+' ApneScan_Project/apnescan.py)
           echo "Chahiye version: v$V"
-          for i in $(seq 1 30); do
+          # Build (Build ApneScan EXE) alag workflow me PARALLEL chalti hai aur
+          # 32-bit PyInstaller + Tesseract bundle ~8-12 min leti hai. Isliye
+          # exact-version release ka ~22 min tak intezaar — taaki website par
+          # size HAMESHA isi version ke asli installer se aaye (purani na dikhe).
+          for i in $(seq 1 45); do
             if gh release download "v$V" -R "$GITHUB_REPOSITORY" \
                  -p "ApneScan-Setup.exe" -p "ApneScan-Portable.zip" -D _site/ --clobber 2>/dev/null; then
               echo "Release v$V mil gaya"; break
             fi
-            echo "Release v$V abhi ban raha hai... intezaar ($i/30)"; sleep 20
+            echo "Release v$V abhi ban raha hai... intezaar ($i/45)"; sleep 30
           done
           if [ ! -f _site/ApneScan-Setup.exe ]; then
             echo "v$V na mila — latest release se le rahe hain"
