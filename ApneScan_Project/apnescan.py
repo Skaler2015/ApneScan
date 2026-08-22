@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "334"
+VERSION = "335"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -22479,66 +22479,221 @@ if the toggle is ticked).</p>
         self._render_files_results(res)
 
     def _show_recent_files(self):
-        """Haal me bani/badli files — naye sabse upar (poore scope me)."""
-        # (v334) Sidebar se "Recent Files" dabate hi pehle My Files panel KHULE —
-        # warna natije chhupe hue widget me jaate the aur "kuch nahi dikhta" tha.
-        try:
-            if hasattr(self, "files_panel") and not self.files_panel.isVisible():
-                self.toggle_files_panel()
-        except Exception:
-            pass
-        scope = self._panel_current_dir()
-        if not (scope and os.path.isdir(scope)):
-            scope = self._files_root()
-        idx = self._files_index_ready(scope)
-        if idx is None:
-            # (v334) Index abhi ban raha — "phir dabao" ke bajaye khud dobara
-            # koshish karo, aur panel me saaf "Taiyaari…" dikhao (blank nahi).
-            try:
-                self.files_results.clear()
-                _w = QtWidgets.QListWidgetItem(
-                    self.L("⏳ Taiyaari… haal ki files aa rahi hain",
-                           "⏳ Indexing… loading recent files"))
-                _w.setFlags(QtCore.Qt.NoItemFlags)
-                _w.setTextAlignment(QtCore.Qt.AlignHCenter)
-                _w.setForeground(QtGui.QColor("#94A3B8"))
-                self.files_results.addItem(_w)
-                self.files_tree.hide(); self.files_results.show()
-            except Exception:
-                pass
-            tries = getattr(self, "_recent_wait_tries", 0)
-            if tries < 40:                       # ~20s tak intezaar, phir chhodo
-                self._recent_wait_tries = tries + 1
-                QtCore.QTimer.singleShot(500, self._show_recent_files)
-            else:
-                self._recent_wait_tries = 0
-                self.status.showMessage(self.L("Taiyaari me der — phir se dabao.",
-                                               "Indexing slow — tap again."), 3000)
-            return
-        self._recent_wait_tries = 0
-        files = [e[1] for e in idx if e[0] == "file"]
+        """(v335) 'Recent Files' ab ek POPUP me khulta hai — haal ki gatividhi
+        FOLDER ke hisaab se: pehle folder ka naam, phir us folder me kya hua
+        (kaunsi file BANI ya BADLI aur kab). Naya sabse upar."""
+        root = self._files_root()
 
         def job():
-            dated = []
-            for p in files:
-                try:
-                    dated.append((os.path.getmtime(p), p))
-                except Exception:
-                    pass
-            dated.sort(reverse=True)
-            return [("file", p) for _m, p in dated[:60]]
-
-        def done(res):
-            if isinstance(res, Exception):
-                return
+            items = []
             try:
-                self.files_filter.blockSignals(True)
-                self.files_filter.setCurrentIndex(0)
-                self.files_filter.blockSignals(False)
+                for dp, dns, fn in os.walk(root):
+                    # chhupe/system folders chhodo (tez + saaf)
+                    dns[:] = [d for d in dns if not d.startswith(".")]
+                    for f in fn:
+                        if f.lower().endswith(self._FILE_EXTS):
+                            p = os.path.join(dp, f)
+                            try:
+                                st = os.stat(p)
+                                items.append((st.st_mtime, st.st_ctime,
+                                              st.st_size, p))
+                            except Exception:
+                                pass
+                    if len(items) >= 20000:
+                        break
             except Exception:
                 pass
-            self._render_files_results(res)
+            items.sort(reverse=True)           # naya (mtime) sabse upar
+            return items[:150]
+
+        def done(res):
+            if isinstance(res, Exception) or not isinstance(res, list):
+                return
+            self._open_recent_dialog(res)
         self._run_bg(job, done, self.L("Haal ki files…", "Recent files…"))
+
+    def _recent_when(self, mt):
+        """mtime -> 'abhi / X min pehle / aaj HH:MM / kal / DD-MM-YYYY'."""
+        try:
+            now = time.time()
+            d = now - mt
+            if d < 60:
+                return self.L("abhi", "just now")
+            if d < 3600:
+                return self.L("%d min pehle" % int(d // 60),
+                              "%d min ago" % int(d // 60))
+            dt = datetime.datetime.fromtimestamp(mt)
+            today = datetime.date.today()
+            if dt.date() == today:
+                if d < 6 * 3600:
+                    return self.L("%d ghante pehle" % int(d // 3600),
+                                  "%dh ago" % int(d // 3600))
+                return self.L("aaj %s" % dt.strftime("%H:%M"),
+                              "today %s" % dt.strftime("%H:%M"))
+            if dt.date() == today - datetime.timedelta(days=1):
+                return self.L("kal %s" % dt.strftime("%H:%M"),
+                              "yesterday %s" % dt.strftime("%H:%M"))
+            return dt.strftime("%d-%m-%Y %H:%M")
+        except Exception:
+            return ""
+
+    def _open_recent_dialog(self, items):
+        """items = [(mtime, ctime, size, path), …] naya-sabse-upar.
+        Folder-wise group karke ek saaf popup me dikhao."""
+        _ICON = {".pdf": "📕", ".docx": "📘", ".doc": "📘", ".xlsx": "📗",
+                 ".xls": "📗", ".jpg": "🖼", ".jpeg": "🖼", ".png": "🖼",
+                 ".tif": "🖼", ".tiff": "🖼", ".txt": "📄", ".zip": "🗜"}
+        # folder ke hisaab se group — pehli baar jis kram me mila (=naya upar)
+        groups, order = {}, []
+        for mt, ct, sz, p in items:
+            fol = os.path.dirname(p)
+            if fol not in groups:
+                groups[fol] = []; order.append(fol)
+            groups[fol].append((mt, ct, sz, p))
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("Recent Files — haal ki gatividhi",
+                                  "Recent Files — recent activity"))
+        dlg.resize(760, 560)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.setContentsMargins(16, 14, 16, 14); v.setSpacing(10)
+
+        head = QtWidgets.QLabel(
+            self.L("🕒 Haal me kya hua — folder ke hisaab se",
+                   "🕒 What happened recently — grouped by folder"))
+        head.setStyleSheet("font-size:16px;font-weight:800;color:#0F172A")
+        v.addWidget(head)
+        sub = QtWidgets.QLabel(
+            self.L("%d file · %d folder — naya sabse upar. Double-click = kholo."
+                   % (len(items), len(order)),
+                   "%d files · %d folders — newest first. Double-click to open."
+                   % (len(items), len(order))))
+        sub.setStyleSheet("color:#64748B;font-size:12.5px")
+        v.addWidget(sub)
+
+        ed = QtWidgets.QLineEdit()
+        ed.setPlaceholderText(self.L("🔍 naam/folder se chhaanто…",
+                                     "🔍 Filter by name or folder…"))
+        ed.setStyleSheet("padding:7px 10px;border:1px solid #E2E8F0;"
+                         "border-radius:9px;font-size:13px")
+        v.addWidget(ed)
+
+        tree = QtWidgets.QTreeWidget()
+        tree.setHeaderLabels([self.L("File / Folder", "File / Folder"),
+                              self.L("Kya hua", "What"),
+                              self.L("Kab", "When")])
+        tree.setRootIsDecorated(True)
+        tree.setColumnWidth(0, 420); tree.setColumnWidth(1, 130)
+        tree.setAlternatingRowColors(True)
+        tree.setStyleSheet(
+            "QTreeWidget{border:1px solid #E2E8F0;border-radius:10px;"
+            "font-size:13px;outline:0}"
+            "QTreeWidget::item{padding:4px 2px}"
+            "QHeaderView::section{background:#F1F5F9;color:#475569;"
+            "font-weight:700;border:0;padding:6px 8px}")
+
+        for fol in order:
+            rows = groups[fol]
+            newest = max(r[0] for r in rows)
+            top = QtWidgets.QTreeWidgetItem([
+                "📁  " + (os.path.basename(fol) or fol),
+                self.L("%d badlav" % len(rows), "%d changes" % len(rows)),
+                self._recent_when(newest)])
+            _tf = top.font(0); _tf.setBold(True); top.setFont(0, _tf)
+            top.setForeground(0, QtGui.QColor("#4F46E5"))
+            top.setToolTip(0, fol)
+            top.setData(0, QtCore.Qt.UserRole, fol)
+            top.setData(0, QtCore.Qt.UserRole + 1, "dir")
+            tree.addTopLevelItem(top)
+            for mt, ct, sz, p in rows:
+                ext = os.path.splitext(p)[1].lower()
+                # BANI vs BADLI: ctime~mtime => nayi bani; warna badli.
+                # (Windows par ctime = banne ka samay — isliye sahi rehta hai.)
+                if abs(mt - ct) <= 3:
+                    did = self.L("🟢 bani", "🟢 created")
+                else:
+                    did = self.L("✏️ badli", "✏️ edited")
+                kb = sz / 1024.0
+                szs = ("%.0f KB" % kb) if kb < 1024 else ("%.1f MB" % (kb / 1024))
+                ch = QtWidgets.QTreeWidgetItem([
+                    "    " + _ICON.get(ext, "📄") + "  " + os.path.basename(p),
+                    did, self._recent_when(mt)])
+                ch.setToolTip(0, p + "   ·   " + szs)
+                ch.setData(0, QtCore.Qt.UserRole, p)
+                ch.setData(0, QtCore.Qt.UserRole + 1, "file")
+                top.addChild(ch)
+            top.setExpanded(True)
+        v.addWidget(tree, 1)
+
+        def _filter(txt):
+            t = txt.strip().lower()
+            for i in range(tree.topLevelItemCount()):
+                top = tree.topLevelItem(i)
+                any_vis = False
+                fol_hit = t in top.text(0).lower()
+                for j in range(top.childCount()):
+                    c = top.child(j)
+                    vis = (not t) or fol_hit or (t in c.text(0).lower())
+                    c.setHidden(not vis)
+                    any_vis = any_vis or vis
+                top.setHidden(bool(t) and not any_vis and not fol_hit)
+                if t and any_vis:
+                    top.setExpanded(True)
+        ed.textChanged.connect(_filter)
+
+        def _activate(it):
+            if it is None:
+                return
+            path = it.data(0, QtCore.Qt.UserRole)
+            kind = it.data(0, QtCore.Qt.UserRole + 1)
+            if not path:
+                return
+            if kind == "file":
+                self._open_path(path)
+            else:                                # folder -> My Files me kholo
+                try:
+                    if hasattr(self, "files_panel") and not self.files_panel.isVisible():
+                        self.toggle_files_panel()
+                    self._panel_show(path)
+                except Exception:
+                    pass
+                dlg.accept()
+        tree.itemDoubleClicked.connect(lambda it, col: _activate(it))
+
+        row = QtWidgets.QHBoxLayout()
+        b_open = QtWidgets.QPushButton(self.L("Kholo", "Open"))
+        b_open.clicked.connect(lambda: _activate(tree.currentItem()))
+        b_fold = QtWidgets.QPushButton(self.L("Folder kholo", "Open folder"))
+
+        def _open_folder():
+            it = tree.currentItem()
+            if it is None:
+                return
+            path = it.data(0, QtCore.Qt.UserRole)
+            if not path:
+                return
+            if it.data(0, QtCore.Qt.UserRole + 1) == "file":
+                # file chuni ho -> Explorer me wahi file select karke dikhao
+                self._reveal_in_explorer(path)
+            else:
+                # folder chuna ho -> woh folder seedha khol do
+                self._open_path(path)
+        b_fold.clicked.connect(_open_folder)
+        bc = QtWidgets.QPushButton(self.L("Band karo", "Close"))
+        bc.clicked.connect(dlg.accept)
+        bc.setDefault(True)
+        row.addWidget(b_open); row.addWidget(b_fold)
+        row.addStretch(1); row.addWidget(bc)
+        v.addLayout(row)
+
+        if not order:
+            empty = QtWidgets.QLabel(
+                self.L("अभी कोई हाल की फ़ाइल नहीं मिली।",
+                       "No recent files found yet."))
+            empty.setAlignment(QtCore.Qt.AlignCenter)
+            empty.setStyleSheet("color:#94A3B8;padding:30px")
+            v.insertWidget(3, empty)
+        dlg.exec_()
 
     def _update_folder_info(self):
         """Is folder me kitni files + kul size — chhoti patti me dikhao."""
