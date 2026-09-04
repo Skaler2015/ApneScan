@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "354"
+VERSION = "355"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -7247,10 +7247,10 @@ class FilesCardDelegate(QtWidgets.QStyledItemDelegate):
         p.setFont(f3); p.setPen(QtGui.QColor("#111827"))
         p.drawText(QtCore.QRectF(x, r.top() + 4, avail, 14),
                    QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, nm)
-        # meta line: date • files/size
+        # meta line: date + time • files/size  (v355: samay bhi dikhao)
         meta = ""
         if mdt is not None:
-            meta = mdt.strftime("%d %b %Y")
+            meta = mdt.strftime("%d %b %Y, %I:%M %p")
         if isdir:
             n = self.win._fcnt(path)
             if n >= 0:
@@ -7264,8 +7264,10 @@ class FilesCardDelegate(QtWidgets.QStyledItemDelegate):
                 pass
         f5 = QtGui.QFont(opt.font); f5.setPointSizeF(6.8)
         p.setFont(f5); p.setPen(QtGui.QColor("#6B7280"))
+        # (v355) jagah kam ho to '…' — samay judne par bhi saaf dikhe
+        _meta = QtGui.QFontMetricsF(f5).elidedText(meta, QtCore.Qt.ElideRight, max(30, avail))
         p.drawText(QtCore.QRectF(x, r.top() + 20, avail, 13),
-                   QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, meta)
+                   QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, _meta)
         p.restore()
 
 
