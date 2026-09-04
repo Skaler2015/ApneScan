@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "355"
+VERSION = "356"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -2640,6 +2640,11 @@ NOTE_ROLE = int(QtCore.Qt.UserRole) + 5      # str: sticky note text
 NEW_ROLE = int(QtCore.Qt.UserRole) + 6       # bool: freshly added, not looked at yet
 FLAG_ROLE = int(QtCore.Qt.UserRole) + 7      # str: "blank"/"blur"/"" (quality warning)
 STAMP_ROLE = int(QtCore.Qt.UserRole) + 8     # str: scan/added time text for the tooltip
+# (v356) Scan me "turant thumbnail": pehle raw preview dikhao, phir saaf ho kar
+# usi jagah replace ho jaaye. SCANSEQ = producer ka page-number; PROVISIONAL =
+# abhi preview hai (final aana baaki) — Save/print isko wait/skip kar sakte hain.
+SCANSEQ_ROLE = int(QtCore.Qt.UserRole) + 9   # int: is scan me page ka kram (preview↔final match)
+PROVISIONAL_ROLE = int(QtCore.Qt.UserRole) + 10  # bool: abhi sirf preview (final processing baaki)
 
 # Colour-label swatches (name -> paint colour)
 LABEL_COLORS = {
@@ -2918,7 +2923,7 @@ class ImportWorker(QtCore.QThread):
 
 
 class ScanWorker(QtCore.QThread):
-    page_done = QtCore.pyqtSignal(str)
+    page_done = QtCore.pyqtSignal(str, int)   # (final_path, seq) — seq matches the preview
     done = QtCore.pyqtSignal(int, int)
     failed = QtCore.pyqtSignal(str)
     stage = QtCore.pyqtSignal(str)      # F16: live processing-stage updates
@@ -2929,6 +2934,12 @@ class ScanWorker(QtCore.QThread):
     # (v353) scanner se SAARE page aa gaye (receiving khatam) — bachi hui
     # processing background me; dialog turant band ho sake.
     receive_done = QtCore.pyqtSignal()
+    # (v356) TURANT THUMBNAIL: page milte hi (safai se PEHLE) ek raw preview
+    # thumbnail bhej do — user ko document turant dikhe. Jab safai poori hoti
+    # hai, page_done usi seq ke saath aata hai aur preview ko final se badal
+    # deta hai. Blank nikla to preview_drop us preview ko hata deta hai.
+    page_preview = QtCore.pyqtSignal(str, int)   # (preview_path, seq)
+    preview_drop = QtCore.pyqtSignal(int)        # (seq) — ye page blank/khaali tha
 
     def __init__(self, hwnd, source_name, dpi, pixel_type, duplex, tmpdir, opts):
         super().__init__()
@@ -2950,9 +2961,10 @@ class ScanWorker(QtCore.QThread):
             # Runs in parallel: saves/processes each page while the scanner
             # is already pulling the NEXT one (this removes the per-page pause).
             while True:
-                img = pageq.get()
-                if img is None:
+                _q_item = pageq.get()
+                if _q_item is None:
                     break
+                _seq, img = _q_item          # (v356) seq = preview↔final match
                 try:
                     self.stage.emit("processing")   # F16: live processing stage
                     # (v308) ORIGINAL COLOUR (jaisa hai waisa): rangeen page ka
@@ -2967,6 +2979,11 @@ class ScanWorker(QtCore.QThread):
                             self.skipped += 1
                             try:
                                 self.page_dropped.emit(self.skipped, "blank")
+                            except Exception:
+                                pass
+                            # (v356) is page ka jo raw preview dikha diya tha use hatao
+                            try:
+                                self.preview_drop.emit(_seq)
                             except Exception:
                                 pass
                             continue
@@ -3079,12 +3096,18 @@ class ScanWorker(QtCore.QThread):
                     else:
                         parts = [img]
                     self.stage.emit("saving")
-                    for _pi in parts:
-                        self._save_and_emit(_pi)
+                    # (v356) pehla part is page ke preview ki jagah lagega (seq).
+                    # split se bana doosra part NAYA page hai (seq=-1 -> append).
+                    for _pi_i, _pi in enumerate(parts):
+                        self._save_and_emit(_pi, _seq if _pi_i == 0 else -1)
                 except Exception:
-                    pass
+                    # (v356) is page ka preview atka na rahe — hata do
+                    try:
+                        self.preview_drop.emit(_seq)
+                    except Exception:
+                        pass
 
-        def _save_and_emit(im):
+        def _save_and_emit(im, seq=-1):
             # Ek image ko temp file me save karke UI ko bhejo. JPEG encode ~5x
             # tez (bade scan me speed) — colour/grey ke liye JPEG, 1-bit B&W ke
             # liye PNG. HD: master pages quality 95 par rakhe jaate hain (yahi
@@ -3149,7 +3172,9 @@ class ScanWorker(QtCore.QThread):
                 except Exception:
                     im.convert("RGB").save(out, "JPEG", quality=90)
             self.kept += 1
-            self.page_done.emit(out)
+            # (v356) seq ke saath: UI is final ko usi seq ke preview par replace
+            # karega (seq=-1 -> naya page append, jaise split ka doosra half).
+            self.page_done.emit(out, seq)
             # (v310) dialog ke live thumbnail + counter ke liye (naam abhi nahi
             # bana — OCR naming baad me hota hai, isliye title khaali)
             try:
@@ -3161,9 +3186,41 @@ class ScanWorker(QtCore.QThread):
         consumer = _th.Thread(target=_consumer, daemon=True)
         consumer.start()
 
+        self._pseq = 0
+
+        def _make_preview(im):
+            # (v356) Chhota/tez preview JPEG — raw scan (safai se PEHLE). User ko
+            # document TURANT dikhe; final (saaf) aate hi usi jagah replace ho jaata
+            # hai. Halka downscale + q60 -> encode kuch millisecond, scanner ki
+            # raftaar par asar nahi.
+            try:
+                p = im
+                _mx = 1100
+                if max(p.width, p.height) > _mx:
+                    _s = _mx / float(max(p.width, p.height))
+                    p = p.resize((max(1, int(p.width * _s)),
+                                  max(1, int(p.height * _s))), Image.BILINEAR)
+                if p.mode not in ("RGB", "L"):
+                    p = p.convert("RGB")
+                fd, pv = tempfile.mkstemp(suffix=".jpg", dir=self.tmpdir)
+                os.close(fd)
+                p.save(pv, "JPEG", quality=60)
+                return pv
+            except Exception:
+                return None
+
         def _on_page(img):
             # Producer: hand the page off instantly and let the scanner keep going.
-            pageq.put(img)
+            seq = self._pseq
+            self._pseq += 1
+            # (v356) TURANT preview thumbnail bhejo (safai queue me alag chalegi)
+            pv = _make_preview(img)
+            if pv:
+                try:
+                    self.page_preview.emit(pv, seq)
+                except Exception:
+                    pass
+            pageq.put((seq, img))
 
         err = None
         method = self.opts.get("scanner_method", "twain")
@@ -17968,6 +18025,9 @@ if the toggle is ticked).</p>
         self._scan_count = 0
         # (v313) Part 4 — is scan ke pages track karo (Cancel me "sab hataao" ke liye)
         self._cur_scan_paths = []
+        # (v356) preview(seq) -> provisional item; aur jinke final aa chuke un seqs
+        self._prev_items = {}
+        self._done_seqs = set()
         self._cancelling = False
         self._cancel_discard = False
         # (v312) Part 3d — DISK check: output-drive par 500MB se kam ho to pehle hi warn
@@ -18076,6 +18136,12 @@ if the toggle is ticked).</p>
             self._worker.receive_done.connect(self._on_receive_done)
         except Exception:
             pass
+        # (v356) TURANT thumbnail: raw preview aate hi dikhao, final aate hi replace
+        try:
+            self._worker.page_preview.connect(self._on_page_preview)
+            self._worker.preview_drop.connect(self._on_preview_drop)
+        except Exception:
+            pass
         # (v311) Part 2 — settings ki patti dialog ko ek baar bhej do
         try:
             _fast = bool(self.chk_fast.isChecked())
@@ -18136,12 +18202,111 @@ if the toggle is ticked).</p>
         except Exception:
             pass
 
-    def _on_page_scanned(self, path):
+    def _on_page_preview(self, prev_path, seq):
+        """(v356) Page milte hi (safai se PEHLE) raw preview dikhao — user ko
+        document TURANT dikhta hai. Jab safai poori hoti hai, _on_page_scanned
+        usi seq par is provisional item ko final (saaf) se replace kar deta hai.
+        Rescan/Insert mode me preview nahi dikhate — wahaan final hi sahi jagah
+        lagta hai (jagah/placement galat na ho)."""
+        try:
+            if getattr(self, "_scan_place", None):
+                return                      # rescan/insert: seedha final lagega
+            if seq in getattr(self, "_done_seqs", set()):
+                return                      # final pehle hi aa gaya (durlabh race)
+            item = self._add_item_for_path(prev_path)
+            if item is None:
+                return
+            item.setData(SCANSEQ_ROLE, int(seq))
+            item.setData(PROVISIONAL_ROLE, True)
+            if not hasattr(self, "_prev_items"):
+                self._prev_items = {}
+            self._prev_items[seq] = item
+        except Exception:
+            pass
+
+    def _on_preview_drop(self, seq):
+        """(v356) Ye page blank/khaali nikla (ya process fail) — jo raw preview
+        thumbnail dikhaya tha use hata do."""
+        try:
+            item = None
+            if hasattr(self, "_prev_items"):
+                item = self._prev_items.pop(seq, None)
+            if item is None:
+                return
+            row = self.list.row(item)
+            if row >= 0:
+                self.list.takeItem(row)
+            self._dirty = True
+            try:
+                self._update_status(); self._update_empty_state()
+                self._update_pages_bar()
+                self._pv_build_filmstrip()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _on_page_scanned(self, path, seq=-1):
         # (v313) Part 4 — is scan me bana page track karo (Cancel "sab hataao")
         try:
             self._cur_scan_paths.append(path)
         except Exception:
             self._cur_scan_paths = [path]
+        # (v356) is seq ka final aa gaya (preview aa raha ho to race band)
+        try:
+            if seq is not None and seq >= 0:
+                if not hasattr(self, "_done_seqs"):
+                    self._done_seqs = set()
+                self._done_seqs.add(seq)
+        except Exception:
+            pass
+        # (v356) Agar is page ka raw preview pehle se dikha rakha hai, to usi
+        # jagah final (saaf) thumbnail se REPLACE karo (naya item append nahi).
+        prov = None
+        try:
+            if seq is not None and seq >= 0 and hasattr(self, "_prev_items"):
+                prov = self._prev_items.pop(seq, None)
+        except Exception:
+            prov = None
+        if prov is not None:
+            row = self.list.row(prov)
+            if row >= 0:
+                _old_prev = prov.data(QtCore.Qt.UserRole)   # raw preview temp file
+                prov.setData(QtCore.Qt.UserRole, path)
+                prov.setData(PROVISIONAL_ROLE, None)
+                prov.setData(SCANSEQ_ROLE, None)
+                try:
+                    prov.setToolTip(self._thumb_tooltip(path, prov))
+                except Exception:
+                    pass
+                self._refresh_item(prov)     # final (saaf) thumbnail
+                # raw preview temp file ab bekaar — hata do (tmpdir me hi tha)
+                try:
+                    if _old_prev and _old_prev != path and os.path.exists(_old_prev):
+                        os.remove(_old_prev)
+                except Exception:
+                    pass
+                self._scan_count += 1
+                self._name_one_page(row, path)   # naam ab final page se
+                self._daily_jpeg_backup(path)
+                if self._progress:
+                    try:
+                        self._progress.set_page(self._scan_count)
+                    except Exception:
+                        pass
+                if (self._opts.get("barcode_autofill") and not self._barcode_tried
+                        and not self.claim_edit.text().strip()):
+                    self._barcode_tried = True
+                    try:
+                        code = read_barcode(path)
+                    except Exception:
+                        code = None
+                    if code:
+                        self.claim_edit.setText(code)
+                        self.status.showMessage(
+                            "Claim number found from barcode: %s" % code, 5000)
+                return
+            # provisional item ab list me nahi (durlabh) -> neeche append ho jaye
         # Rescan / Insert mode: page ko us hi jagah lagao (aakhir me nahi)
         place = getattr(self, "_scan_place", None)
         if place:
