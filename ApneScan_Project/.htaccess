@@ -1,0 +1,4 @@
+# ApneScan — clean URL for the admin dashboard.
+# apnescan.apnesoft.com/admin  ->  stats.php?admin=1  (login page)
+RewriteEngine On
+RewriteRule ^admin/?$ stats.php?admin=1 [L,QSA]

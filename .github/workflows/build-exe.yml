@@ -1,0 +1,118 @@
+name: Build ApneScan EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/content-review-jjokt7
+      - main
+
+permissions:
+  contents: write        # GitHub Release + tag banane ke liye zaroori
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up 32-bit Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x86
+
+      - name: Install dependencies
+        working-directory: ApneScan_Project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build EXE with PyInstaller
+        working-directory: ApneScan_Project
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --name "ApneScan" --icon apnescan.ico --add-data "apnescan.ico;." --add-data "apnescan_icon.png;." --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes --hidden-import twain --hidden-import PyQt5.QtMultimedia --hidden-import PyQt5.QtMultimediaWidgets --hidden-import PyQt5.QtNetwork --hidden-import qrcode --hidden-import qrcode.image.pil apnescan.py
+          # (v280) ONEDIR — python312.dll + baaki DLL exe ke SAATH folder me
+          # rehti hain (runtime par _MEI temp me extract nahi hoti). Isliye
+          # antivirus/adhoori-copy wala 'Failed to load python312.dll' error
+          # kabhi nahi aata. Portable users ke liye poore folder ka ZIP.
+          New-Item -ItemType Directory -Force -Path "Output" | Out-Null
+          Compress-Archive -Path "dist\ApneScan\*" -DestinationPath "Output\ApneScan-Portable.zip" -Force
+
+      # (v205) Tesseract ko installer ke SAATH bundle karo — user ko alag
+      # install nahi karna padta; auto-rotate/OCR/naam-padhna turant chalta
+      # hai. (64-bit tesseract.exe alag subprocess me chalta hai — 32-bit
+      # app ke saath koi dikkat nahi.) Hindi + OSD traineddata bhi saath.
+      # Tesseract ko installer ke SAATH bundle karo — user ko alag install
+      # nahi karna. choco kabhi transient-fail hota hai isliye 3 baar retry;
+      # phir bhi na aaye to build FAIL (warna Tesseract-BINA installer ship
+      # ho jaata — auto-rotate/OCR band). Ye guarantee hai ki har installer
+      # me Tesseract ho.
+      - name: Bundle Tesseract OCR (required)
+        shell: pwsh
+        run: |
+          $src = ""
+          for ($i=1; $i -le 3; $i++) {
+            choco install tesseract -y --no-progress
+            if (Test-Path "C:\Program Files\Tesseract-OCR\tesseract.exe") { $src = "C:\Program Files\Tesseract-OCR"; break }
+            if (Test-Path "C:\Program Files (x86)\Tesseract-OCR\tesseract.exe") { $src = "C:\Program Files (x86)\Tesseract-OCR"; break }
+            Write-Host "Tesseract install try $i failed — retrying..."; Start-Sleep -Seconds 10
+          }
+          if ($src -eq "") { throw "Tesseract install FAILED after 3 tries — installer ko Tesseract-bina ship nahi karenge." }
+          Copy-Item $src "ApneScan_Project\tesseract_dist" -Recurse
+          $td = "ApneScan_Project\tesseract_dist\tessdata"
+          if (!(Test-Path "$td\osd.traineddata")) { Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata/raw/main/osd.traineddata" -OutFile "$td\osd.traineddata" }
+          if (!(Test-Path "$td\hin.traineddata")) { Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/hin.traineddata" -OutFile "$td\hin.traineddata" }
+          if (!(Test-Path "ApneScan_Project\tesseract_dist\tesseract.exe")) { throw "tesseract.exe missing in bundle" }
+          New-Item -ItemType Directory -Force -Path "ApneScan_Project\Output" | Out-Null
+          Compress-Archive -Path "ApneScan_Project\tesseract_dist\*" -DestinationPath "ApneScan_Project\Output\Tesseract-OCR.zip" -Force
+          Get-ChildItem "ApneScan_Project\tesseract_dist"
+
+      # One-click installer (Start menu + desktop icon ke saath)
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" ApneScan_Project\ApneScan_installer_ci.iss
+
+      # ---- GitHub Release SABSE PEHLE (quota-free, permanent, public) ----
+      # Ye app ka asli download + update source hai. Artifact storage bhar jaaye
+      # to bhi Release banta rahega (Release alag storage me hai).
+      - name: Read app version
+        id: ver
+        shell: bash
+        run: echo "v=$(grep -m1 -oP 'VERSION = \"\K[0-9]+' ApneScan_Project/apnescan.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release (exe + installer)
+        if: steps.ver.outputs.v != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.v }}
+          name: ApneScan v${{ steps.ver.outputs.v }}
+          files: |
+            ApneScan_Project/Output/ApneScan-Setup.exe
+            ApneScan_Project/Output/ApneScan-Portable.zip
+            ApneScan_Project/Output/Tesseract-OCR.zip
+          generate_release_notes: true
+
+      # ---- Artifacts (best-effort) — sirf deploy-website ke same-SHA match ke
+      # liye. Storage-quota (403) aaye to build FAIL na ho + 1 din me expire. ----
+      - name: Upload EXE artifact
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApneScan-exe
+          path: ApneScan_Project/Output/ApneScan-Portable.zip
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload installer artifact
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ApneScan-Setup
+          path: ApneScan_Project/Output/ApneScan-Setup.exe
+          if-no-files-found: error
+          retention-days: 1

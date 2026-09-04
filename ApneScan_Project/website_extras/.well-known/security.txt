@@ -1,0 +1,6 @@
+# ApneScan security contact (RFC 9116)
+Contact: https://apnescan.apnesoft.com/about.html
+Preferred-Languages: en, hi
+Canonical: https://apnescan.apnesoft.com/.well-known/security.txt
+Policy: https://apnescan.apnesoft.com/privacy.html
+Expires: 2027-12-31T23:59:59.000Z
