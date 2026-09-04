@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "352"
+VERSION = "353"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1158,6 +1158,7 @@ DEFAULT_OPTIONS = {
     "sound_on_done": False,       # scan poora hote hi 'ting'
     "notify_on_done": True,       # (v314) background scan poora hote hi tray notification
     "scan_always_bg": False,      # (v315) scan-dialog kabhi na dikhe — seedha background
+    "scan_autoclose": True,       # (v353) saare page aate hi dialog band; processing bg me
     "confirm_exit": False,        # band karte samay pucho
     "footer_clock": False,        # status-bar: ghadi/date
     "footer_today": False,        # status-bar: aaj ke scan
@@ -2925,6 +2926,9 @@ class ScanWorker(QtCore.QThread):
     # signals ko chhua nahi; ye SIRF UI dikhane ke liye extra hain):
     page_ready = QtCore.pyqtSignal(str, int, int, str)   # (path, kept, skipped, title)
     page_dropped = QtCore.pyqtSignal(int, str)           # (skipped_total, reason)
+    # (v353) scanner se SAARE page aa gaye (receiving khatam) — bachi hui
+    # processing background me; dialog turant band ho sake.
+    receive_done = QtCore.pyqtSignal()
 
     def __init__(self, hwnd, source_name, dpi, pixel_type, duplex, tmpdir, opts):
         super().__init__()
@@ -3210,6 +3214,13 @@ class ScanWorker(QtCore.QThread):
             self.acquire_secs = max(0.0, time.time() - _t_acq0)
         except Exception:
             self.acquire_secs = 0.0
+
+        # (v353) scanner ne saare page de diye — ab dialog turant band ho sakta
+        # hai; bachi processing background me chalti rahegi (page live aate hain).
+        try:
+            self.receive_done.emit()
+        except Exception:
+            pass
 
         pageq.put(None)            # tell the saver thread to finish
         consumer.join(timeout=60)  # wait until all pages are saved
@@ -18010,6 +18021,8 @@ if the toggle is ticked).</p>
             # (v310) Part 1 — live thumbnail + counter (naye signals; purane bache)
             self._worker.page_ready.connect(self._progress.on_page_ready)
             self._worker.page_dropped.connect(self._progress.on_page_dropped)
+            # (v353) saare page aate hi dialog band -> processing background me
+            self._worker.receive_done.connect(self._on_receive_done)
         except Exception:
             pass
         # (v311) Part 2 — settings ki patti dialog ko ek baar bhej do
@@ -18051,6 +18064,26 @@ if the toggle is ticked).</p>
             self._scan_info = {}
         self._worker.start(); self._progress.show()
         self._set_busy_display("busy")
+
+    def _on_receive_done(self):
+        """(v353) Scanner se saare page aa gaye. Baaki processing (cleaning/
+        straightening/save/naam) background me chalti rahegi — dialog turant
+        band karke document turant dikhao. Pages pehle se main area me LIVE
+        aa rahe hain, isliye kuch chhutega nahi."""
+        try:
+            if not self._opts.get("scan_autoclose", True):
+                return
+            p = getattr(self, "_progress", None)
+            if p is not None and p.isVisible():
+                p.hide()                 # background mode — processing chalti rahegi
+                try:
+                    self.status.showMessage(self.L(
+                        "✓ Scan ho gaya — baaki safai background me…",
+                        "✓ Scan done — finishing cleanup in background…"), 4000)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _on_page_scanned(self, path):
         # (v313) Part 4 — is scan me bana page track karo (Cancel "sab hataao")
