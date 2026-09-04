@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "353"
+VERSION = "354"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11483,11 +11483,58 @@ class ScannerWindow(QtWidgets.QMainWindow):
             period = getattr(self, "_world_period", "today")
             days = {"today": 1, "week": 7, "month": 30, "all": None}.get(period, 1)
 
-            def wtot(m):
-                return rawv(m[2]) if m[2] else 0
+            # (v354) World/Aaj ab HAR metric ke liye — curated key ya server ke
+            # features/actions map (fw/fwt/aw/awt) se. Data na ho -> None (—).
+            def _wmap(nm):
+                w = getattr(self, "_an_world", {}) or {}
+                v = w.get(nm)
+                return v if isinstance(v, dict) else {}
+
+            def _wlook(curated, feat):
+                w = getattr(self, "_an_world", {}) or {}
+                if curated and curated in w:
+                    try:
+                        return int(w[curated])
+                    except Exception:
+                        pass
+                fw = _wmap("fw"); aw = _wmap("aw")
+                if feat in fw:
+                    try:
+                        return int(fw[feat])
+                    except Exception:
+                        return 0
+                if feat in aw:
+                    try:
+                        return int(aw[feat])
+                    except Exception:
+                        return 0
+                return None
+
+            def _wlook_today(curated, feat):
+                w = getattr(self, "_an_world", {}) or {}
+                if curated and curated in w:
+                    try:
+                        return int(w[curated])
+                    except Exception:
+                        pass
+                fwt = _wmap("fwt"); awt = _wmap("awt")
+                if feat in fwt:
+                    try:
+                        return int(fwt[feat])
+                    except Exception:
+                        return 0
+                if feat in awt:
+                    try:
+                        return int(awt[feat])
+                    except Exception:
+                        return 0
+                return None
+
+            def wtot(m):        # int ya None (None => "—")
+                return _wlook(m[2], m[4])
 
             def wtoday(m):
-                return rawv(m[3]) if m[3] else 0
+                return _wlook_today(m[3], m[4])
 
             def you(m):
                 return self._my_sum(m[4], days)
@@ -11502,17 +11549,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 if scol == "you":
                     return you(m)
                 if scol == "world":
-                    return wtot(m)
+                    return wtot(m) or 0
                 if scol == "today":
-                    return wtoday(m)
-                return wtot(m) if m[2] else self._my_sum(m[4], None)   # 'top'
+                    return wtoday(m) or 0
+                w = wtot(m)                                  # 'top' = combined
+                return w if w else self._my_sum(m[4], None)
 
             # (v347) 0-वाले अपने-आप HATAO — jisme World/aaj/AAP me se kahin bhi
             # kuch ho wahi dikhao. Ginti aate hi khud judta hai, 0 hote hi hat
             # jaata (poori tarah automated).
             def _keep(m):
                 # is period me kahin bhi kuch ho -> dikhao; poora 0 -> hatao
-                return wtot(m) > 0 or wtoday(m) > 0 or you(m) > 0
+                return (wtot(m) or 0) > 0 or (wtoday(m) or 0) > 0 or you(m) > 0
             shown = [m for m in METRICS if _keep(m)]
             if not shown:                       # sab 0 (offline/naya) — khaali na ho
                 shown = METRICS
@@ -11576,8 +11624,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
                         tr = ' <span style="color:#16A34A;">▲</span>'
                     elif cur < prev:
                         tr = ' <span style="color:#DC2626;">▼</span>'
-                wv_s = short(wtot(m)) if m[2] else "—"
-                td_s = short(wtoday(m)) if m[3] else "—"
+                _wv = wtot(m); _td = wtoday(m)         # (v354) int ya None
+                wv_s = short(_wv) if _wv is not None else "—"
+                td_s = short(_td) if _td is not None else "—"
                 h.append(
                     '<tr>'
                     '<td bgcolor="%s" style="color:#374151;padding:2px 3px;white-space:nowrap;">'

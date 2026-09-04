@@ -342,8 +342,17 @@ function compute_stats($d, $client) {
         if (!empty($cc['freply']['t'])) { $freply=$cc['freply']['t']; $freplyId=intval($cc['freply']['id']); }
     }
 
+    // (v354) app ke World-widget me HAR metric ka World+Aaj dikhane ke liye:
+    // poora features-map + aaj ka featDaily + top actions + aaj ke actions.
+    $__aw = (isset($d['actions'])&&is_array($d['actions']))?$d['actions']:array();
+    arsort($__aw); $__aw = array_slice($__aw, 0, 150, true);
+
     return array(
         'ok'=>true,'srv'=>'php2','time'=>date('Y-m-d H:i'),'today_key'=>'day_'.$today,
+        'fw'=>(isset($d['features'])&&is_array($d['features']))?$d['features']:array(),
+        'fwt'=>(isset($d['featDaily'][$today])&&is_array($d['featDaily'][$today]))?$d['featDaily'][$today]:array(),
+        'aw'=>$__aw,
+        'awt'=>(isset($d['actionsDaily'][$today])&&is_array($d['actionsDaily'][$today]))?$d['actionsDaily'][$today]:array(),
         'total'=>intval($d['total']),
         'today'=>intval(isset($d['days'][$today])?$d['days'][$today]:0),
         'online'=>$online,'users'=>count($d['clients']),'newToday'=>$newToday,
