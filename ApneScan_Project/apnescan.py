@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "362"
+VERSION = "363"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9286,9 +9286,10 @@ class WorldMap(QtWidgets.QWidget):
         "IE": (-8, 53), "PT": (-8, 39), "BE": (4, 50), "PL": (19, 52), "UA": (32, 49),
     }
 
-    def __init__(self, countries=None, parent=None):
+    def __init__(self, countries=None, flagpix=None, parent=None):
         super().__init__(parent)
         self._c = dict(countries or {})
+        self._fp = dict(flagpix or {})     # cc -> QPixmap
         self.setMinimumHeight(190)
 
     def set_countries(self, countries):
@@ -9328,17 +9329,22 @@ class WorldMap(QtWidgets.QWidget):
             grad.setColorAt(1, QtGui.QColor(13, 148, 136, 90))
             p.setBrush(grad); p.setPen(QtGui.QPen(QtGui.QColor("#4338CA"), 1))
             p.drawEllipse(QtCore.QPointF(x, y), r, r)
-        # label top 3
+        # label top 4 (asli jhanda + ginti)
         p.setPen(QtGui.QColor("#1E293B")); f = p.font(); f.setPointSize(8); f.setBold(True); p.setFont(f)
-        for cc, val in items[:3]:
+        for cc, val in items[:4]:
             co = self.COORDS.get(str(cc).upper())
             if not co:
                 continue
             lon, lat = co
             x = pad + (lon + 180) / 360.0 * (W - 2 * pad)
             y = pad + (90 - lat) / 180.0 * (H - 2 * pad)
-            p.drawText(QtCore.QRectF(x + 6, y - 8, 90, 14), QtCore.Qt.AlignLeft,
-                       "%s %s" % (cc, "{:,}".format(int(val))))
+            tx = x + 6
+            pix = self._fp.get(str(cc).upper())
+            if pix is not None and not pix.isNull():
+                p.drawPixmap(QtCore.QRectF(tx, y - 7, 18, 12), pix, QtCore.QRectF(pix.rect()))
+                tx += 21
+            p.drawText(QtCore.QRectF(tx, y - 8, 80, 14), QtCore.Qt.AlignLeft,
+                       "{:,}".format(int(val)))
         p.end()
 
 
@@ -11933,6 +11939,179 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
         return "🏳"
 
+    # (v363) ASLI RANGEEN JHANDE — Windows emoji flags nahi dikhata, isliye
+    # QPainter se khud draw karte hain. spec: (orient, [colours], [overlays]).
+    # orient: 'h' (upar-niche band) / 'v' (baayen-daayen) / 'solid'.
+    _FLAG_SPECS = {
+        "IN": ("h", ["#FF9933", "#FFFFFF", "#138808"], [("circ", "#054A91", .5, .5, .085)]),
+        "US": ("h", ["#B22234", "#FFFFFF"] * 6 + ["#B22234"], [("canton", "#3C3B6E", .42, .54)]),
+        "AE": ("h", ["#00843D", "#FFFFFF", "#000000"], [("vbar", "#FF0000", 0, .30)]),
+        "GB": ("solid", ["#012169"], [("cross", "#FFFFFF", .34), ("cross", "#C8102E", .16)]),
+        "CA": ("v", ["#FF0000", "#FFFFFF", "#FF0000"], [("circ", "#FF0000", .5, .5, .12)]),
+        "DE": ("h", ["#000000", "#DD0000", "#FFCE00"], []),
+        "FR": ("v", ["#0055A4", "#FFFFFF", "#EF4135"], []),
+        "IT": ("v", ["#009246", "#FFFFFF", "#CE2B37"], []),
+        "IE": ("v", ["#169B62", "#FFFFFF", "#FF883E"], []),
+        "BE": ("v", ["#000000", "#FDDA24", "#EF3340"], []),
+        "NG": ("v", ["#008751", "#FFFFFF", "#008751"], []),
+        "RU": ("h", ["#FFFFFF", "#0039A6", "#D52B1E"], []),
+        "NL": ("h", ["#AE1C28", "#FFFFFF", "#21468B"], []),
+        "EG": ("h", ["#CE1126", "#FFFFFF", "#000000"], []),
+        "IR": ("h", ["#239F40", "#FFFFFF", "#DA0000"], []),
+        "IQ": ("h", ["#CE1126", "#FFFFFF", "#000000"], []),
+        "CO": ("h", ["#FCD116", "#FCD116", "#003893", "#CE1126"], []),
+        "ID": ("h", ["#FF0000", "#FFFFFF"], []),
+        "PL": ("h", ["#FFFFFF", "#DC143C"], []),
+        "UA": ("h", ["#0057B7", "#FFD700"], []),
+        "TH": ("h", ["#A51931", "#F4F5F8", "#2D2A4A", "#2D2A4A", "#F4F5F8", "#A51931"], []),
+        "ES": ("h", ["#AA151B", "#F1BF00", "#F1BF00", "#AA151B"], []),
+        "KE": ("h", ["#000000", "#BB0000", "#006600"], []),
+        "AF": ("v", ["#000000", "#D32011", "#007A36"], []),
+        "MX": ("v", ["#006847", "#FFFFFF", "#CE1126"], []),
+        "PT": ("v", ["#046A38", "#046A38", "#DA291C", "#DA291C", "#DA291C"], []),
+        "JP": ("solid", ["#FFFFFF"], [("circ", "#BC002D", .5, .5, .16)]),
+        "BD": ("solid", ["#006A4E"], [("circ", "#F42A41", .45, .5, .17)]),
+        "CN": ("solid", ["#DE2910"], [("star", "#FFDE00", .18, .28, .10)]),
+        "VN": ("solid", ["#DA251D"], [("star", "#FFFF00", .5, .5, .20)]),
+        "CH": ("solid", ["#D52B1E"], [("cross", "#FFFFFF", .18)]),
+        "TR": ("solid", ["#E30A17"], [("circ", "#FFFFFF", .42, .5, .15),
+                                      ("circ", "#E30A17", .47, .5, .12), ("star", "#FFFFFF", .58, .5, .07)]),
+        "SA": ("solid", ["#006C35"], []),
+        "PK": ("solid", ["#01411C"], [("vbar", "#FFFFFF", 0, .28), ("circ", "#FFFFFF", .62, .5, .14),
+                                      ("circ", "#01411C", .67, .48, .12)]),
+        "SG": ("h", ["#EF3340", "#FFFFFF"], [("circ", "#FFFFFF", .22, .28, .12),
+                                            ("circ", "#EF3340", .27, .28, .10)]),
+        "MY": ("h", ["#CC0001", "#FFFFFF"] * 7, [("canton", "#010066", .48, .58)]),
+        "QA": ("solid", ["#8A1538"], [("vbar", "#FFFFFF", 0, .30)]),
+        "KW": ("h", ["#007A3D", "#FFFFFF", "#CE1126"], [("tri", "#000000", "l")]),
+        "AU": ("solid", ["#00008B"], [("canton", "#00008B", .5, .5), ("cross", "#FFFFFF", .10),
+                                      ("star", "#FFFFFF", .75, .72, .10)]),
+        "NZ": ("solid", ["#00247D"], [("star", "#CC142B", .75, .40, .07),
+                                      ("star", "#CC142B", .70, .68, .07)]),
+        "LK": ("solid", ["#8D2029"], [("vbar", "#EB7400", 0, .18), ("vbar", "#00534E", .18, .10)]),
+        "OM": ("h", ["#FFFFFF", "#DB161B", "#008000"], [("vbar", "#DB161B", 0, .25)]),
+        "PH": ("h", ["#0038A8", "#CE1126"], [("tri", "#FFFFFF", "l")]),
+        "CL": ("h", ["#FFFFFF", "#D52B1E"], [("canton", "#0039A6", .33, .5),
+                                            ("star", "#FFFFFF", .16, .25, .09)]),
+        "AR": ("h", ["#74ACDF", "#FFFFFF", "#74ACDF"], [("circ", "#F6B40E", .5, .5, .08)]),
+        "SE": ("solid", ["#006AA7"], [("cross_off", "#FECC00", .16, .33)]),
+        "BR": ("solid", ["#009C3B"], [("diamond", "#FFDF00"), ("circ", "#002776", .5, .5, .15)]),
+        "ZA": ("h", ["#E03C31", "#FFFFFF", "#007A4D", "#FFFFFF", "#001489"], []),
+    }
+
+    @staticmethod
+    def _draw_star(p, cx, cy, r, color):
+        import math as _m
+        pts = []
+        for i in range(10):
+            ang = -_m.pi / 2 + i * _m.pi / 5
+            rad = r if i % 2 == 0 else r * 0.42
+            pts.append(QtCore.QPointF(cx + rad * _m.cos(ang), cy + rad * _m.sin(ang)))
+        p.setBrush(color); p.setPen(QtCore.Qt.NoPen)
+        p.drawPolygon(QtGui.QPolygonF(pts))
+
+    def _flag_overlay(self, p, ov, W, H):
+        k = ov[0]
+        if k == "circ":
+            _, c, cx, cy, r = ov
+            p.setBrush(QtGui.QColor(c)); p.setPen(QtCore.Qt.NoPen)
+            p.drawEllipse(QtCore.QPointF(W * cx, H * cy), W * r, W * r)
+        elif k == "cross":
+            _, c, t = ov; th = H * t
+            p.setPen(QtCore.Qt.NoPen)
+            p.fillRect(QtCore.QRectF(0, (H - th) / 2, W, th), QtGui.QColor(c))
+            p.fillRect(QtCore.QRectF((W - th) / 2, 0, th, H), QtGui.QColor(c))
+        elif k == "cross_off":     # nordic cross (baayen shift)
+            _, c, t, xf = ov; th = H * t
+            p.setPen(QtCore.Qt.NoPen)
+            p.fillRect(QtCore.QRectF(0, (H - th) / 2, W, th), QtGui.QColor(c))
+            p.fillRect(QtCore.QRectF(W * xf - th / 2, 0, th, H), QtGui.QColor(c))
+        elif k == "canton":
+            _, c, wf, hf = ov
+            p.fillRect(QtCore.QRectF(0, 0, W * wf, H * hf), QtGui.QColor(c))
+        elif k == "vbar":
+            _, c, xf, wf = ov
+            p.fillRect(QtCore.QRectF(W * xf, 0, W * wf, H), QtGui.QColor(c))
+        elif k == "hbar":
+            _, c, yf, hf = ov
+            p.fillRect(QtCore.QRectF(0, H * yf, W, H * hf), QtGui.QColor(c))
+        elif k == "star":
+            _, c, cx, cy, r = ov
+            self._draw_star(p, W * cx, H * cy, W * r, QtGui.QColor(c))
+        elif k == "tri":
+            _, c, _s = ov
+            p.setBrush(QtGui.QColor(c)); p.setPen(QtCore.Qt.NoPen)
+            p.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(0, 0),
+                                           QtCore.QPointF(W * 0.44, H / 2), QtCore.QPointF(0, H)]))
+        elif k == "diamond":
+            c = ov[1]
+            p.setBrush(QtGui.QColor(c)); p.setPen(QtCore.Qt.NoPen)
+            p.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(W / 2, H * .12), QtCore.QPointF(W * .88, H / 2),
+                                           QtCore.QPointF(W / 2, H * .88), QtCore.QPointF(W * .12, H / 2)]))
+
+    def _flag_png(self, cc):
+        """(v363) Desh-code -> chhota rangeen jhanda PNG (tmpdir me cache)."""
+        try:
+            cc = str(cc).strip().upper()
+        except Exception:
+            return None
+        if not (len(cc) == 2 and cc.isalpha()):
+            return None
+        cache = getattr(self, "_flag_cache", None)
+        if cache is None:
+            cache = self._flag_cache = {}
+        if cc in cache:
+            return cache[cc]
+        W, H = 30, 20
+        pm = QtGui.QPixmap(W, H); pm.fill(QtCore.Qt.transparent)
+        p = QtGui.QPainter(pm); p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        path = QtGui.QPainterPath(); path.addRoundedRect(0, 0, W, H, 3, 3)
+        p.setClipPath(path)
+        spec = self._FLAG_SPECS.get(cc)
+        if not spec:
+            p.fillRect(0, 0, W, H, QtGui.QColor("#1E3A8A"))
+            p.setPen(QtGui.QColor("#FFFFFF"))
+            f = p.font(); f.setPixelSize(11); f.setBold(True); p.setFont(f)
+            p.drawText(pm.rect(), QtCore.Qt.AlignCenter, cc)
+        else:
+            orient, cols = spec[0], spec[1]
+            overs = spec[2] if len(spec) > 2 else []
+            n = max(1, len(cols))
+            if orient == "h":
+                for i, c in enumerate(cols):
+                    p.fillRect(QtCore.QRectF(0, H * i / n, W, H / n + 1), QtGui.QColor(c))
+            elif orient == "v":
+                for i, c in enumerate(cols):
+                    p.fillRect(QtCore.QRectF(W * i / n, 0, W / n + 1, H), QtGui.QColor(c))
+            else:
+                p.fillRect(0, 0, W, H, QtGui.QColor(cols[0]))
+            for ov in overs:
+                try:
+                    self._flag_overlay(p, ov, W, H)
+                except Exception:
+                    pass
+        p.setClipping(False)
+        p.setPen(QtGui.QPen(QtGui.QColor(0, 0, 0, 45), 1)); p.setBrush(QtCore.Qt.NoBrush)
+        p.drawRoundedRect(0, 0, W - 1, H - 1, 3, 3)
+        p.end()
+        try:
+            base = self._tmpdir if os.path.isdir(getattr(self, "_tmpdir", "") or "") \
+                else tempfile.gettempdir()
+            out = os.path.join(base, "flag_%s.png" % cc)
+            pm.save(out, "PNG")
+            cache[cc] = out
+            return out
+        except Exception:
+            cache[cc] = None
+            return None
+
+    def _flag_img(self, cc, w=18, h=12):
+        """HTML <img> tag for the flag (QLabel rich-text me chalta hai)."""
+        path = self._flag_png(cc)
+        if path:
+            return '<img src="%s" width="%d" height="%d">' % (path.replace("\\", "/"), w, h)
+        return str(cc)
+
     def _world_doers(self, feat):
         """(v360) Is metric ko kitne alag-alag users ne kiya (server fu/au se)."""
         w = getattr(self, "_an_world", {}) or {}
@@ -12464,7 +12643,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             if tc:
                 lbrow.addWidget(self._lead_label(
                     "🌐 " + L("Top desh", "Top countries"),
-                    [(self._flag(k) + " " + str(k), vv) for k, vv in list(tc.items())[:6]]), 1)
+                    [(self._flag_img(k) + "&nbsp;" + str(k), vv) for k, vv in list(tc.items())[:6]]), 1)
             ts = w.get("topStates") if isinstance(w.get("topStates"), dict) else {}
             if ts:
                 lbrow.addWidget(self._lead_label(
@@ -12479,7 +12658,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
             if tcm:
                 v.addWidget(self._section_label(
                     "🗺️ " + L("Kahan-kahan chal raha hai", "Where it's running")))
-                v.addWidget(WorldMap(tcm))
+                _fp = {}
+                for _cc in list(tcm.keys())[:6]:
+                    _pp = self._flag_png(_cc)
+                    if _pp:
+                        _fp[str(_cc).upper()] = QtGui.QPixmap(_pp)
+                v.addWidget(WorldMap(tcm, _fp))
 
         # ---- live feed ticker (abhi duniya me) ----
         if w:
@@ -12494,7 +12678,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     continue
                 if n <= 0:
                     continue
-                fl = self._flag(cc) if cc else "🌍"
+                fl = self._flag_img(cc) if cc else "🌍"
                 fitems.append('<div style="padding:3px 0;border-bottom:1px dashed #E2E8F0;">'
                               '<span style="color:#16A34A;">&#9679;</span> %s <b>%d</b> %s '
                               '<span style="color:#94A3B8;">· %s</span></div>'
