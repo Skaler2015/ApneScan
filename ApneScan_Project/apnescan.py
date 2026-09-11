@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "358"
+VERSION = "359"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9192,6 +9192,58 @@ class SavePreviewDialog(QtWidgets.QDialog):
         self.accept()
 
 
+class SparkBar(QtWidgets.QWidget):
+    """(v359) Chhota bar-graph (sparkline) — pichhle kuch din ki apni ginti.
+    World-Analytics ke metric-detail popup me use hota hai."""
+    def __init__(self, values, colour="#4F46E5", labels=None, parent=None):
+        super().__init__(parent)
+        self._vals = [max(0, int(v or 0)) for v in (values or [])]
+        self._col = QtGui.QColor(colour)
+        self._labels = labels or []
+        self.setMinimumHeight(74)
+
+    def set_values(self, values, colour=None):
+        self._vals = [max(0, int(v or 0)) for v in (values or [])]
+        if colour:
+            self._col = QtGui.QColor(colour)
+        self.update()
+
+    def paintEvent(self, ev):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        w = self.width(); h = self.height()
+        p.fillRect(self.rect(), QtGui.QColor("#F8FAFC"))
+        vals = self._vals
+        if not vals:
+            return
+        mx = max(vals) or 1
+        n = len(vals)
+        pad = 6
+        gap = 2
+        bw = max(2.0, (w - 2 * pad - (n - 1) * gap) / float(n))
+        base = h - 16
+        for i, v in enumerate(vals):
+            bh = (base - 6) * (v / float(mx))
+            x = pad + i * (bw + gap)
+            y = base - bh
+            c = QtGui.QColor(self._col)
+            if i != n - 1:
+                c.setAlpha(150)                     # aaj ka bar gehra, baaki halka
+            p.fillRect(QtCore.QRectF(x, y, bw, max(1.0, bh)), c)
+        # baseline
+        p.setPen(QtGui.QPen(QtGui.QColor("#CBD5E1"), 1))
+        p.drawLine(pad, int(base), int(w - pad), int(base))
+        # end labels (pehla + aakhri din)
+        if self._labels:
+            p.setPen(QtGui.QColor("#94A3B8"))
+            f = p.font(); f.setPointSize(7); p.setFont(f)
+            p.drawText(QtCore.QRectF(pad, base + 2, 60, 14),
+                       QtCore.Qt.AlignLeft, self._labels[0])
+            p.drawText(QtCore.QRectF(w - pad - 60, base + 2, 60, 14),
+                       QtCore.Qt.AlignRight, self._labels[-1])
+        p.end()
+
+
 class ScannerWindow(QtWidgets.QMainWindow):
     THUMB_W = 150
     THUMB_H = 200
@@ -11641,8 +11693,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 rankhtml = ('&nbsp;<span style="background:#F59E0B;color:#FFFFFF;'
                             'font-size:8px;padding:1px 5px;">🏆 %s #%d</span>'
                             % (L("आप", "You"), rank))
+            # (v359) title clickable -> poori Analytics screen
             h.append('<tr><td colspan="4" style="padding:1px 2px 3px;">'
-                     '<b style="color:#4338CA;font-size:11.5px;">🌍 %s</b>%s</td></tr>'
+                     '<a href="wdash:" style="text-decoration:none;">'
+                     '<b style="color:#4338CA;font-size:11.5px;">🌍 %s ▸</b></a>%s</td></tr>'
                      % (L("Duniya", "World"), rankhtml))
             # ⑤ summary line (wrap ho sakti hai -> chaudai force nahi karti)
             h.append('<tr><td colspan="4" style="padding:0px 2px 4px;color:#475569;'
@@ -11677,6 +11731,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
                      + '</tr>')
             for i, m in enumerate(rows):
                 lab, col = m[0], m[1]
+                feat = m[4]                            # (v359) detail-popup ke liye
+                lab_lnk = ('<a href="wdet:%s" style="color:#1F2937;text-decoration:none;">'
+                           '%s</a>' % (feat, lab))
                 bg = "#EDF0FB" if (i % 2 == 0) else "#FFFFFF"
                 yv = you(m)
                 _wv = wtot(m); _td = wtoday(m)         # (v354) int ya None
@@ -11693,7 +11750,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     '<b style="color:#111827;font-size:9.5px;">%s</b></td>'
                     '<td bgcolor="%s" align="right" style="padding:4px 2px;white-space:nowrap;">'
                     '<b style="color:#0D9488;font-size:9.5px;">%s</b></td>'
-                    '</tr>' % (bg, col, lab, bg, short(yv), bg, wv_s, bg, td_s))
+                    '</tr>' % (bg, col, lab_lnk, bg, short(yv), bg, wv_s, bg, td_s))
             h.append('</table>')
             lbl.setText("".join(h))
         except Exception:
@@ -11703,6 +11760,21 @@ class ScannerWindow(QtWidgets.QMainWindow):
         """(v262) World table column header click — us column se sort; agar
         wahi column dobara click ho to direction ulta kar do."""
         s = str(link)
+        # (v359) 🌍 title click -> poori Analytics screen kholo
+        if s.startswith("wdash:"):
+            try:
+                self.show_analytics()
+            except Exception:
+                pass
+            return
+        # (v359) kisi metric par click -> us metric ka detail popup (You/World +
+        # 30-din ka graph + trend)
+        if s.startswith("wdet:"):
+            try:
+                self._show_metric_detail(s.split(":", 1)[1])
+            except Exception:
+                pass
+            return
         # (v345) period chip (aaj/hafta/mahina/sab)
         if s.startswith("wper:"):
             p = s.split(":", 1)[1]
@@ -11724,6 +11796,172 @@ class ScannerWindow(QtWidgets.QMainWindow):
             sdesc = (col != "name")
         self._world_sort = (col, sdesc)
         self._update_world_lbl()
+
+    # (v359) metric-detail popup ke liye: curated metric ki world-keys + meta
+    _WORLD_KEYS = {
+        "scan": ("total", "today"), "save": ("pdfs", "pdfs_today"),
+        "import": ("imports", "imports_today"), "print": ("prints", "prints_today"),
+        "whatsapp": ("whatsapps", "whatsapps_today"),
+        "rename": ("renames", "renames_today"), "phone": ("phones", "phones_today"),
+    }
+    _CURATED_META = {
+        "scan": ("Scan", "#4F46E5"), "save": ("PDF Save", "#DC2626"),
+        "import": ("Import", "#EA580C"), "print": ("Print", "#2563EB"),
+        "whatsapp": ("WhatsApp", "#16A34A"), "rename": ("Rename", "#9333EA"),
+        "phone": ("Phone", "#DB2777"), "email": ("Email", "#0EA5E9"),
+        "compress": ("Compress", "#0D9488"), "ocr": ("OCR", "#7C3AED"),
+        "merge": ("Merge", "#D97706"), "split": ("Split", "#CA8A04"),
+        "sign": ("Sign", "#059669"), "watermark": ("Watermark", "#0891B2"),
+        "stamp": ("Stamp", "#BE185D"), "password": ("Protect", "#4338CA"),
+        "idcard": ("ID Card", "#DB2777"), "search": ("Search", "#64748B"),
+    }
+
+    def _metric_meta(self, feat):
+        if feat in self._CURATED_META:
+            return self._CURATED_META[feat]
+        return self._metric_style(feat)
+
+    def _world_val(self, total_key, feat):
+        """(v359) is metric ka WORLD total — curated key ya server ke fw/aw se."""
+        w = getattr(self, "_an_world", {}) or {}
+        if total_key and total_key in w:
+            try:
+                return int(w[total_key])
+            except Exception:
+                pass
+        for mp in ("fw", "aw"):
+            d = w.get(mp)
+            if isinstance(d, dict) and feat in d:
+                try:
+                    return int(d[feat])
+                except Exception:
+                    return 0
+        return None
+
+    def _world_today_val(self, today_key, feat):
+        w = getattr(self, "_an_world", {}) or {}
+        if today_key and today_key in w:
+            try:
+                return int(w[today_key])
+            except Exception:
+                pass
+        for mp in ("fwt", "awt"):
+            d = w.get(mp)
+            if isinstance(d, dict) and feat in d:
+                try:
+                    return int(d[feat])
+                except Exception:
+                    return 0
+        return None
+
+    def _show_metric_detail(self, feat):
+        """(v359) Kisi metric par click — uska poora haal: AAP (aaj/hafta/mahina/
+        kul) + WORLD + aaj, pichhle 30 din ka apna graph, aur is-hafte ka trend."""
+        L = self.L
+        lab, col = self._metric_meta(feat)
+        tkey, dkey = self._WORLD_KEYS.get(feat, (None, None))
+        you_all = self._my_sum(feat, None)
+        you_today = self._my_sum(feat, 1)
+        you_week = self._my_sum(feat, 7)
+        you_month = self._my_sum(feat, 30)
+        wv = self._world_val(tkey, feat)
+        wt = self._world_today_val(dkey, feat)
+        # 30-din ka apna graph
+        rec = (self._config.get("mycounts") or {}).get(feat) or {}
+        now = datetime.datetime.now()
+        N = 30
+        vals, labs = [], []
+        for i in range(N - 1, -1, -1):
+            d = now - datetime.timedelta(days=i)
+            vals.append(int(rec.get(d.strftime("%Y-%m-%d"), 0)))
+            labs.append(d.strftime("%d/%m"))
+        # is hafta vs pichhla hafta (trend)
+        prev_week = self._my_range(feat, 7, 7)
+        if prev_week > 0:
+            pct = int(round((you_week - prev_week) * 100.0 / prev_week))
+        else:
+            pct = 100 if you_week > 0 else 0
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("%s — %s" % (L("Analytics", "Analytics"), lab))
+        dlg.setMinimumWidth(430)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.setContentsMargins(18, 16, 18, 16); v.setSpacing(12)
+        # header
+        hd = QtWidgets.QLabel(
+            '<span style="color:%s;font-size:20px;">&#9679;</span>&nbsp;'
+            '<b style="font-size:18px;color:#111827;">%s</b>' % (col, lab))
+        hd.setTextFormat(QtCore.Qt.RichText)
+        v.addWidget(hd)
+        # 4 stat cards: AAP aaj / hafta / mahina / kul
+        cards = QtWidgets.QHBoxLayout(); cards.setSpacing(8)
+
+        def _card(title, val, c):
+            f = QtWidgets.QFrame()
+            f.setStyleSheet("QFrame{background:#F8FAFC;border:1px solid #E5E7EB;"
+                            "border-radius:10px;}")
+            fl = QtWidgets.QVBoxLayout(f); fl.setContentsMargins(10, 8, 10, 8); fl.setSpacing(1)
+            t = QtWidgets.QLabel(title); t.setStyleSheet("color:#64748B;font-size:10px;border:none;")
+            n = QtWidgets.QLabel("{:,}".format(int(val)))
+            n.setStyleSheet("color:%s;font-size:20px;font-weight:800;border:none;" % c)
+            fl.addWidget(t); fl.addWidget(n)
+            return f
+        cards.addWidget(_card(L("आज", "Today"), you_today, "#0D9488"))
+        cards.addWidget(_card(L("हफ्ता", "Week"), you_week, "#2563EB"))
+        cards.addWidget(_card(L("महीना", "Month"), you_month, "#7C3AED"))
+        cards.addWidget(_card(L("कुल (आप)", "All-time"), you_all, "#4F46E5"))
+        v.addLayout(cards)
+        # trend line
+        if pct > 0:
+            trend = ('<span style="color:#16A34A;">▲ %d%%</span> %s'
+                     % (pct, L("pichhle hafte se zyada", "vs last week")))
+        elif pct < 0:
+            trend = ('<span style="color:#DC2626;">▼ %d%%</span> %s'
+                     % (abs(pct), L("pichhle hafte se kam", "vs last week")))
+        else:
+            trend = L("pichhle hafte jaisa hi", "same as last week")
+        tl = QtWidgets.QLabel(trend); tl.setTextFormat(QtCore.Qt.RichText)
+        tl.setStyleSheet("font-size:12px;color:#475569;")
+        v.addWidget(tl)
+        # sparkline (apne pichhle 30 din)
+        gcap = QtWidgets.QLabel(L("पिछले 30 दिन — आपका काम",
+                                  "Last 30 days — your activity"))
+        gcap.setStyleSheet("font-size:11px;color:#64748B;font-weight:600;")
+        v.addWidget(gcap)
+        v.addWidget(SparkBar(vals, col, labs, dlg))
+        # world row
+        wv_s = "{:,}".format(wv) if wv is not None else "—"
+        wt_s = "{:,}".format(wt) if wt is not None else "—"
+        share = ""
+        if wv:
+            try:
+                fr = you_all * 100.0 / wv
+                if fr >= 0.01:
+                    share = "  ·  %s <b>%.2f%%</b>" % (L("aapka hissa", "your share"), fr)
+            except Exception:
+                pass
+        wl = QtWidgets.QLabel(
+            '<span style="font-size:14px;">🌍</span> <b style="color:#4338CA;">%s</b> '
+            '%s &nbsp; · &nbsp; %s <b style="color:#0D9488;">%s</b>%s'
+            % (wv_s, L("duniya bhar", "worldwide"), L("आज", "today"), wt_s, share))
+        wl.setTextFormat(QtCore.Qt.RichText); wl.setWordWrap(True)
+        wl.setStyleSheet("font-size:13px;color:#334155;background:#EEF2FF;"
+                         "border:1px solid #E0E7FF;border-radius:10px;padding:8px 10px;")
+        v.addWidget(wl)
+        # buttons
+        bb = QtWidgets.QHBoxLayout()
+        b_full = QtWidgets.QPushButton("📊 " + L("पूरी Analytics", "Full Analytics"))
+        b_full.clicked.connect(lambda: (dlg.accept(), self.show_analytics()))
+        bb.addWidget(b_full); bb.addStretch(1)
+        b_close = QtWidgets.QPushButton(L("बंद करो", "Close")); b_close.clicked.connect(dlg.accept)
+        bb.addWidget(b_close)
+        v.addLayout(bb)
+        # privacy note
+        note = QtWidgets.QLabel(L("🔒 World के आँकड़े पूरी तरह anonymous हैं.",
+                                  "🔒 World figures are fully anonymous."))
+        note.setStyleSheet("font-size:9.5px;color:#94A3B8;")
+        v.addWidget(note)
+        dlg.exec_()
 
     def _an_update_box(self):
         try:
