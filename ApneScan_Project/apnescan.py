@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "361"
+VERSION = "362"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9268,6 +9268,80 @@ class ProgressRing(QtWidgets.QWidget):
         p.end()
 
 
+class WorldMap(QtWidgets.QWidget):
+    """(v362) Halka world-map: top deshon ke bubbles (count ke hisaab se bade).
+    Koi bahri map/library nahi — country-code se approx lon/lat par bubble."""
+    COORDS = {
+        "IN": (78, 22), "US": (-98, 39), "AE": (54, 24), "GB": (-1, 52),
+        "CA": (-106, 56), "AU": (133, -25), "DE": (10, 51), "FR": (2, 46),
+        "BR": (-51, -10), "RU": (100, 60), "CN": (105, 35), "JP": (138, 36),
+        "PK": (70, 30), "BD": (90, 24), "NP": (84, 28), "LK": (81, 7),
+        "SA": (45, 24), "QA": (51, 25), "KW": (47, 29), "OM": (56, 21),
+        "SG": (103, 1), "MY": (102, 4), "ID": (113, -1), "PH": (122, 13),
+        "TH": (100, 15), "VN": (106, 16), "ZA": (24, -29), "NG": (8, 9),
+        "KE": (38, 0), "EG": (30, 26), "IT": (12, 42), "ES": (-4, 40),
+        "NL": (5, 52), "SE": (15, 62), "CH": (8, 47), "TR": (35, 39),
+        "IR": (53, 32), "IQ": (44, 33), "AF": (66, 33), "MX": (-102, 23),
+        "AR": (-64, -34), "CL": (-71, -30), "CO": (-74, 4), "NZ": (174, -41),
+        "IE": (-8, 53), "PT": (-8, 39), "BE": (4, 50), "PL": (19, 52), "UA": (32, 49),
+    }
+
+    def __init__(self, countries=None, parent=None):
+        super().__init__(parent)
+        self._c = dict(countries or {})
+        self.setMinimumHeight(190)
+
+    def set_countries(self, countries):
+        self._c = dict(countries or {}); self.update()
+
+    def paintEvent(self, ev):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        W = self.width(); H = self.height()
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(QtGui.QColor("#EAF0FB"))
+        p.drawRoundedRect(0, 0, W, H, 12, 12)
+        # faint lat/long grid
+        p.setPen(QtGui.QPen(QtGui.QColor("#D6E0F2"), 1))
+        for gx in range(1, 6):
+            p.drawLine(int(W * gx / 6), 6, int(W * gx / 6), H - 6)
+        for gy in range(1, 4):
+            p.drawLine(6, int(H * gy / 4), W - 6, int(H * gy / 4))
+        if not self._c:
+            p.setPen(QtGui.QColor("#94A3B8")); f = p.font(); f.setPointSize(9); p.setFont(f)
+            p.drawText(self.rect(), QtCore.Qt.AlignCenter, "—")
+            p.end(); return
+        mx = max(self._c.values()) or 1
+        pad = 14
+        items = sorted(self._c.items(), key=lambda kv: kv[1], reverse=True)
+        for cc, val in items:
+            co = self.COORDS.get(str(cc).upper())
+            if not co:
+                continue
+            lon, lat = co
+            x = pad + (lon + 180) / 360.0 * (W - 2 * pad)
+            y = pad + (90 - lat) / 180.0 * (H - 2 * pad)
+            import math as _m
+            r = 5 + 20 * _m.sqrt(val / float(mx))
+            grad = QtGui.QRadialGradient(x, y, r)
+            grad.setColorAt(0, QtGui.QColor(79, 70, 229, 210))
+            grad.setColorAt(1, QtGui.QColor(13, 148, 136, 90))
+            p.setBrush(grad); p.setPen(QtGui.QPen(QtGui.QColor("#4338CA"), 1))
+            p.drawEllipse(QtCore.QPointF(x, y), r, r)
+        # label top 3
+        p.setPen(QtGui.QColor("#1E293B")); f = p.font(); f.setPointSize(8); f.setBold(True); p.setFont(f)
+        for cc, val in items[:3]:
+            co = self.COORDS.get(str(cc).upper())
+            if not co:
+                continue
+            lon, lat = co
+            x = pad + (lon + 180) / 360.0 * (W - 2 * pad)
+            y = pad + (90 - lat) / 180.0 * (H - 2 * pad)
+            p.drawText(QtCore.QRectF(x + 6, y - 8, 90, 14), QtCore.Qt.AlignLeft,
+                       "%s %s" % (cc, "{:,}".format(int(val))))
+        p.end()
+
+
 class ScannerWindow(QtWidgets.QMainWindow):
     THUMB_W = 150
     THUMB_H = 200
@@ -11877,6 +11951,32 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     pass
         return 0
 
+    def _world_frank(self, feat):
+        """(v362) Is metric me duniya-bhar aapki RANK (server frank se). 0=nahi."""
+        w = getattr(self, "_an_world", {}) or {}
+        fr = w.get("frank") if isinstance(w.get("frank"), dict) else {}
+        for key in (self._DOER_ALIAS.get(feat, feat), feat):
+            if key in fr:
+                try:
+                    return int(fr[key])
+                except Exception:
+                    pass
+        return 0
+
+    def _ago(self, ts):
+        """timestamp -> 'abhi' / '5m' / '2h' / '1d'."""
+        try:
+            d = int(time.time()) - int(ts or 0)
+        except Exception:
+            return ""
+        if d < 60:
+            return self.L("abhi", "now")
+        if d < 3600:
+            return "%dm" % (d // 60)
+        if d < 86400:
+            return "%dh" % (d // 3600)
+        return "%dd" % (d // 86400)
+
     def _world_val(self, total_key, feat):
         """(v359) is metric ka WORLD total — curated key ya server ke fw/aw se."""
         w = getattr(self, "_an_world", {}) or {}
@@ -12004,6 +12104,16 @@ class ScannerWindow(QtWidgets.QMainWindow):
         wl.setStyleSheet("font-size:13px;color:#334155;background:#EEF2FF;"
                          "border:1px solid #E0E7FF;border-radius:10px;padding:8px 10px;")
         v.addWidget(wl)
+        # (v362) is kaam me duniya-bhar aapki RANK (server frank)
+        frk = self._world_frank(feat)
+        if frk:
+            rkl = QtWidgets.QLabel("🏆 %s &nbsp;<b style='font-size:17px;color:#B45309;'>#%s</b>"
+                                   % (L("Is kaam me duniya me aapki rank",
+                                        "Your world rank in this"), "{:,}".format(frk)))
+            rkl.setTextFormat(QtCore.Qt.RichText); rkl.setWordWrap(True)
+            rkl.setStyleSheet("font-size:13px;color:#92400E;background:#FEF3C7;"
+                              "border:1px solid #F59E0B;border-radius:10px;padding:8px 10px;")
+            v.addWidget(rkl)
         # (v360) doers + world-average + aapki overall rank/percentile
         w0 = getattr(self, "_an_world", {}) or {}
         doers = self._world_doers(feat)
@@ -12363,6 +12473,40 @@ class ScannerWindow(QtWidgets.QMainWindow):
             if tc or ts:
                 v.addLayout(lbrow)
 
+        # ---- world map (top deshon ke bubbles) ----
+        if w:
+            tcm = w.get("topCountries") if isinstance(w.get("topCountries"), dict) else {}
+            if tcm:
+                v.addWidget(self._section_label(
+                    "🗺️ " + L("Kahan-kahan chal raha hai", "Where it's running")))
+                v.addWidget(WorldMap(tcm))
+
+        # ---- live feed ticker (abhi duniya me) ----
+        if w:
+            feed = w.get("feed") if isinstance(w.get("feed"), list) else []
+            fitems = []
+            for it in feed[:8]:
+                try:
+                    n = int(it.get("n") or 0)
+                    cc = str(it.get("cc") or "").upper()[:2]
+                    ts = it.get("t")
+                except Exception:
+                    continue
+                if n <= 0:
+                    continue
+                fl = self._flag(cc) if cc else "🌍"
+                fitems.append('<div style="padding:3px 0;border-bottom:1px dashed #E2E8F0;">'
+                              '<span style="color:#16A34A;">&#9679;</span> %s <b>%d</b> %s '
+                              '<span style="color:#94A3B8;">· %s</span></div>'
+                              % (fl, n, L("pages scan hue", "pages scanned"), self._ago(ts)))
+            if fitems:
+                v.addWidget(self._section_label("⚡ " + L("Abhi duniya me", "Live now")))
+                fw2 = QtWidgets.QLabel("".join(fitems))
+                fw2.setTextFormat(RT); fw2.setWordWrap(True)
+                fw2.setStyleSheet("font-size:12px;color:#334155;background:#F8FAFC;"
+                                  "border:1px solid #E5E7EB;border-radius:10px;padding:8px 10px;")
+                v.addWidget(fw2)
+
         # ---- per-metric You / World / avg table ----
         rows = []
         for (feat, lab, colr, tk, dk) in self._metric_list():
@@ -12372,7 +12516,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 continue
             doers = self._world_doers(feat)
             avg = int(round(wv / float(doers))) if (wv and doers) else None
-            rows.append((youv, lab, colr, youv, wv, avg))
+            rows.append((youv, lab, colr, youv, wv, avg, self._world_frank(feat)))
         rows.sort(key=lambda r: r[0], reverse=True)
         rows = rows[:10]
         if rows:
@@ -12383,15 +12527,17 @@ class ScannerWindow(QtWidgets.QMainWindow):
                    '<td bgcolor="#4F46E5" align="right" style="color:#fff;padding:4px 6px;">%s</td>'
                    '<td bgcolor="#4F46E5" align="right" style="color:#fff;padding:4px 6px;">⌀</td></tr>'
                    % (L("Kaam", "Action"), L("Aap", "You"), L("World", "World")))
-            for i, (_s, lab, colr, youv, wv, avg) in enumerate(rows):
+            for i, (_s, lab, colr, youv, wv, avg, frk) in enumerate(rows):
                 bg = "#F1F3FC" if i % 2 == 0 else "#FFFFFF"
+                lab2 = lab + (('&nbsp;<span style="color:#B45309;font-weight:700;">#%d</span>' % frk)
+                              if frk else "")
                 trs += ('<tr>'
                         '<td bgcolor="%s" style="padding:4px 6px;color:#1F2937;">'
                         '<span style="color:%s;">&#9679;</span>&nbsp;%s</td>'
                         '<td bgcolor="%s" align="right" style="padding:4px 6px;color:#4F46E5;"><b>%s</b></td>'
                         '<td bgcolor="%s" align="right" style="padding:4px 6px;color:#111827;">%s</td>'
                         '<td bgcolor="%s" align="right" style="padding:4px 6px;color:#0D9488;">%s</td>'
-                        '</tr>' % (bg, colr, lab, bg, "{:,}".format(int(youv)),
+                        '</tr>' % (bg, colr, lab2, bg, "{:,}".format(int(youv)),
                                    bg, (self._short_num(wv) if wv is not None else "—"),
                                    bg, (self._short_num(avg) if avg is not None else "—")))
             tbl = QtWidgets.QLabel('<table width="100%%" cellspacing="0" style="font-size:12px;">%s</table>' % trs)

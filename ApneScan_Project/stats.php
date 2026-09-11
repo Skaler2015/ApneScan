@@ -299,6 +299,14 @@ function compute_stats($d, $client) {
 
     $versions=array(); $countries=array(); $methods=array(); $scores=array();
     $named=array(); $mine=0; $newToday=0;
+    // (v362) PER-METRIC WORLD RANK: is client ke apne per-feature totals leke,
+    // niche wale loop me hi gino ki kitne users ne is-feature me isse ZYADA kiya.
+    $RANKFEATS = array('scan','save','import','print','rename','whatsapp',
+                       'phonescan','email','compress','ocr','merge','split','sign','search');
+    $myFeats = ($client!=='' && isset($d['clients'][$client]['feats'])
+                && is_array($d['clients'][$client]['feats']))
+             ? $d['clients'][$client]['feats'] : array();
+    $frankCnt = array(); foreach ($RANKFEATS as $__f) $frankCnt[$__f] = 1;   // rank 1 se
     foreach ($d['clients'] as $id => $c) {
         if (!empty($c['blocked'])) continue;
         $v =trim(isset($c['version'])?$c['version']:''); if($v!=='')  bump($versions,$v);
@@ -310,6 +318,27 @@ function compute_stats($d, $client) {
         if ($client!=='' && (string)$id===(string)$client) $mine=$sc;
         $fs=intval(isset($c['first'])?$c['first']:0);
         if ($fs && date('Y-m-d',$fs)===$today) $newToday++;
+        // per-metric rank ginti (sirf un feats ke liye jo maine khud kiye hain)
+        $cf = (isset($c['feats'])&&is_array($c['feats'])) ? $c['feats'] : array();
+        foreach ($RANKFEATS as $__f) {
+            $mv = isset($myFeats[$__f]) ? intval($myFeats[$__f]) : 0;
+            if ($mv <= 0) continue;
+            if ((isset($cf[$__f]) ? intval($cf[$__f]) : 0) > $mv) $frankCnt[$__f]++;
+        }
+    }
+    $frank = array();
+    foreach ($RANKFEATS as $__f) {
+        if (isset($myFeats[$__f]) && intval($myFeats[$__f]) > 0) $frank[$__f] = $frankCnt[$__f];
+    }
+    // (v362) LIVE FEED: aakhri ~15 scans (anonymous: pages + desh + kab) — app
+    // ke dashboard ki chalti "abhi duniya me" patti ke liye.
+    $feed = array();
+    if (isset($d['recentScans']) && is_array($d['recentScans'])) {
+        foreach (array_reverse(array_slice($d['recentScans'], -15)) as $r) {
+            $feed[] = array('t'=>intval(isset($r['t'])?$r['t']:0),
+                            'n'=>intval(isset($r['n'])?$r['n']:0),
+                            'cc'=>substr(isset($r['cc'])?$r['cc']:'', 0, 4));
+        }
     }
     rsort($scores);
     $rank=1; foreach($scores as $s){ if($s>$mine)$rank++; }
@@ -369,6 +398,8 @@ function compute_stats($d, $client) {
         // (v360) per-metric doers + desh/rajya leaderboard
         'fu'=>$__fu, 'au'=>$__au,
         'topCountries'=>$topCountries, 'topStates'=>$topStates,
+        // (v362) per-metric world rank + live feed
+        'frank'=>$frank, 'feed'=>$feed,
         'ok'=>true,'srv'=>'php2','time'=>date('Y-m-d H:i'),'today_key'=>'day_'.$today,
         'fw'=>(isset($d['features'])&&is_array($d['features']))?$d['features']:array(),
         'fwt'=>(isset($d['featDaily'][$today])&&is_array($d['featDaily'][$today]))?$d['featDaily'][$today]:array(),
