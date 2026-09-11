@@ -298,7 +298,7 @@ function compute_stats($d, $client) {
     foreach ($d['days'] as $v) { if (intval($v) > $bestDay) $bestDay = intval($v); }
 
     $versions=array(); $countries=array(); $methods=array(); $scores=array();
-    $named=array(); $mine=0; $newToday=0;
+    $named=array(); $mine=0; $newToday=0; $activeToday=0;   // (v365) aaj active users
     // (v362) PER-METRIC WORLD RANK: is client ke apne per-feature totals leke,
     // niche wale loop me hi gino ki kitne users ne is-feature me isse ZYADA kiya.
     $RANKFEATS = array('scan','save','import','print','rename','whatsapp',
@@ -318,6 +318,9 @@ function compute_stats($d, $client) {
         if ($client!=='' && (string)$id===(string)$client) $mine=$sc;
         $fs=intval(isset($c['first'])?$c['first']:0);
         if ($fs && date('Y-m-d',$fs)===$today) $newToday++;
+        // (v365) aaj koi bhi samay active (last-seen aaj) — "Today online"
+        $ls=intval(isset($c['last'])?$c['last']:0);
+        if ($ls && date('Y-m-d',$ls)===$today) $activeToday++;
         // per-metric rank ginti (sirf un feats ke liye jo maine khud kiye hain)
         $cf = (isset($c['feats'])&&is_array($c['feats'])) ? $c['feats'] : array();
         foreach ($RANKFEATS as $__f) {
@@ -400,6 +403,8 @@ function compute_stats($d, $client) {
         'topCountries'=>$topCountries, 'topStates'=>$topStates,
         // (v362) per-metric world rank + live feed
         'frank'=>$frank, 'feed'=>$feed,
+        // (v365) aaj active users (last-seen aaj)
+        'activeToday'=>$activeToday,
         'ok'=>true,'srv'=>'php2','time'=>date('Y-m-d H:i'),'today_key'=>'day_'.$today,
         'fw'=>(isset($d['features'])&&is_array($d['features']))?$d['features']:array(),
         'fwt'=>(isset($d['featDaily'][$today])&&is_array($d['featDaily'][$today]))?$d['featDaily'][$today]:array(),

@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "364"
+VERSION = "365"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11859,6 +11859,47 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     '<td bgcolor="%s" align="right" style="padding:4px 2px;white-space:nowrap;">'
                     '<b style="color:#0D9488;font-size:9.5px;">%s</b></td>'
                     '</tr>' % (bg, col, lab_lnk, bg, short(yv), bg, wv_s, bg, td_s))
+            # (v365) niche: Total users · Online · Aaj online + Live-now (latest 3)
+            w0 = getattr(self, "_an_world", {}) or {}
+
+            def _g(k):
+                try:
+                    return int(w0.get(k) or 0)
+                except Exception:
+                    return 0
+            h.append('<tr><td colspan="4" style="font-size:5px;">&nbsp;</td></tr>')
+            h.append('<tr>'
+                     '<td colspan="2" style="padding:3px 3px;font-size:8.5px;color:#334155;">'
+                     '👥 %s <b>%s</b></td>'
+                     '<td colspan="2" align="right" style="padding:3px 3px;font-size:8.5px;color:#16A34A;">'
+                     '🟢 %s <b>%s</b></td></tr>'
+                     % (L("Total", "Total"), short(_g("users")),
+                        L("online", "online"), short(_g("online"))))
+            h.append('<tr><td colspan="4" style="padding:1px 3px 3px;font-size:8.5px;color:#334155;">'
+                     '📅 %s <b>%s</b></td></tr>'
+                     % (L("Aaj online", "Today online"), short(_g("activeToday"))))
+            feed = w0.get("feed") if isinstance(w0.get("feed"), list) else []
+            _lf = []
+            for _it in feed[:3]:
+                try:
+                    _n = int(_it.get("n") or 0)
+                    _cc = str(_it.get("cc") or "").upper()[:2]
+                    _ts = _it.get("t")
+                except Exception:
+                    continue
+                if _n <= 0:
+                    continue
+                _fl = self._flag_img(_cc, 14, 10) if _cc else "🌍"
+                _lf.append('%s <b>%d</b> %s <span style="color:#94A3B8;">· %s</span>'
+                           % (_fl, _n, L("pages", "pages"), self._ago(_ts)))
+            if _lf:
+                h.append('<tr><td colspan="4" style="padding:5px 3px 2px;font-size:8.5px;'
+                         'color:#B45309;font-weight:700;">⚡ %s</td></tr>'
+                         % L("Abhi duniya me", "Live now"))
+                for _line in _lf:
+                    h.append('<tr><td colspan="4" style="padding:1px 3px;font-size:8.5px;'
+                             'color:#334155;white-space:nowrap;">'
+                             '<span style="color:#16A34A;">&#9679;</span> %s</td></tr>' % _line)
             h.append('</table>')
             lbl.setText("".join(h))
         except Exception:
