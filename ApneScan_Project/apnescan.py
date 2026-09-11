@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "360"
+VERSION = "361"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9244,6 +9244,30 @@ class SparkBar(QtWidgets.QWidget):
         p.end()
 
 
+class ProgressRing(QtWidgets.QWidget):
+    """(v361) Gol progress-ring — daily goal (aaj kitna target poora)."""
+    def __init__(self, pct=0.0, colour="#16A34A", center="", parent=None):
+        super().__init__(parent)
+        self._pct = max(0.0, min(1.0, float(pct or 0)))
+        self._col = QtGui.QColor(colour)
+        self._center = center
+        self.setFixedSize(96, 96)
+
+    def paintEvent(self, ev):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        r = self.rect().adjusted(10, 10, -10, -10)
+        pen = QtGui.QPen(QtGui.QColor("#E5E7EB"), 9)
+        pen.setCapStyle(QtCore.Qt.RoundCap)
+        p.setPen(pen); p.drawArc(r, 0, 360 * 16)
+        pen2 = QtGui.QPen(self._col, 9); pen2.setCapStyle(QtCore.Qt.RoundCap)
+        p.setPen(pen2); p.drawArc(r, 90 * 16, -int(360 * 16 * self._pct))
+        p.setPen(QtGui.QColor("#111827"))
+        f = p.font(); f.setPointSize(13); f.setBold(True); p.setFont(f)
+        p.drawText(self.rect(), QtCore.Qt.AlignCenter, self._center)
+        p.end()
+
+
 class ScannerWindow(QtWidgets.QMainWindow):
     THUMB_W = 150
     THUMB_H = 200
@@ -11996,7 +12020,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
         if rankv and usersv:
-            topp = max(1, int(round((usersv - rankv + 1) * 100.0 / usersv)))
+            topp = max(1, int(round(rankv * 100.0 / usersv)))
             bits.append("🏆 %s <b>#%s</b> (%s %d%%)" % (
                 L("aapki overall rank", "your overall rank"),
                 "{:,}".format(rankv), L("top", "top"), topp))
@@ -12046,11 +12070,152 @@ class ScannerWindow(QtWidgets.QMainWindow):
                           "border-radius:10px;padding:8px 10px;")
         return lab
 
+    # ---- (v361) World Dashboard ke helper: streak / badge / eco / rank-card ----
+    def _current_streak(self):
+        """Aaj (ya kal) tak lagaataar kitne din use kiya (pages>0)."""
+        days = (self._pstats().get("days") or {})
+
+        def has(off):
+            k = (datetime.datetime.now() - datetime.timedelta(days=off)).strftime("%Y-%m-%d")
+            return int((days.get(k) or {}).get("pages", 0)) > 0
+        if has(0):
+            start = 0
+        elif has(1):
+            start = 1
+        else:
+            return 0
+        c = 0; i = start
+        while has(i) and i < 400:
+            c += 1; i += 1
+        return c
+
+    _BADGES = [(50000, "💎", "Diamond"), (10000, "🏆", "Platinum"),
+               (5000, "🥇", "Gold"), (1000, "🥈", "Silver"),
+               (200, "🥉", "Bronze"), (1, "⭐", "Starter")]
+
+    def _badge_tier(self, n):
+        """scans -> (emoji, naam, agla-threshold ya None)."""
+        n = int(n or 0)
+        for i, (thr, emo, name) in enumerate(self._BADGES):
+            if n >= thr:
+                nxt = self._BADGES[i - 1][0] if i > 0 else None
+                return emo, name, nxt
+        return "🌱", "New", self._BADGES[-1][0]
+
+    def _eco_pages(self):
+        try:
+            p = int((self._pstats().get("totals") or {}).get("pages", 0))
+        except Exception:
+            p = 0
+        if p <= 0:
+            p = self._my_sum("scan", None)
+        return int(p or 0)
+
+    def _metric_list(self):
+        """World Dashboard/table ke liye metric-tuple list:
+        (feat, label, colour, total_key, today_key)."""
+        order = ["scan", "save", "import", "print", "rename", "whatsapp", "phone",
+                 "email", "compress", "ocr", "merge", "split", "sign",
+                 "watermark", "stamp", "password", "idcard", "search"]
+        out = []; seen = set()
+        for f in order:
+            lab, col = self._metric_meta(f)
+            tk, dk = self._WORLD_KEYS.get(f, (None, None))
+            out.append((f, lab, col, tk, dk)); seen.add(f)
+        for k in (self._config.get("mycounts") or {}):
+            if k not in seen:
+                lab, col = self._metric_style(k)
+                out.append((k, lab, col, None, None)); seen.add(k)
+        return out
+
+    def _rank_card_path(self):
+        try:
+            base = self._tmpdir if os.path.isdir(getattr(self, "_tmpdir", "") or "") \
+                else tempfile.gettempdir()
+        except Exception:
+            base = tempfile.gettempdir()
+        return os.path.join(base, "ApneScan_rank_card.png")
+
+    def _make_rank_card(self, path):
+        """(v361) Share ke liye ek sundar rank-card image (PNG) banao."""
+        W, H = 1000, 560
+        pm = QtGui.QPixmap(W, H)
+        pm.fill(QtGui.QColor("#0f1836"))
+        p = QtGui.QPainter(pm)
+        p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        p.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
+        grad = QtGui.QLinearGradient(0, 0, W, H)
+        grad.setColorAt(0, QtGui.QColor("#4F46E5")); grad.setColorAt(1, QtGui.QColor("#0D9488"))
+        p.setPen(QtCore.Qt.NoPen); p.setBrush(grad)
+        p.drawRoundedRect(28, 28, W - 56, H - 56, 26, 26)
+        w = getattr(self, "_an_world", {}) or {}
+        try:
+            rank = int(w.get("rank") or 0)
+            users = int(w.get("users") or 0)
+        except Exception:
+            rank = users = 0
+        scans = self._my_sum("scan", None)
+        streak = self._current_streak()
+        emo, bname, _ = self._badge_tier(scans)
+
+        def T(x, y, s, size, bold=True, col="#FFFFFF", align=QtCore.Qt.AlignLeft):
+            f = p.font(); f.setPointSize(size); f.setBold(bold); p.setFont(f)
+            p.setPen(QtGui.QColor(col))
+            p.drawText(QtCore.QRectF(x, y, W - 2 * x if align != QtCore.Qt.AlignLeft else 900, size * 2.6),
+                       align, s)
+        T(70, 60, "📄  ApneScan", 22, True, "#E0E7FF")
+        T(70, 120, "My World Rank", 30, True, "#C7F9EE")
+        # big rank
+        f = p.font(); f.setPointSize(150); f.setBold(True); p.setFont(f)
+        p.setPen(QtGui.QColor("#FFFFFF"))
+        p.drawText(QtCore.QRectF(60, 150, W - 120, 240), QtCore.Qt.AlignCenter,
+                   ("#%d" % rank) if rank else "🌍")
+        pct = ""
+        if rank and users:
+            topp = max(1, int(round(rank * 100.0 / users)))
+            pct = "Top %d%% worldwide" % topp
+        T(0, 400, pct, 24, True, "#E0E7FF", QtCore.Qt.AlignHCenter)
+        line = "%s scans   ·   %d day streak   ·   %s %s" % (
+            "{:,}".format(int(scans)), int(streak), emo, bname)
+        T(0, 448, line, 20, True, "#F1F5F9", QtCore.Qt.AlignHCenter)
+        T(0, 500, "apnescan.apnesoft.com  ·  Free Windows scanner", 17, False,
+          "#C7D2FE", QtCore.Qt.AlignHCenter)
+        p.end()
+        try:
+            pm.save(path, "PNG")
+            return True
+        except Exception:
+            return False
+
+    def _share_rank_card(self, how="whatsapp"):
+        """(v361) Rank-card image banao aur WhatsApp/Save."""
+        path = self._rank_card_path()
+        if not self._make_rank_card(path):
+            return
+        if how == "save":
+            try:
+                dest, _ = QtWidgets.QFileDialog.getSaveFileName(
+                    self, self.L("Rank-card save karo", "Save rank card"),
+                    os.path.join(os.path.expanduser("~"), "ApneScan_rank_card.png"),
+                    "PNG (*.png)")
+                if dest:
+                    shutil.copyfile(path, dest)
+                    self._toast(self.L("✓ Rank-card save ho gaya", "✓ Rank card saved"))
+            except Exception:
+                pass
+            return
+        try:
+            self.share_whatsapp(path)      # image clipboard par + WhatsApp khulega
+        except Exception:
+            pass
+
     def _show_world_live(self):
-        """(v360) 🌍 World title par click — duniya-bhar ka LIVE haal: abhi online,
-        kul users, aaj naye, world scans (aaj/kul), top desh + rajya, best day,
-        peak, aaj ka top user (record). Data server ke _an_world se."""
+        """(v361) 🌍 World — Live DASHBOARD (full): aapki rank-card, live KPIs,
+        streak/badge/eco/daily-goal, weekly report, desh+rajya leaderboard,
+        per-metric You/World/avg table, milestone. Rank-card WhatsApp/Save.
+        Local (_pstats/mycounts) + world (_an_world) data — sab anonymous."""
         L = self.L
+        RT = QtCore.Qt.RichText
         w = getattr(self, "_an_world", {}) or {}
 
         def gi(k):
@@ -12060,64 +12225,220 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 return 0
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(L("Duniya — Live", "World — Live"))
-        dlg.setMinimumWidth(450)
-        v = QtWidgets.QVBoxLayout(dlg)
-        v.setContentsMargins(18, 16, 18, 16); v.setSpacing(12)
-        hd = QtWidgets.QLabel('<b style="font-size:19px;color:#111827;">🌍 %s</b>'
+        dlg.resize(580, 760)
+        outer = QtWidgets.QVBoxLayout(dlg); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
+        scroll = QtWidgets.QScrollArea(); scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        body = QtWidgets.QWidget(); v = QtWidgets.QVBoxLayout(body)
+        v.setContentsMargins(18, 16, 18, 14); v.setSpacing(12)
+        scroll.setWidget(body); outer.addWidget(scroll, 1)
+
+        # ---- header + online ----
+        hrow = QtWidgets.QHBoxLayout()
+        hd = QtWidgets.QLabel('<b style="font-size:20px;color:#111827;">🌍 %s</b>'
                               % L("Duniya — Live", "World — Live"))
-        hd.setTextFormat(QtCore.Qt.RichText); v.addWidget(hd)
+        hd.setTextFormat(RT); hrow.addWidget(hd); hrow.addStretch(1)
+        op = QtWidgets.QLabel("🟢 %s %s" % ("{:,}".format(gi("online")), L("abhi online", "online")))
+        op.setStyleSheet("background:#DCFCE7;color:#15803D;border-radius:20px;"
+                         "padding:5px 12px;font-weight:800;font-size:12px;")
+        hrow.addWidget(op); v.addLayout(hrow)
+
+        # ---- YOUR rank card ----
+        rank = gi("rank"); users = gi("users")
+        topp = max(1, int(round(rank * 100.0 / users))) if (rank and users) else 0
+        scans = self._my_sum("scan", None)
+        streak = self._current_streak()
+        try:
+            best = self._an_longest_streak()
+        except Exception:
+            best = streak
+        emo, bname, _nb = self._badge_tier(scans)
+        rc = QtWidgets.QFrame()
+        rc.setStyleSheet("QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+                         "stop:0 #4F46E5,stop:1 #0D9488);border-radius:14px;}")
+        rl = QtWidgets.QVBoxLayout(rc); rl.setContentsMargins(16, 13, 16, 13); rl.setSpacing(2)
+        r1 = QtWidgets.QLabel(L("Is hafte aapki overall rank", "Your overall rank this week"))
+        r1.setStyleSheet("color:#E0E7FF;font-size:12px;border:none;background:transparent;")
+        r2 = QtWidgets.QLabel(("#%s" % "{:,}".format(rank)) if rank else "🌍")
+        r2.setStyleSheet("color:#FFFFFF;font-size:38px;font-weight:800;border:none;background:transparent;")
+        sub = "%s%s · 🔥 %d %s · %s %s" % (
+            (L("top", "top") + " %d%% · " % topp) if topp else "",
+            "{:,}".format(int(scans)) + " scans", int(streak), L("din", "days"), emo, bname)
+        r3 = QtWidgets.QLabel(sub)
+        r3.setStyleSheet("color:#C7F9EE;font-size:12.5px;border:none;background:transparent;")
+        rl.addWidget(r1); rl.addWidget(r2); rl.addWidget(r3)
+        shrow = QtWidgets.QHBoxLayout(); shrow.setSpacing(8)
+        b_wa = QtWidgets.QPushButton("📤 " + L("Rank-card WhatsApp", "Share rank-card"))
+        b_wa.setStyleSheet("QPushButton{background:rgba(255,255,255,.18);color:#fff;border:none;"
+                           "border-radius:9px;padding:6px 12px;font-weight:700;}"
+                           "QPushButton:hover{background:rgba(255,255,255,.3);}")
+        b_wa.clicked.connect(lambda: self._share_rank_card("whatsapp"))
+        b_sv = QtWidgets.QPushButton("💾 " + L("Save", "Save"))
+        b_sv.setStyleSheet(b_wa.styleSheet())
+        b_sv.clicked.connect(lambda: self._share_rank_card("save"))
+        shrow.addWidget(b_wa); shrow.addWidget(b_sv); shrow.addStretch(1)
+        rl.addLayout(shrow)
+        v.addWidget(rc)
+
         if not w:
-            msg = QtWidgets.QLabel(L("Abhi duniya ke aankde nahi mile — internet on karke "
-                                     "thodi der baad kholein.",
-                                     "World figures not loaded yet — connect to the internet "
-                                     "and reopen in a moment."))
+            msg = QtWidgets.QLabel(L("Duniya ke aankde abhi nahi mile — internet on karke "
+                                     "thodi der baad kholein. (Aapke apne stats upar dikh rahe hain.)",
+                                     "World figures not loaded yet — connect to the internet and "
+                                     "reopen. (Your own stats are shown above.)"))
             msg.setWordWrap(True); msg.setStyleSheet("color:#64748B;font-size:12px;")
             v.addWidget(msg)
-        else:
+
+        # ---- live KPI grid ----
+        if w:
             grid = QtWidgets.QGridLayout(); grid.setSpacing(8)
             cards = [
-                ("🟢 " + L("Abhi online", "Online now"), gi("online"), "#16A34A"),
                 ("👥 " + L("Kul users", "Total users"), gi("users"), "#4F46E5"),
-                ("✨ " + L("Aaj naye users", "New users today"), gi("newToday"), "#EA580C"),
+                ("✨ " + L("Aaj naye", "New today"), gi("newToday"), "#EA580C"),
                 ("📷 " + L("Aaj world scan", "World scans today"), gi("today"), "#0D9488"),
                 ("📚 " + L("Kul world scan", "Total world scans"), gi("total"), "#2563EB"),
                 ("🏆 " + L("Aaj ka top user", "Top user today"), gi("topscans"), "#DB2777"),
+                ("📈 " + L("World best day", "World best day"), gi("bestDay"), "#7C3AED"),
             ]
             for i, (t, val, c) in enumerate(cards):
-                grid.addWidget(self._live_card(t, val, c), i // 2, i % 2)
+                grid.addWidget(self._live_card(t, val, c), i // 3, i % 3)
             v.addLayout(grid)
+
+        # ---- Aapka asar: streak / eco / daily goal ----
+        v.addWidget(self._section_label("💪 " + L("Aapka asar", "Your impact")))
+        impact = QtWidgets.QHBoxLayout(); impact.setSpacing(8)
+        impact.addWidget(self._live_card("🔥 " + L("Streak (din)", "Streak (days)"), streak, "#EA580C"))
+        pages = self._eco_pages()
+        trees = pages / 8333.0
+        eco = self._live_card("🌳 " + L("Ped bache (~)", "Trees saved (~)"), int(trees), "#16A34A")
+        impact.addWidget(eco)
+        # daily goal ring
+        goal = int(self._opts.get("daily_goal", 25) or 25)
+        tp = int(((self._pstats().get("days") or {}).get(
+            datetime.datetime.now().strftime("%Y-%m-%d"), {}) or {}).get("pages", 0))
+        gf = QtWidgets.QFrame(); gf.setStyleSheet("QFrame{background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;}")
+        gfl = QtWidgets.QVBoxLayout(gf); gfl.setContentsMargins(8, 6, 8, 6); gfl.setSpacing(1)
+        gt = QtWidgets.QLabel("🎯 " + L("Aaj ka goal", "Today's goal"))
+        gt.setStyleSheet("color:#64748B;font-size:10.5px;border:none;")
+        ring = ProgressRing(min(1.0, tp / float(goal or 1)), "#16A34A", "%d/%d" % (tp, goal))
+        gfl.addWidget(gt); gfl.addWidget(ring, 0, QtCore.Qt.AlignCenter)
+        impact.addWidget(gf)
+        v.addLayout(impact)
+        # weekly report (is hafta vs pichhla hafta — pages)
+        _pdays = (self._pstats().get("days") or {})
+
+        def _prange(a, b):
+            _now = datetime.datetime.now(); s = 0
+            for i in range(a, a + b):
+                k = (_now - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+                s += int((_pdays.get(k) or {}).get("pages", 0))
+            return s
+        wk = _prange(0, 7); pw = _prange(7, 7)
+        if pw > 0:
+            wpct = int(round((wk - pw) * 100.0 / pw))
+            wtxt = ('<span style="color:#16A34A;">▲ %d%%</span>' % wpct) if wpct >= 0 \
+                else ('<span style="color:#DC2626;">▼ %d%%</span>' % abs(wpct))
+        else:
+            wtxt = "—"
+        wr = QtWidgets.QLabel("🗓 %s <b>%s</b> pages · %s · 🔥 %d %s · %s <b>%s</b>" % (
+            L("Is hafte", "This week"), "{:,}".format(int(wk)), wtxt,
+            int(streak), L("din streak", "day streak"),
+            L("best", "best"), int(best)))
+        wr.setTextFormat(RT); wr.setWordWrap(True)
+        wr.setStyleSheet("font-size:12px;color:#475569;")
+        v.addWidget(wr)
+
+        # ---- leaderboards ----
+        if w:
+            lbrow = QtWidgets.QHBoxLayout(); lbrow.setSpacing(8)
             tc = w.get("topCountries") if isinstance(w.get("topCountries"), dict) else {}
             if tc:
-                v.addWidget(self._lead_label(
+                lbrow.addWidget(self._lead_label(
                     "🌐 " + L("Top desh", "Top countries"),
-                    [(self._flag(k) + " " + str(k), vv) for k, vv in list(tc.items())[:6]]))
+                    [(self._flag(k) + " " + str(k), vv) for k, vv in list(tc.items())[:6]]), 1)
             ts = w.get("topStates") if isinstance(w.get("topStates"), dict) else {}
             if ts:
-                v.addWidget(self._lead_label(
+                lbrow.addWidget(self._lead_label(
                     "📍 " + L("Top rajya", "Top states"),
-                    [(k, vv) for k, vv in list(ts.items())[:6]]))
-            extra = ("📈 %s <b>%s</b> &nbsp;·&nbsp; 👥 %s <b>%s</b>"
-                     % (L("Best day", "Best day"), "{:,}".format(gi("bestDay")),
-                        L("Peak aaj", "Peak today"), "{:,}".format(gi("peak"))))
-            el = QtWidgets.QLabel(extra); el.setTextFormat(QtCore.Qt.RichText)
-            el.setStyleSheet("font-size:12px;color:#475569;"); v.addWidget(el)
-        # buttons
-        bb = QtWidgets.QHBoxLayout()
-        b_full = QtWidgets.QPushButton("📊 " + L("पूरी Analytics", "Full Analytics"))
-        b_full.clicked.connect(lambda: (dlg.accept(), self.show_analytics()))
-        bb.addWidget(b_full); bb.addStretch(1)
-        b_ref = QtWidgets.QPushButton("🔄 " + L("Taaza", "Refresh"))
-        b_ref.clicked.connect(lambda: (self._an_refresh()
-                                       if hasattr(self, "_an_refresh") else None))
-        bb.addWidget(b_ref)
-        b_close = QtWidgets.QPushButton(L("बंद करो", "Close")); b_close.clicked.connect(dlg.accept)
-        bb.addWidget(b_close)
-        v.addLayout(bb)
+                    [(k, vv) for k, vv in list(ts.items())[:6]]), 1)
+            if tc or ts:
+                v.addLayout(lbrow)
+
+        # ---- per-metric You / World / avg table ----
+        rows = []
+        for (feat, lab, colr, tk, dk) in self._metric_list():
+            youv = self._my_sum(feat, None)
+            wv = self._world_val(tk, feat)
+            if youv <= 0 and not wv:
+                continue
+            doers = self._world_doers(feat)
+            avg = int(round(wv / float(doers))) if (wv and doers) else None
+            rows.append((youv, lab, colr, youv, wv, avg))
+        rows.sort(key=lambda r: r[0], reverse=True)
+        rows = rows[:10]
+        if rows:
+            v.addWidget(self._section_label("📊 " + L("Har kaam — Aap vs Duniya",
+                                                      "Each action — You vs World")))
+            trs = ('<tr><td bgcolor="#4F46E5" style="color:#fff;padding:4px 6px;">%s</td>'
+                   '<td bgcolor="#4F46E5" align="right" style="color:#fff;padding:4px 6px;">%s</td>'
+                   '<td bgcolor="#4F46E5" align="right" style="color:#fff;padding:4px 6px;">%s</td>'
+                   '<td bgcolor="#4F46E5" align="right" style="color:#fff;padding:4px 6px;">⌀</td></tr>'
+                   % (L("Kaam", "Action"), L("Aap", "You"), L("World", "World")))
+            for i, (_s, lab, colr, youv, wv, avg) in enumerate(rows):
+                bg = "#F1F3FC" if i % 2 == 0 else "#FFFFFF"
+                trs += ('<tr>'
+                        '<td bgcolor="%s" style="padding:4px 6px;color:#1F2937;">'
+                        '<span style="color:%s;">&#9679;</span>&nbsp;%s</td>'
+                        '<td bgcolor="%s" align="right" style="padding:4px 6px;color:#4F46E5;"><b>%s</b></td>'
+                        '<td bgcolor="%s" align="right" style="padding:4px 6px;color:#111827;">%s</td>'
+                        '<td bgcolor="%s" align="right" style="padding:4px 6px;color:#0D9488;">%s</td>'
+                        '</tr>' % (bg, colr, lab, bg, "{:,}".format(int(youv)),
+                                   bg, (self._short_num(wv) if wv is not None else "—"),
+                                   bg, (self._short_num(avg) if avg is not None else "—")))
+            tbl = QtWidgets.QLabel('<table width="100%%" cellspacing="0" style="font-size:12px;">%s</table>' % trs)
+            tbl.setTextFormat(RT); tbl.setWordWrap(True)
+            v.addWidget(tbl)
+
+        # ---- milestone (world total ke agle round tak) ----
+        if gi("total") > 0:
+            tot = gi("total")
+            import math as _m
+            e = int(_m.floor(_m.log10(max(1, tot)))); base = 10 ** e
+            nxt = base
+            for mm in (base, 2 * base, 5 * base, 10 * base):
+                if mm > tot:
+                    nxt = mm; break
+            mp = int(round(tot * 100.0 / nxt))
+            ms = QtWidgets.QLabel("🎯 %s <b>%s</b> — %d%% %s" % (
+                L("Agla milestone", "Next milestone"), self._short_num(nxt), mp,
+                L("pahunche", "reached")))
+            ms.setTextFormat(RT)
+            ms.setStyleSheet("background:#FEF3C7;border:1px solid #F59E0B;border-radius:10px;"
+                             "padding:7px 10px;color:#92400E;font-size:12px;font-weight:700;")
+            v.addWidget(ms)
+
+        v.addStretch(1)
         note = QtWidgets.QLabel(L("🔒 Sab aankde anonymous hain — kisi ka naam/file nahi.",
                                   "🔒 All figures are anonymous — no names or files."))
         note.setStyleSheet("font-size:9.5px;color:#94A3B8;")
         v.addWidget(note)
+
+        # ---- fixed bottom buttons ----
+        bb = QtWidgets.QHBoxLayout(); bb.setContentsMargins(14, 8, 14, 12)
+        b_full = QtWidgets.QPushButton("📊 " + L("पूरी Analytics", "Full Analytics"))
+        b_full.clicked.connect(lambda: (dlg.accept(), self.show_analytics()))
+        bb.addWidget(b_full); bb.addStretch(1)
+        b_ref = QtWidgets.QPushButton("🔄 " + L("Taaza", "Refresh"))
+        b_ref.clicked.connect(lambda: (self._an_refresh() if hasattr(self, "_an_refresh") else None))
+        bb.addWidget(b_ref)
+        b_close = QtWidgets.QPushButton(L("बंद करो", "Close")); b_close.clicked.connect(dlg.accept)
+        bb.addWidget(b_close)
+        outer.addLayout(bb)
         dlg.exec_()
+
+    def _section_label(self, text):
+        lab = QtWidgets.QLabel(text)
+        lab.setStyleSheet("font-size:13px;font-weight:800;color:#334155;margin-top:2px;")
+        return lab
 
     def _an_update_box(self):
         try:
