@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "366"
+VERSION = "367"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -18425,6 +18425,7 @@ if the toggle is ticked).</p>
         _s2.setStyleSheet("font-size:10.5px;color:#374151;")
         _sv.addWidget(_s2)
         nv.addWidget(_store)
+        _store.hide()          # (v367) user request — "Storage used · Scanner" box hatao
         _ver = QtWidgets.QLabel("ApneScan · v%s · 100%% Free" % VERSION)
         _ver.setAlignment(QtCore.Qt.AlignCenter)
         _ver.setStyleSheet("color:#9CA3AF;font-size:9.5px;")
