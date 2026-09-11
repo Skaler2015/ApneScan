@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "365"
+VERSION = "366"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11799,16 +11799,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
                              'font-size:8px;padding:1px 5px;">🏆 %s #%d</span>'
                              % (L("आप", "You"), rank))
             h.append('<tr>'
-                     '<td colspan="3" bgcolor="#4F46E5" style="padding:4px 6px;">'
+                     '<td colspan="3" bgcolor="#4F46E5" style="padding:2px 6px;">'
                      '<a href="wdash:" style="text-decoration:none;">'
-                     '<b style="color:#FFFFFF;font-size:12px;">🌍 %s ▸</b></a></td>'
-                     '<td bgcolor="#4F46E5" align="right" style="padding:4px 6px;">%s</td>'
+                     '<b style="color:#FFFFFF;font-size:11px;">🌍 %s ▸</b></a></td>'
+                     '<td bgcolor="#4F46E5" align="right" style="padding:2px 6px;">%s</td>'
                      '</tr>' % (L("Duniya", "World"), rank_pill))
-            # thodi khaali jagah header-bar ke neeche
-            h.append('<tr><td colspan="4" style="font-size:3px;">&nbsp;</td></tr>')
             # ⑤ summary line (wrap ho sakti hai -> chaudai force nahi karti)
-            h.append('<tr><td colspan="4" style="padding:0px 2px 4px;color:#475569;'
-                     'font-size:8.5px;">%s <b>%s</b> · %s <b>%s</b> · '
+            h.append('<tr><td colspan="4" style="padding:2px 2px 2px;color:#475569;'
+                     'font-size:8px;">%s <b>%s</b> · %s <b>%s</b> · '
                      '<b>%s</b> PDF</td></tr>'
                      % (L("scan", "scan"), short(rawv("total")),
                         L("आज", "today"), short(rawv("today")), short(rawv("pdfs"))))
@@ -11820,14 +11818,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 return ('<a href="wper:%s" style="text-decoration:none;">'
                         '<span style="background:%s;color:%s;font-size:8.5px;'
                         'padding:2px 6px;">%s</span></a>&nbsp;' % (pk, bg, fg, txt))
-            h.append('<tr><td colspan="4" style="padding:1px 2px 5px;">'
+            h.append('<tr><td colspan="4" style="padding:1px 2px 2px;">'
                      + _chip("today", L("आज", "Today")) + _chip("week", L("हफ्ता", "Week"))
                      + _chip("month", L("महीना", "Month")) + _chip("all", L("सब", "All"))
                      + '</td></tr>')
             # column headers (clickable)
             def _hcell(col, text, align):
                 return ('<td align="%s" bgcolor="#4F46E5" '
-                        'style="color:#FFFFFF;font-size:8px;padding:4px 2px;'
+                        'style="color:#FFFFFF;font-size:8px;padding:2px 2px;'
                         'white-space:nowrap;">'
                         '<a href="wsort:%s" style="color:#FFFFFF;text-decoration:none;">'
                         '<b>%s%s</b></a></td>' % (align, col, text, _arw(col)))
@@ -11850,13 +11848,13 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 # bada number (9.5px bold), lambi row (4px padding), saaf rang
                 h.append(
                     '<tr>'
-                    '<td bgcolor="%s" style="color:#1F2937;font-size:8px;padding:4px 2px;white-space:nowrap;">'
-                    '<span style="color:%s;font-size:10px;">&#9679;</span>&nbsp;%s</td>'
-                    '<td bgcolor="%s" align="right" style="padding:4px 2px;white-space:nowrap;">'
+                    '<td bgcolor="%s" style="color:#1F2937;font-size:8px;padding:2px 2px;white-space:nowrap;">'
+                    '<span style="color:%s;font-size:9px;">&#9679;</span>&nbsp;%s</td>'
+                    '<td bgcolor="%s" align="right" style="padding:2px 2px;white-space:nowrap;">'
                     '<b style="color:#4F46E5;font-size:9.5px;">%s</b></td>'
-                    '<td bgcolor="%s" align="right" style="padding:4px 2px;white-space:nowrap;">'
+                    '<td bgcolor="%s" align="right" style="padding:2px 2px;white-space:nowrap;">'
                     '<b style="color:#111827;font-size:9.5px;">%s</b></td>'
-                    '<td bgcolor="%s" align="right" style="padding:4px 2px;white-space:nowrap;">'
+                    '<td bgcolor="%s" align="right" style="padding:2px 2px;white-space:nowrap;">'
                     '<b style="color:#0D9488;font-size:9.5px;">%s</b></td>'
                     '</tr>' % (bg, col, lab_lnk, bg, short(yv), bg, wv_s, bg, td_s))
             # (v365) niche: Total users · Online · Aaj online + Live-now (latest 3)
@@ -11867,15 +11865,15 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     return int(w0.get(k) or 0)
                 except Exception:
                     return 0
-            h.append('<tr><td colspan="4" style="font-size:5px;">&nbsp;</td></tr>')
+            h.append('<tr><td colspan="4" style="font-size:2px;">&nbsp;</td></tr>')
             h.append('<tr>'
-                     '<td colspan="2" style="padding:3px 3px;font-size:8.5px;color:#334155;">'
+                     '<td colspan="2" style="padding:2px 3px;font-size:8px;color:#334155;">'
                      '👥 %s <b>%s</b></td>'
-                     '<td colspan="2" align="right" style="padding:3px 3px;font-size:8.5px;color:#16A34A;">'
+                     '<td colspan="2" align="right" style="padding:2px 3px;font-size:8px;color:#16A34A;">'
                      '🟢 %s <b>%s</b></td></tr>'
                      % (L("Total", "Total"), short(_g("users")),
                         L("online", "online"), short(_g("online"))))
-            h.append('<tr><td colspan="4" style="padding:1px 3px 3px;font-size:8.5px;color:#334155;">'
+            h.append('<tr><td colspan="4" style="padding:0px 3px 2px;font-size:8px;color:#334155;">'
                      '📅 %s <b>%s</b></td></tr>'
                      % (L("Aaj online", "Today online"), short(_g("activeToday"))))
             feed = w0.get("feed") if isinstance(w0.get("feed"), list) else []
@@ -11893,11 +11891,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 _lf.append('%s <b>%d</b> %s <span style="color:#94A3B8;">· %s</span>'
                            % (_fl, _n, L("pages", "pages"), self._ago(_ts)))
             if _lf:
-                h.append('<tr><td colspan="4" style="padding:5px 3px 2px;font-size:8.5px;'
+                h.append('<tr><td colspan="4" style="padding:2px 3px 1px;font-size:8px;'
                          'color:#B45309;font-weight:700;">⚡ %s</td></tr>'
                          % L("Abhi duniya me", "Live now"))
                 for _line in _lf:
-                    h.append('<tr><td colspan="4" style="padding:1px 3px;font-size:8.5px;'
+                    h.append('<tr><td colspan="4" style="padding:0px 3px;font-size:8px;'
                              'color:#334155;white-space:nowrap;">'
                              '<span style="color:#16A34A;">&#9679;</span> %s</td></tr>' % _line)
             h.append('</table>')
