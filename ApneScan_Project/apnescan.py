@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "363"
+VERSION = "364"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11790,18 +11790,22 @@ class ScannerWindow(QtWidgets.QMainWindow):
             # isliye label/header 8px par hi rakhe, warna daayan column kat jaata.
             h = ['<table width="100%" cellspacing="0" cellpadding="0" '
                  'style="font-size:8px;">']
-            # ⑥ heading + RANK badge
+            # (v364) Design A — RANGEEN HEADER BAR: poore-chaudai ki neeli patti
+            # (baayen 🌍 World, daayen amber 🏆 You #1 pill). Title click -> dashboard.
             rank = rawv("rank")
-            rankhtml = ""
+            rank_pill = ""
             if rank > 0:
-                rankhtml = ('&nbsp;<span style="background:#F59E0B;color:#FFFFFF;'
-                            'font-size:8px;padding:1px 5px;">🏆 %s #%d</span>'
-                            % (L("आप", "You"), rank))
-            # (v359) title clickable -> poori Analytics screen
-            h.append('<tr><td colspan="4" style="padding:1px 2px 3px;">'
+                rank_pill = ('<span style="background:#F59E0B;color:#FFFFFF;'
+                             'font-size:8px;padding:1px 5px;">🏆 %s #%d</span>'
+                             % (L("आप", "You"), rank))
+            h.append('<tr>'
+                     '<td colspan="3" bgcolor="#4F46E5" style="padding:4px 6px;">'
                      '<a href="wdash:" style="text-decoration:none;">'
-                     '<b style="color:#4338CA;font-size:11.5px;">🌍 %s ▸</b></a>%s</td></tr>'
-                     % (L("Duniya", "World"), rankhtml))
+                     '<b style="color:#FFFFFF;font-size:12px;">🌍 %s ▸</b></a></td>'
+                     '<td bgcolor="#4F46E5" align="right" style="padding:4px 6px;">%s</td>'
+                     '</tr>' % (L("Duniya", "World"), rank_pill))
+            # thodi khaali jagah header-bar ke neeche
+            h.append('<tr><td colspan="4" style="font-size:3px;">&nbsp;</td></tr>')
             # ⑤ summary line (wrap ho sakti hai -> chaudai force nahi karti)
             h.append('<tr><td colspan="4" style="padding:0px 2px 4px;color:#475569;'
                      'font-size:8.5px;">%s <b>%s</b> · %s <b>%s</b> · '
