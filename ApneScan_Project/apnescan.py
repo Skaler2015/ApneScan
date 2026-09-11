@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "359"
+VERSION = "360"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11760,10 +11760,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
         """(v262) World table column header click — us column se sort; agar
         wahi column dobara click ho to direction ulta kar do."""
         s = str(link)
-        # (v359) 🌍 title click -> poori Analytics screen kholo
+        # (v359/v360) 🌍 title click -> World-Live popup (online/users/desh…)
         if s.startswith("wdash:"):
             try:
-                self.show_analytics()
+                self._show_world_live()
             except Exception:
                 pass
             return
@@ -11816,10 +11816,42 @@ class ScannerWindow(QtWidgets.QMainWindow):
         "idcard": ("ID Card", "#DB2777"), "search": ("Search", "#64748B"),
     }
 
+    # widget-feat -> server feature-name (doers/featUsers me isi naam se hai)
+    _DOER_ALIAS = {"phone": "phonescan"}
+
     def _metric_meta(self, feat):
         if feat in self._CURATED_META:
             return self._CURATED_META[feat]
         return self._metric_style(feat)
+
+    @staticmethod
+    def _flag(cc):
+        """Desh-code (IN/US…) -> emoji jhanda."""
+        try:
+            cc = str(cc).strip().upper()
+            if len(cc) == 2 and cc.isalpha():
+                return "".join(chr(0x1F1E6 + ord(ch) - 65) for ch in cc)
+        except Exception:
+            pass
+        return "🏳"
+
+    def _world_doers(self, feat):
+        """(v360) Is metric ko kitne alag-alag users ne kiya (server fu/au se)."""
+        w = getattr(self, "_an_world", {}) or {}
+        fu = w.get("fu") if isinstance(w.get("fu"), dict) else {}
+        au = w.get("au") if isinstance(w.get("au"), dict) else {}
+        for key in (self._DOER_ALIAS.get(feat, feat), feat):
+            if key in fu:
+                try:
+                    return int(fu[key])
+                except Exception:
+                    pass
+            if key in au:
+                try:
+                    return int(au[key])
+                except Exception:
+                    pass
+        return 0
 
     def _world_val(self, total_key, feat):
         """(v359) is metric ka WORLD total — curated key ya server ke fw/aw se."""
@@ -11948,6 +11980,31 @@ class ScannerWindow(QtWidgets.QMainWindow):
         wl.setStyleSheet("font-size:13px;color:#334155;background:#EEF2FF;"
                          "border:1px solid #E0E7FF;border-radius:10px;padding:8px 10px;")
         v.addWidget(wl)
+        # (v360) doers + world-average + aapki overall rank/percentile
+        w0 = getattr(self, "_an_world", {}) or {}
+        doers = self._world_doers(feat)
+        rankv = int(w0.get("rank") or 0)
+        usersv = int(w0.get("users") or 0)
+        bits = []
+        if doers:
+            bits.append("👥 <b>{:,}</b> {}".format(
+                doers, L("log ye karte hain", "people do this")))
+        if wv and doers:
+            try:
+                bits.append("⌀ %s <b>%s</b>" % (
+                    L("average", "avg"), "{:,}".format(int(round(wv / float(doers))))))
+            except Exception:
+                pass
+        if rankv and usersv:
+            topp = max(1, int(round((usersv - rankv + 1) * 100.0 / usersv)))
+            bits.append("🏆 %s <b>#%s</b> (%s %d%%)" % (
+                L("aapki overall rank", "your overall rank"),
+                "{:,}".format(rankv), L("top", "top"), topp))
+        if bits:
+            xl = QtWidgets.QLabel("  ·  ".join(bits))
+            xl.setTextFormat(QtCore.Qt.RichText); xl.setWordWrap(True)
+            xl.setStyleSheet("font-size:12px;color:#475569;")
+            v.addWidget(xl)
         # buttons
         bb = QtWidgets.QHBoxLayout()
         b_full = QtWidgets.QPushButton("📊 " + L("पूरी Analytics", "Full Analytics"))
@@ -11959,6 +12016,105 @@ class ScannerWindow(QtWidgets.QMainWindow):
         # privacy note
         note = QtWidgets.QLabel(L("🔒 World के आँकड़े पूरी तरह anonymous हैं.",
                                   "🔒 World figures are fully anonymous."))
+        note.setStyleSheet("font-size:9.5px;color:#94A3B8;")
+        v.addWidget(note)
+        dlg.exec_()
+
+    def _live_card(self, title, val, colour):
+        """(v360) World-Live popup ka ek stat-card."""
+        f = QtWidgets.QFrame()
+        f.setStyleSheet("QFrame{background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;}")
+        fl = QtWidgets.QVBoxLayout(f); fl.setContentsMargins(11, 8, 11, 8); fl.setSpacing(1)
+        t = QtWidgets.QLabel(title); t.setStyleSheet("color:#64748B;font-size:10.5px;border:none;")
+        n = QtWidgets.QLabel("{:,}".format(int(val)))
+        n.setStyleSheet("color:%s;font-size:21px;font-weight:800;border:none;" % colour)
+        fl.addWidget(t); fl.addWidget(n)
+        return f
+
+    def _lead_label(self, title, pairs):
+        """(v360) Leaderboard (desh/rajya) — chhoti HTML list."""
+        rows = "".join(
+            '<tr><td style="padding:2px 8px 2px 0;color:#334155;">%s</td>'
+            '<td align="right" style="padding:2px 0;color:#4F46E5;"><b>%s</b></td></tr>'
+            % (str(k), "{:,}".format(int(vv))) for k, vv in pairs)
+        lab = QtWidgets.QLabel(
+            '<b style="color:#475569;font-size:11.5px;">%s</b>'
+            '<table width="100%%" cellspacing="0" style="font-size:12px;margin-top:3px;">%s</table>'
+            % (title, rows))
+        lab.setTextFormat(QtCore.Qt.RichText); lab.setWordWrap(True)
+        lab.setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;"
+                          "border-radius:10px;padding:8px 10px;")
+        return lab
+
+    def _show_world_live(self):
+        """(v360) 🌍 World title par click — duniya-bhar ka LIVE haal: abhi online,
+        kul users, aaj naye, world scans (aaj/kul), top desh + rajya, best day,
+        peak, aaj ka top user (record). Data server ke _an_world se."""
+        L = self.L
+        w = getattr(self, "_an_world", {}) or {}
+
+        def gi(k):
+            try:
+                return int(w.get(k) or 0)
+            except Exception:
+                return 0
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(L("Duniya — Live", "World — Live"))
+        dlg.setMinimumWidth(450)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.setContentsMargins(18, 16, 18, 16); v.setSpacing(12)
+        hd = QtWidgets.QLabel('<b style="font-size:19px;color:#111827;">🌍 %s</b>'
+                              % L("Duniya — Live", "World — Live"))
+        hd.setTextFormat(QtCore.Qt.RichText); v.addWidget(hd)
+        if not w:
+            msg = QtWidgets.QLabel(L("Abhi duniya ke aankde nahi mile — internet on karke "
+                                     "thodi der baad kholein.",
+                                     "World figures not loaded yet — connect to the internet "
+                                     "and reopen in a moment."))
+            msg.setWordWrap(True); msg.setStyleSheet("color:#64748B;font-size:12px;")
+            v.addWidget(msg)
+        else:
+            grid = QtWidgets.QGridLayout(); grid.setSpacing(8)
+            cards = [
+                ("🟢 " + L("Abhi online", "Online now"), gi("online"), "#16A34A"),
+                ("👥 " + L("Kul users", "Total users"), gi("users"), "#4F46E5"),
+                ("✨ " + L("Aaj naye users", "New users today"), gi("newToday"), "#EA580C"),
+                ("📷 " + L("Aaj world scan", "World scans today"), gi("today"), "#0D9488"),
+                ("📚 " + L("Kul world scan", "Total world scans"), gi("total"), "#2563EB"),
+                ("🏆 " + L("Aaj ka top user", "Top user today"), gi("topscans"), "#DB2777"),
+            ]
+            for i, (t, val, c) in enumerate(cards):
+                grid.addWidget(self._live_card(t, val, c), i // 2, i % 2)
+            v.addLayout(grid)
+            tc = w.get("topCountries") if isinstance(w.get("topCountries"), dict) else {}
+            if tc:
+                v.addWidget(self._lead_label(
+                    "🌐 " + L("Top desh", "Top countries"),
+                    [(self._flag(k) + " " + str(k), vv) for k, vv in list(tc.items())[:6]]))
+            ts = w.get("topStates") if isinstance(w.get("topStates"), dict) else {}
+            if ts:
+                v.addWidget(self._lead_label(
+                    "📍 " + L("Top rajya", "Top states"),
+                    [(k, vv) for k, vv in list(ts.items())[:6]]))
+            extra = ("📈 %s <b>%s</b> &nbsp;·&nbsp; 👥 %s <b>%s</b>"
+                     % (L("Best day", "Best day"), "{:,}".format(gi("bestDay")),
+                        L("Peak aaj", "Peak today"), "{:,}".format(gi("peak"))))
+            el = QtWidgets.QLabel(extra); el.setTextFormat(QtCore.Qt.RichText)
+            el.setStyleSheet("font-size:12px;color:#475569;"); v.addWidget(el)
+        # buttons
+        bb = QtWidgets.QHBoxLayout()
+        b_full = QtWidgets.QPushButton("📊 " + L("पूरी Analytics", "Full Analytics"))
+        b_full.clicked.connect(lambda: (dlg.accept(), self.show_analytics()))
+        bb.addWidget(b_full); bb.addStretch(1)
+        b_ref = QtWidgets.QPushButton("🔄 " + L("Taaza", "Refresh"))
+        b_ref.clicked.connect(lambda: (self._an_refresh()
+                                       if hasattr(self, "_an_refresh") else None))
+        bb.addWidget(b_ref)
+        b_close = QtWidgets.QPushButton(L("बंद करो", "Close")); b_close.clicked.connect(dlg.accept)
+        bb.addWidget(b_close)
+        v.addLayout(bb)
+        note = QtWidgets.QLabel(L("🔒 Sab aankde anonymous hain — kisi ka naam/file nahi.",
+                                  "🔒 All figures are anonymous — no names or files."))
         note.setStyleSheet("font-size:9.5px;color:#94A3B8;")
         v.addWidget(note)
         dlg.exec_()

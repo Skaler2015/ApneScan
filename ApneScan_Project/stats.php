@@ -347,7 +347,28 @@ function compute_stats($d, $client) {
     $__aw = (isset($d['actions'])&&is_array($d['actions']))?$d['actions']:array();
     arsort($__aw); $__aw = array_slice($__aw, 0, 150, true);
 
+    // (v360) HAR metric ke DOERS (kitne alag-alag users ne kiya) — app ke
+    // metric-detail popup me "N log ye karte hain" + world-average ke liye.
+    $__fu = array();
+    if (isset($d['featUsers']) && is_array($d['featUsers']))
+        foreach ($d['featUsers'] as $f=>$us) { $__fu[(string)$f] = is_array($us)?count($us):0; }
+    $__au = array();
+    if (isset($d['actionUsers']) && is_array($d['actionUsers']))
+        foreach ($d['actionUsers'] as $a=>$us) { $__au[(string)$a] = is_array($us)?count($us):0; }
+    // (v360) DESH + RAJYA leaderboard (top) — World-live popup ke liye.
+    $__cc = $countries; arsort($__cc); $topCountries = array_slice($__cc, 0, 8, true);
+    $__st = array();
+    foreach ($d['clients'] as $c) {
+        if (!empty($c['blocked'])) continue;
+        $rg = trim(isset($c['region'])?$c['region']:'');
+        if ($rg!=='') bump($__st, $rg);
+    }
+    arsort($__st); $topStates = array_slice($__st, 0, 8, true);
+
     return array(
+        // (v360) per-metric doers + desh/rajya leaderboard
+        'fu'=>$__fu, 'au'=>$__au,
+        'topCountries'=>$topCountries, 'topStates'=>$topStates,
         'ok'=>true,'srv'=>'php2','time'=>date('Y-m-d H:i'),'today_key'=>'day_'.$today,
         'fw'=>(isset($d['features'])&&is_array($d['features']))?$d['features']:array(),
         'fwt'=>(isset($d['featDaily'][$today])&&is_array($d['featDaily'][$today]))?$d['featDaily'][$today]:array(),
