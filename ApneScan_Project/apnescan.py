@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "356"
+VERSION = "357"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13878,6 +13878,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 if k == QtCore.Qt.Key_Escape and self.files_search.text():
                     self.files_search.clear()
                     return True
+        # (v357) My Files panel resize -> "⬆ Top" button apni jagah par rakho
+        if obj is getattr(self, "files_panel", None) and ev.type() == QtCore.QEvent.Resize:
+            try:
+                self._update_files_top_btn()
+            except Exception:
+                pass
         if obj is self.list.viewport():
             if ev.type() == QtCore.QEvent.Resize:
                 self._empty_lbl.setGeometry(self.list.viewport().rect())
@@ -16869,6 +16875,28 @@ if the toggle is ticked).</p>
         # (v290) Ctrl+F => seedha is live sidebar-search par focus (panel bند ho to
         # khol kar), aur pehle se likha text select — turant naya search likho.
         QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+F"), self, self._focus_files_search)
+        # (v357) "⬆ Top" — list neeche scroll ho to ek click me SABSE UPAR aa jaye.
+        # List ke upar TAIRTA (floating) button; sirf tab dikhta hai jab neeche
+        # scroll kiya ho. files_tree (folder-list) aur search-results dono par.
+        self.btn_files_top = QtWidgets.QToolButton(self.files_panel)
+        self.btn_files_top.setText(self.L("⬆ Upar", "⬆ Top"))
+        self.btn_files_top.setCursor(QtCore.Qt.PointingHandCursor)
+        self.btn_files_top.setToolTip(self.L("Sabse upar jao", "Scroll to top"))
+        self.btn_files_top.setStyleSheet(
+            "QToolButton{background:rgba(37,99,235,0.94);color:#fff;border:none;"
+            "border-radius:15px;padding:6px 13px;font-size:11px;font-weight:700;}"
+            "QToolButton:hover{background:#1D4ED8;}")
+        self.btn_files_top.clicked.connect(self._scroll_files_top)
+        self.btn_files_top.hide()
+        try:
+            self.files_tree.verticalScrollBar().valueChanged.connect(self._update_files_top_btn)
+            self.files_results.verticalScrollBar().valueChanged.connect(self._update_files_top_btn)
+            self.files_tree.verticalScrollBar().rangeChanged.connect(
+                lambda *_a: self._update_files_top_btn())
+            self.files_search.textChanged.connect(lambda *_a: self._update_files_top_btn())
+            self.files_panel.installEventFilter(self)   # panel resize -> button reposition
+        except Exception:
+            pass
         self._rebuild_fav_bar()
         _row = QtWidgets.QHBoxLayout()
         _bopen = QtWidgets.QPushButton(self.L("📂 Kholo", "📂 Open"))
@@ -20273,6 +20301,61 @@ if the toggle is ticked).</p>
             except Exception:
                 pass
 
+    def _files_visible_list(self):
+        """(v357) Abhi kaunsi list dikh rahi hai — search-results ya folder-tree."""
+        fr = getattr(self, "files_results", None)
+        ft = getattr(self, "files_tree", None)
+        if fr is not None and fr.isVisible():
+            return fr
+        return ft
+
+    def _scroll_files_top(self):
+        """(v357) 'Top' button — dikh rahi list ko sabse upar le aao."""
+        w = self._files_visible_list()
+        if w is not None:
+            try:
+                w.scrollToTop()
+                w.verticalScrollBar().setValue(0)
+            except Exception:
+                pass
+        b = getattr(self, "btn_files_top", None)
+        if b is not None:
+            b.hide()
+
+    def _reposition_files_top_btn(self):
+        """(v357) 'Top' button ko dikh rahi list ke neeche-daaye kone me rakho."""
+        b = getattr(self, "btn_files_top", None)
+        w = self._files_visible_list()
+        if b is None or w is None:
+            return
+        try:
+            r = w.geometry()             # files_panel ke coordinate me
+            b.adjustSize()
+            x = r.right() - b.width() - 12
+            y = r.bottom() - b.height() - 12
+            b.move(max(r.left() + 4, x), max(r.top() + 4, y))
+            b.raise_()
+        except Exception:
+            pass
+
+    def _update_files_top_btn(self, *a):
+        """(v357) List neeche scroll ho to 'Top' button dikhao, upar aate hi chhupa do."""
+        b = getattr(self, "btn_files_top", None)
+        w = self._files_visible_list()
+        if b is None or w is None:
+            return
+        try:
+            sb = w.verticalScrollBar()
+            show = bool(sb.maximum() > 0 and sb.value() > 40)
+        except Exception:
+            show = False
+        if show:
+            self._reposition_files_top_btn()
+            b.show()
+            b.raise_()
+        else:
+            b.hide()
+
     def _set_files_sort(self, key):
         # (v292) yeh pasand SIRF abhi khule folder ke liye yaad rakho (baaki
         # folder par asar nahi). Jo folder abhi khula nahi/na mile to global default.
@@ -21681,6 +21764,9 @@ if the toggle is ticked).</p>
             if len(_imgsel) > 1:
                 # (v322) kai image: sab->PDF, jodo, B&W/enhance/compress
                 self._add_image_tools_bulk(menu, _imgsel)
+            menu.addAction("📋 " + self.L("%d files Copy (kahin bhi paste)" % len(sel_files),
+                                          "Copy %d files (paste anywhere)" % len(sel_files)),
+                           lambda: self._copy_files_to_clipboard(sel_files))
             menu.addAction(self.L("📁 Dusre folder me le jao…", "📁 Move to another folder…"),
                            lambda: self._bulk_move(sel_files, copy=False))
             menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
@@ -21713,6 +21799,8 @@ if the toggle is ticked).</p>
                                       "🗜 Make a ZIP of this folder…"),
                                lambda: self._zip_folder(path))
                 menu.addAction("📂 Open in Explorer", lambda: self._open_path(path))
+                menu.addAction("📋 " + self.L("Folder copy (kahin bhi paste)", "Copy folder (paste anywhere)"),
+                               lambda p=path: self._copy_files_to_clipboard([p]))
                 # (v276) folder ka rang — pehchaan aasaan
                 cm = menu.addMenu("🎨 " + self.L("Folder ka rang", "Folder colour"))
                 for _nm, _hex in (("🟡 Amber", None), ("🔵 Neela", "#3B82F6"),
@@ -21730,6 +21818,8 @@ if the toggle is ticked).</p>
                                lambda: self._delete_folder(path))
             else:
                 menu.addAction("📖 Open", lambda: self._open_path(path))
+                menu.addAction("📋 " + self.L("Copy (kahin bhi paste karo)", "Copy (paste anywhere)"),
+                               lambda p=path: self._copy_files_to_clipboard([p]))
                 if path.lower().endswith(self._IMPORTABLE_EXTS):
                     menu.addAction("🖊 " + self.L("Editor me kholo", "Open in editor"),
                                    lambda: self._open_in_editor([path]))
@@ -21795,6 +21885,35 @@ if the toggle is ticked).</p>
         menu.addAction(self.L("🗑 Recycle Bin…", "🗑 Recycle Bin…"), self.show_recycle_bin)
         menu.exec_(self.files_tree.viewport().mapToGlobal(pos))
 
+    def _copy_files_to_clipboard(self, paths):
+        """(v357) Chuni file(s)/folder ko OS clipboard par 'Copy' karo — user
+        kahin bhi paste (Ctrl+V) kar sake: Explorer me dusre folder me, WhatsApp/
+        Email me attach, ya kisi aur software me. Windows Explorer 'Copy' jaisa."""
+        paths = [p for p in (paths or []) if p and os.path.exists(p)]
+        if not paths:
+            return
+        try:
+            md = QtCore.QMimeData()
+            md.setUrls([QtCore.QUrl.fromLocalFile(p) for p in paths])
+            md.setText("\n".join(paths))
+            # Windows: 'Copy' (paste = file copy, cut nahi) — Preferred DropEffect=1
+            try:
+                if sys.platform.startswith("win"):
+                    import struct
+                    md.setData("Preferred DropEffect",
+                               QtCore.QByteArray(struct.pack("<I", 1)))
+            except Exception:
+                pass
+            QtWidgets.QApplication.clipboard().setMimeData(md)
+            try:
+                self._toast(self.L(
+                    "📋 %d file copy ho gayi — kahin bhi paste karein (Ctrl+V)" % len(paths),
+                    "📋 Copied %d file(s) — paste anywhere (Ctrl+V)" % len(paths)))
+            except Exception:
+                pass
+        except Exception:
+            pass
+
     def _selected_result_paths(self):
         """Search-results list me chuni hui saari file/folder paths (UserRole)."""
         out, seen = [], set()
@@ -21845,6 +21964,9 @@ if the toggle is ticked).</p>
             _imgsel = [f for f in files if f.lower().endswith(self._IMG_EXTS)]
             if len(_imgsel) > 1:
                 self._add_image_tools_bulk(menu, _imgsel)
+            menu.addAction("📋 " + self.L("%d files Copy (kahin bhi paste)" % len(files),
+                                          "Copy %d files (paste anywhere)" % len(files)),
+                           lambda: self._copy_files_to_clipboard(files))
             menu.addAction(self.L("📁 Dusre folder me le jao…", "📁 Move to another folder…"),
                            lambda: self._bulk_move(files, copy=False))
             menu.addAction(self.L("📄 Dusre folder me copy…", "📄 Copy to another folder…"),
@@ -21858,6 +21980,8 @@ if the toggle is ticked).</p>
         elif len(files) == 1:
             path = files[0]
             menu.addAction("📖 " + self.L("Kholo", "Open"), lambda: self._open_path(path))
+            menu.addAction("📋 " + self.L("Copy (kahin bhi paste karo)", "Copy (paste anywhere)"),
+                           lambda p=path: self._copy_files_to_clipboard([p]))
             menu.addAction("👁 " + self.L("Badी झलक (Space)", "Quick-look (Space)"),
                            lambda: self._quick_look(path))
             if path.lower().endswith(self._IMPORTABLE_EXTS):
