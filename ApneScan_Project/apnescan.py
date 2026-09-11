@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "357"
+VERSION = "358"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11628,21 +11628,25 @@ class ScannerWindow(QtWidgets.QMainWindow):
             def _arw(col):
                 return (" ▼" if sdesc else " ▲") if col == scol else ""
 
-            h = ['<table width="100%" cellspacing="0" cellpadding="1" '
+            # (v358) EKDAM SAAF: number bada (9.5px), row lambi (4px vertical
+            # padding = zyada jagah), gehra contrast, aur har row ka confusing
+            # ▲/▼ arrow HATA diya (saaf look). Sidebar sirf ~168px chaudi hai —
+            # isliye label/header 8px par hi rakhe, warna daayan column kat jaata.
+            h = ['<table width="100%" cellspacing="0" cellpadding="0" '
                  'style="font-size:8px;">']
             # ⑥ heading + RANK badge
             rank = rawv("rank")
             rankhtml = ""
             if rank > 0:
                 rankhtml = ('&nbsp;<span style="background:#F59E0B;color:#FFFFFF;'
-                            'font-size:7.5px;padding:0px 4px;">🏆 %s #%d</span>'
+                            'font-size:8px;padding:1px 5px;">🏆 %s #%d</span>'
                             % (L("आप", "You"), rank))
-            h.append('<tr><td colspan="4" style="padding:0px 2px 1px;">'
-                     '<b style="color:#4338CA;font-size:9.5px;">🌍 %s</b>%s</td></tr>'
+            h.append('<tr><td colspan="4" style="padding:1px 2px 3px;">'
+                     '<b style="color:#4338CA;font-size:11.5px;">🌍 %s</b>%s</td></tr>'
                      % (L("Duniya", "World"), rankhtml))
-            # ⑤ summary line
-            h.append('<tr><td colspan="4" style="padding:0px 2px 2px;color:#475569;'
-                     'font-size:7.5px;white-space:nowrap;">%s <b>%s</b> · %s <b>%s</b> · '
+            # ⑤ summary line (wrap ho sakti hai -> chaudai force nahi karti)
+            h.append('<tr><td colspan="4" style="padding:0px 2px 4px;color:#475569;'
+                     'font-size:8.5px;">%s <b>%s</b> · %s <b>%s</b> · '
                      '<b>%s</b> PDF</td></tr>'
                      % (L("scan", "scan"), short(rawv("total")),
                         L("आज", "today"), short(rawv("today")), short(rawv("pdfs"))))
@@ -11652,16 +11656,16 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 bg = "#4F46E5" if on else "#EEF2FF"
                 fg = "#FFFFFF" if on else "#4338CA"
                 return ('<a href="wper:%s" style="text-decoration:none;">'
-                        '<span style="background:%s;color:%s;font-size:7.5px;'
-                        'padding:1px 5px;">%s</span></a>&nbsp;' % (pk, bg, fg, txt))
-            h.append('<tr><td colspan="4" style="padding:0px 2px 3px;">'
+                        '<span style="background:%s;color:%s;font-size:8.5px;'
+                        'padding:2px 6px;">%s</span></a>&nbsp;' % (pk, bg, fg, txt))
+            h.append('<tr><td colspan="4" style="padding:1px 2px 5px;">'
                      + _chip("today", L("आज", "Today")) + _chip("week", L("हफ्ता", "Week"))
                      + _chip("month", L("महीना", "Month")) + _chip("all", L("सब", "All"))
                      + '</td></tr>')
             # column headers (clickable)
             def _hcell(col, text, align):
                 return ('<td align="%s" bgcolor="#4F46E5" '
-                        'style="color:#FFFFFF;font-size:7.5px;padding:2px 3px;'
+                        'style="color:#FFFFFF;font-size:8px;padding:4px 2px;'
                         'white-space:nowrap;">'
                         '<a href="wsort:%s" style="color:#FFFFFF;text-decoration:none;">'
                         '<b>%s%s</b></a></td>' % (align, col, text, _arw(col)))
@@ -11673,30 +11677,23 @@ class ScannerWindow(QtWidgets.QMainWindow):
                      + '</tr>')
             for i, m in enumerate(rows):
                 lab, col = m[0], m[1]
-                bg = "#F1F3FC" if (i % 2 == 0) else "#FFFFFF"
+                bg = "#EDF0FB" if (i % 2 == 0) else "#FFFFFF"
                 yv = you(m)
-                # ③ trend (AAP: is period vs pichhla same-length period)
-                tr = ""
-                if days:
-                    cur = yv; prev = self._my_range(m[4], days, days)
-                    if cur > prev:
-                        tr = ' <span style="color:#16A34A;">▲</span>'
-                    elif cur < prev:
-                        tr = ' <span style="color:#DC2626;">▼</span>'
                 _wv = wtot(m); _td = wtoday(m)         # (v354) int ya None
                 wv_s = short(_wv) if _wv is not None else "—"
                 td_s = short(_td) if _td is not None else "—"
+                # bada number (9.5px bold), lambi row (4px padding), saaf rang
                 h.append(
                     '<tr>'
-                    '<td bgcolor="%s" style="color:#374151;padding:2px 3px;white-space:nowrap;">'
-                    '<span style="color:%s;font-size:9px;">&#9679;</span>&nbsp;%s</td>'
-                    '<td bgcolor="%s" align="right" style="padding:2px 3px;white-space:nowrap;">'
-                    '<b style="color:#4F46E5;">%s</b>%s</td>'
-                    '<td bgcolor="%s" align="right" style="padding:2px 3px;white-space:nowrap;">'
-                    '<b style="color:#111827;">%s</b></td>'
-                    '<td bgcolor="%s" align="right" style="padding:2px 3px;white-space:nowrap;">'
-                    '<b style="color:#0D9488;">%s</b></td>'
-                    '</tr>' % (bg, col, lab, bg, short(yv), tr, bg, wv_s, bg, td_s))
+                    '<td bgcolor="%s" style="color:#1F2937;font-size:8px;padding:4px 2px;white-space:nowrap;">'
+                    '<span style="color:%s;font-size:10px;">&#9679;</span>&nbsp;%s</td>'
+                    '<td bgcolor="%s" align="right" style="padding:4px 2px;white-space:nowrap;">'
+                    '<b style="color:#4F46E5;font-size:9.5px;">%s</b></td>'
+                    '<td bgcolor="%s" align="right" style="padding:4px 2px;white-space:nowrap;">'
+                    '<b style="color:#111827;font-size:9.5px;">%s</b></td>'
+                    '<td bgcolor="%s" align="right" style="padding:4px 2px;white-space:nowrap;">'
+                    '<b style="color:#0D9488;font-size:9.5px;">%s</b></td>'
+                    '</tr>' % (bg, col, lab, bg, short(yv), bg, wv_s, bg, td_s))
             h.append('</table>')
             lbl.setText("".join(h))
         except Exception:
@@ -16887,7 +16884,8 @@ if the toggle is ticked).</p>
             "border-radius:15px;padding:6px 13px;font-size:11px;font-weight:700;}"
             "QToolButton:hover{background:#1D4ED8;}")
         self.btn_files_top.clicked.connect(self._scroll_files_top)
-        self.btn_files_top.hide()
+        self.btn_files_top.hide()   # layout ke baad _update_files_top_btn dikhayega
+        QtCore.QTimer.singleShot(0, self._update_files_top_btn)
         try:
             self.files_tree.verticalScrollBar().valueChanged.connect(self._update_files_top_btn)
             self.files_results.verticalScrollBar().valueChanged.connect(self._update_files_top_btn)
@@ -20310,7 +20308,8 @@ if the toggle is ticked).</p>
         return ft
 
     def _scroll_files_top(self):
-        """(v357) 'Top' button — dikh rahi list ko sabse upar le aao."""
+        """(v357) 'Top' button — dikh rahi list ko sabse upar le aao.
+        (v358) Button hamesha dikhta hai — click ke baad hataate nahi."""
         w = self._files_visible_list()
         if w is not None:
             try:
@@ -20318,9 +20317,6 @@ if the toggle is ticked).</p>
                 w.verticalScrollBar().setValue(0)
             except Exception:
                 pass
-        b = getattr(self, "btn_files_top", None)
-        if b is not None:
-            b.hide()
 
     def _reposition_files_top_btn(self):
         """(v357) 'Top' button ko dikh rahi list ke neeche-daaye kone me rakho."""
@@ -20339,17 +20335,13 @@ if the toggle is ticked).</p>
             pass
 
     def _update_files_top_btn(self, *a):
-        """(v357) List neeche scroll ho to 'Top' button dikhao, upar aate hi chhupa do."""
+        """(v358) 'Top' button HAMESHA dikhao (user request) — jab tak My Files
+        panel/list khula hai. (Pehle sirf scroll par dikhta tha.)"""
         b = getattr(self, "btn_files_top", None)
         w = self._files_visible_list()
         if b is None or w is None:
             return
-        try:
-            sb = w.verticalScrollBar()
-            show = bool(sb.maximum() > 0 and sb.value() > 40)
-        except Exception:
-            show = False
-        if show:
+        if w.isVisible():
             self._reposition_files_top_btn()
             b.show()
             b.raise_()
