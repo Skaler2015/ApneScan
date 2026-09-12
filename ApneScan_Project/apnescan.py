@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "367"
+VERSION = "368"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -11878,7 +11878,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                      % (L("Aaj online", "Today online"), short(_g("activeToday"))))
             feed = w0.get("feed") if isinstance(w0.get("feed"), list) else []
             _lf = []
-            for _it in feed[:3]:
+            for _it in feed[:6]:                    # (v368) 6 dikhao (2 col × 3 row)
                 try:
                     _n = int(_it.get("n") or 0)
                     _cc = str(_it.get("cc") or "").upper()[:2]
@@ -11887,17 +11887,23 @@ class ScannerWindow(QtWidgets.QMainWindow):
                     continue
                 if _n <= 0:
                     continue
-                _fl = self._flag_img(_cc, 14, 10) if _cc else "🌍"
-                _lf.append('%s <b>%d</b> %s <span style="color:#94A3B8;">· %s</span>'
-                           % (_fl, _n, L("pages", "pages"), self._ago(_ts)))
+                _fl = self._flag_img(_cc, 13, 9) if _cc else "🌍"
+                # compact (2 column me fit): ● flag N · time  ("pages" word chhoda)
+                _lf.append('<span style="color:#16A34A;">&#9679;</span> %s <b>%d</b> '
+                           '<span style="color:#94A3B8;">· %s</span>' % (_fl, _n, self._ago(_ts)))
             if _lf:
                 h.append('<tr><td colspan="4" style="padding:2px 3px 1px;font-size:8px;'
                          'color:#B45309;font-weight:700;">⚡ %s</td></tr>'
                          % L("Abhi duniya me", "Live now"))
-                for _line in _lf:
-                    h.append('<tr><td colspan="4" style="padding:0px 3px;font-size:8px;'
-                             'color:#334155;white-space:nowrap;">'
-                             '<span style="color:#16A34A;">&#9679;</span> %s</td></tr>' % _line)
+                for _i2 in range(0, len(_lf), 2):     # 2 items per row
+                    _left = _lf[_i2]
+                    _right = _lf[_i2 + 1] if (_i2 + 1) < len(_lf) else "&nbsp;"
+                    h.append('<tr>'
+                             '<td colspan="2" style="padding:0px 3px;font-size:8px;'
+                             'color:#334155;white-space:nowrap;">%s</td>'
+                             '<td colspan="2" style="padding:0px 3px;font-size:8px;'
+                             'color:#334155;white-space:nowrap;">%s</td></tr>'
+                             % (_left, _right))
             h.append('</table>')
             lbl.setText("".join(h))
         except Exception:

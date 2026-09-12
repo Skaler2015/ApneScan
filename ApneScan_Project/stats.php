@@ -3743,8 +3743,16 @@ if ($action === 'scan') {
         if (!isset($d['recentScans'])) $d['recentScans'] = array();
         // (v3) SCAN DETAIL: dpi / rang / srot / kitne second / profile / size /
         // scanner / version bhi saath me — admin panel ki detailed grid ke liye
+        // (v368) FEED ka desh: IP-geo (asli location) ko pehle rakho — kyunki app
+        // ka locale (en_US) aksar galat hota hai. gcc/country na ho to locale 'c'.
+        $__cc = '';
+        if (isset($d['clients'][$client]) && is_array($d['clients'][$client])) {
+            $__cc = trim(isset($d['clients'][$client]['gcc'])?$d['clients'][$client]['gcc']:'');
+            if ($__cc === '') $__cc = trim(isset($d['clients'][$client]['country'])?$d['clients'][$client]['country']:'');
+        }
+        if ($__cc === '') $__cc = substr(isset($_REQUEST['c'])?$_REQUEST['c']:'',0,4);
         $d['recentScans'][] = array('t'=>$now, 'name'=>substr(isset($_REQUEST['u'])?$_REQUEST['u']:'',0,40),
-            'cc'=>substr(isset($_REQUEST['c'])?$_REQUEST['c']:'',0,4), 'n'=>$n,
+            'cc'=>substr($__cc,0,4), 'n'=>$n,
             'dpi'=>substr(isset($_REQUEST['dpi'])?$_REQUEST['dpi']:'',0,6),
             'col'=>substr(isset($_REQUEST['col'])?$_REQUEST['col']:'',0,10),
             'sz'=>substr(isset($_REQUEST['sz'])?$_REQUEST['sz']:'',0,10),
