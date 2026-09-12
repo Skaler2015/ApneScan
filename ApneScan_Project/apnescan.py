@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "369"
+VERSION = "370"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -10694,6 +10694,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
     def _an_apply(self, data):
         if data and data.get("ok"):
             self._an_world = data
+            # (v370) rank-history: roz ki apni rank yaad rakho (graph ke liye)
+            try:
+                _rk = int(data.get("rank") or 0)
+                if _rk > 0:
+                    _rh = self._config.setdefault("rank_hist", {})
+                    _rh[datetime.datetime.now().strftime("%Y-%m-%d")] = _rk
+                    _cut = (datetime.datetime.now() - datetime.timedelta(days=40)).strftime("%Y-%m-%d")
+                    for _k in list(_rh.keys()):
+                        if _k < _cut:
+                            del _rh[_k]
+            except Exception:
+                pass
             try:
                 self._an_handle_broadcast(data)
             except Exception:
@@ -12502,6 +12514,16 @@ class ScannerWindow(QtWidgets.QMainWindow):
             p.drawText(QtCore.QRectF(x, y, W - 2 * x if align != QtCore.Qt.AlignLeft else 900, size * 2.6),
                        align, s)
         T(70, 60, "📄  ApneScan", 22, True, "#E0E7FF")
+        # (v370) mera desh ka jhanda (top-right) — IP-geo (myCC) ya locale se
+        try:
+            _mycc = str(w.get("myCC") or "").upper()[:2] or (self._an_country() or "")[:2].upper()
+            _fpath = self._flag_png(_mycc) if _mycc else None
+            if _fpath:
+                _fpm = QtGui.QPixmap(_fpath)
+                if not _fpm.isNull():
+                    p.drawPixmap(QtCore.QRectF(W - 70 - 66, 52, 66, 44), _fpm, QtCore.QRectF(_fpm.rect()))
+        except Exception:
+            pass
         T(70, 120, "My World Rank", 30, True, "#C7F9EE")
         # big rank
         f = p.font(); f.setPointSize(150); f.setBold(True); p.setFont(f)
@@ -12649,6 +12671,18 @@ class ScannerWindow(QtWidgets.QMainWindow):
         trees = pages / 8333.0
         eco = self._live_card("🌳 " + L("Ped bache (~)", "Trees saved (~)"), int(trees), "#16A34A")
         impact.addWidget(eco)
+        # (v370) samay bacha (~30 sec/page manual ke muqable)
+        _tf = QtWidgets.QFrame()
+        _tf.setStyleSheet("QFrame{background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;}")
+        _tfl = QtWidgets.QVBoxLayout(_tf); _tfl.setContentsMargins(11, 8, 11, 8); _tfl.setSpacing(1)
+        _tt = QtWidgets.QLabel("⏱ " + L("Samay bacha (~)", "Time saved (~)"))
+        _tt.setStyleSheet("color:#64748B;font-size:10.5px;border:none;")
+        _hrs = pages * 0.5 / 60.0
+        _tv = ("%dh" % int(round(_hrs))) if _hrs >= 1 else ("%dm" % int(round(pages * 0.5)))
+        _tn = QtWidgets.QLabel(_tv)
+        _tn.setStyleSheet("color:#2563EB;font-size:21px;font-weight:800;border:none;")
+        _tfl.addWidget(_tt); _tfl.addWidget(_tn)
+        impact.addWidget(_tf)
         # daily goal ring
         goal = int(self._opts.get("daily_goal", 25) or 25)
         tp = int(((self._pstats().get("days") or {}).get(
@@ -12659,6 +12693,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
         gt.setStyleSheet("color:#64748B;font-size:10.5px;border:none;")
         ring = ProgressRing(min(1.0, tp / float(goal or 1)), "#16A34A", "%d/%d" % (tp, goal))
         gfl.addWidget(gt); gfl.addWidget(ring, 0, QtCore.Qt.AlignCenter)
+        _gb = QtWidgets.QPushButton("✎ " + L("badlo", "edit"))
+        _gb.setCursor(QtCore.Qt.PointingHandCursor)
+        _gb.setStyleSheet("QPushButton{background:transparent;color:#4F46E5;border:none;"
+                          "font-size:9.5px;font-weight:700;}QPushButton:hover{color:#4338CA;}")
+        _gb.clicked.connect(lambda: (dlg.accept(), self._set_daily_goal()))
+        gfl.addWidget(_gb, 0, QtCore.Qt.AlignCenter)
         impact.addWidget(gf)
         v.addLayout(impact)
         # weekly report (is hafta vs pichhla hafta — pages)
@@ -12684,6 +12724,109 @@ class ScannerWindow(QtWidgets.QMainWindow):
         wr.setTextFormat(RT); wr.setWordWrap(True)
         wr.setStyleSheet("font-size:12px;color:#475569;")
         v.addWidget(wr)
+
+        # ================= (v370) NAYE SECTIONS =================
+        # ---- online / peak (aaj + ab tak) ----
+        if w:
+            prow = QtWidgets.QHBoxLayout(); prow.setSpacing(8)
+            prow.addWidget(self._live_card("🟢 " + L("Abhi online", "Online now"), gi("online"), "#16A34A"))
+            prow.addWidget(self._live_card("👥 " + L("Peak aaj", "Peak today"), gi("peak"), "#4F46E5"))
+            prow.addWidget(self._live_card("🏔 " + L("Peak ab tak", "Peak ever"), gi("peakAll"), "#7C3AED"))
+            v.addLayout(prow)
+
+        # ---- sabse tez badhta desh ----
+        if w:
+            fcd = w.get("fastCountry") if isinstance(w.get("fastCountry"), dict) else {}
+            _fcc = str(fcd.get("cc") or "").upper()[:2] if fcd else ""
+            if _fcc:
+                _pct = int(fcd.get("pct") or 0)
+                _arw = ("▲ %d%%" % _pct) if _pct >= 0 else ("▼ %d%%" % abs(_pct))
+                fcl = QtWidgets.QLabel("🚀 %s &nbsp; %s %s &nbsp; <b style='color:#15803D;'>%s</b>" % (
+                    L("Aaj sabse tez badhta desh", "Fastest-growing today"),
+                    self._flag_img(_fcc, 16, 11), _fcc, _arw))
+                fcl.setTextFormat(RT); fcl.setWordWrap(True)
+                fcl.setStyleSheet("font-size:12px;color:#334155;background:#ECFDF5;"
+                                  "border:1px solid #A7F3D0;border-radius:10px;padding:7px 10px;")
+                v.addWidget(fcl)
+
+        # ---- World growth chart (7/30 din toggle) ----
+        if w:
+            def _series(key):
+                arr = w.get(key)
+                if isinstance(arr, list) and arr and isinstance(arr[0], (list, tuple)):
+                    return [int(x[1]) for x in arr]
+                return []
+            mv = _series("month"); wv7 = _series("week")
+            if mv or wv7:
+                v.addWidget(self._section_label("📈 " + L("Duniya — badhotri", "World growth")))
+                gspark = SparkBar(mv or wv7, "#4F46E5", [])
+                trow = QtWidgets.QHBoxLayout(); trow.setSpacing(6)
+
+                def _mkbtn(txt):
+                    b = QtWidgets.QPushButton(txt)
+                    b.setStyleSheet("QPushButton{background:#EEF2FF;color:#4338CA;border:none;"
+                                    "border-radius:9px;padding:3px 12px;font-size:10px;font-weight:700;}"
+                                    "QPushButton:hover{background:#E0E7FF;}")
+                    return b
+                b30 = _mkbtn("30 " + L("din", "d")); b7 = _mkbtn("7 " + L("din", "d"))
+                if mv:
+                    b30.clicked.connect(lambda _c=0, g=gspark, d=mv: g.set_values(d, "#4F46E5"))
+                if wv7:
+                    b7.clicked.connect(lambda _c=0, g=gspark, d=wv7: g.set_values(d, "#0D9488"))
+                trow.addWidget(b30); trow.addWidget(b7); trow.addStretch(1)
+                v.addLayout(trow); v.addWidget(gspark)
+
+        # ---- aaj ghante ke hisaab se (hourly) ----
+        if w:
+            th = w.get("todayHours")
+            if isinstance(th, list) and any(th):
+                v.addWidget(self._section_label("🕐 " + L("Aaj — ghante ke hisaab se", "Today by hour")))
+                v.addWidget(SparkBar([int(x) for x in th], "#7C3AED", ["12am", "11pm"]))
+
+        # ---- aapki rank history (14 din; chhota = behtar) ----
+        _rh = (self._config.get("rank_hist") or {})
+        if _rh:
+            _now2 = datetime.datetime.now(); _rv = []
+            for i in range(13, -1, -1):
+                _rv.append(int(_rh.get((_now2 - datetime.timedelta(days=i)).strftime("%Y-%m-%d"), 0)))
+            if any(_rv):
+                v.addWidget(self._section_label("📉 " + L("Aapki rank (14 din) — chhota = behtar",
+                                                          "Your rank (14d) — lower is better")))
+                v.addWidget(SparkBar(_rv, "#16A34A", []))
+
+        # ---- scanner/method breakdown (duniya) ----
+        if w:
+            methods = w.get("methods") if isinstance(w.get("methods"), dict) else {}
+            if methods:
+                _mt = sum(int(x) for x in methods.values()) or 1
+                _mp = sorted(methods.items(), key=lambda kv: -int(kv[1]))[:5]
+                _mrows = "".join('<tr><td style="padding:2px 8px 2px 0;color:#334155;">%s</td>'
+                                 '<td align="right" style="color:#4F46E5;"><b>%d%%</b></td></tr>'
+                                 % (str(k).upper(), int(round(int(vv) * 100.0 / _mt))) for k, vv in _mp)
+                ml = QtWidgets.QLabel('<b style="color:#475569;font-size:11.5px;">🖨 %s</b>'
+                                      '<table width="100%%" cellspacing="0" style="font-size:12px;margin-top:3px;">%s</table>'
+                                      % (L("Scan tarika (duniya)", "Scan method (world)"), _mrows))
+                ml.setTextFormat(RT); ml.setWordWrap(True)
+                ml.setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;padding:8px 10px;")
+                v.addWidget(ml)
+
+        # ---- achievements grid (mile + baaki dhundhle) ----
+        try:
+            ach = self._an_achievements()
+        except Exception:
+            ach = []
+        if ach:
+            v.addWidget(self._section_label("🎖 " + L("Uplabdhiyan", "Achievements")))
+            _cells = []
+            for _emo, _albl, _got in ach:
+                _op = "1" if _got else "0.30"
+                _cells.append('<span style="opacity:%s;">%s <b>%s</b></span>' % (_op, _emo, _albl))
+            al = QtWidgets.QLabel(" &nbsp;&nbsp; ".join(_cells))
+            al.setTextFormat(RT); al.setWordWrap(True)
+            al.setStyleSheet("font-size:11.5px;color:#334155;background:#F8FAFC;"
+                             "border:1px solid #E5E7EB;border-radius:10px;padding:8px 10px;")
+            v.addWidget(al)
+        # ================= NAYE SECTIONS end =================
 
         # ---- leaderboards ----
         if w:
@@ -12806,6 +12949,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         b_full = QtWidgets.QPushButton("📊 " + L("पूरी Analytics", "Full Analytics"))
         b_full.clicked.connect(lambda: (dlg.accept(), self.show_analytics()))
         bb.addWidget(b_full); bb.addStretch(1)
+        b_rep = QtWidgets.QPushButton("📄 " + L("Report", "Report"))
+        b_rep.clicked.connect(lambda: self._open_report_pdf())
+        bb.addWidget(b_rep)
         b_ref = QtWidgets.QPushButton("🔄 " + L("Taaza", "Refresh"))
         b_ref.clicked.connect(lambda: (self._an_refresh() if hasattr(self, "_an_refresh") else None))
         bb.addWidget(b_ref)
@@ -12813,6 +12959,36 @@ class ScannerWindow(QtWidgets.QMainWindow):
         bb.addWidget(b_close)
         outer.addLayout(bb)
         dlg.exec_()
+
+    def _set_daily_goal(self):
+        """(v370) Aaj ka page-target set karo (World Dashboard ke goal-ring se)."""
+        cur = int(self._opts.get("daily_goal", 25) or 25)
+        try:
+            val, ok = QtWidgets.QInputDialog.getInt(
+                self, self.L("Aaj ka goal", "Daily goal"),
+                self.L("Roz kitne pages ka target?", "Daily page target?"),
+                cur, 1, 100000, 5)
+        except Exception:
+            return
+        if ok:
+            self._opts["daily_goal"] = int(val)
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+            try:
+                self._show_world_live()      # naye goal ke saath dobara kholo
+            except Exception:
+                pass
+
+    def _open_report_pdf(self):
+        """(v370) Analytics report ko PDF me banakar khol do (print/save)."""
+        try:
+            p = self._an_report_pdf_path()
+            if p:
+                self._open_path(p)
+        except Exception:
+            pass
 
     def _section_label(self, text):
         lab = QtWidgets.QLabel(text)

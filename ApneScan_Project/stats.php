@@ -343,6 +343,27 @@ function compute_stats($d, $client) {
                             'cc'=>substr(isset($r['cc'])?$r['cc']:'', 0, 4));
         }
     }
+    // (v370) MERA desh (rank-card ke jhande ke liye) — IP-geo se
+    $myCC = '';
+    if ($client!=='' && isset($d['clients'][$client]) && is_array($d['clients'][$client])) {
+        $myCC = strtoupper(trim(isset($d['clients'][$client]['gcc'])?$d['clients'][$client]['gcc']:''));
+        if ($myCC==='') $myCC = strtoupper(trim(isset($d['clients'][$client]['country'])?$d['clients'][$client]['country']:''));
+    }
+    // (v370) AAJ top desh + SABSE TEZ badhta desh (kal se growth%) — countriesDaily se
+    $topCountriesToday = array(); $fastCountry = array();
+    $__cdT = (isset($d['countriesDaily'][$today])&&is_array($d['countriesDaily'][$today]))?$d['countriesDaily'][$today]:array();
+    if ($__cdT) {
+        $__cdT2 = $__cdT; arsort($__cdT2); $topCountriesToday = array_slice($__cdT2, 0, 8, true);
+        $__ykey = date('Y-m-d', $now-86400);
+        $__cdY = (isset($d['countriesDaily'][$__ykey])&&is_array($d['countriesDaily'][$__ykey]))?$d['countriesDaily'][$__ykey]:array();
+        $__bestPct = -1;
+        foreach ($__cdT as $__cc2=>$__tv) {
+            $__tv = intval($__tv); if ($__tv < 3) continue;      // shor kam
+            $__yv = intval(isset($__cdY[$__cc2])?$__cdY[$__cc2]:0);
+            $__pct = ($__yv>0) ? intval(round(($__tv-$__yv)*100.0/$__yv)) : 100;
+            if ($__pct > $__bestPct) { $__bestPct=$__pct; $fastCountry=array('cc'=>$__cc2,'today'=>$__tv,'pct'=>$__pct); }
+        }
+    }
     rsort($scores);
     $rank=1; foreach($scores as $s){ if($s>$mine)$rank++; }
     $top=array_slice($scores,0,10);
@@ -405,6 +426,8 @@ function compute_stats($d, $client) {
         'frank'=>$frank, 'feed'=>$feed,
         // (v365) aaj active users (last-seen aaj)
         'activeToday'=>$activeToday,
+        // (v370) mera desh + aaj top desh + sabse tez badhta desh
+        'myCC'=>$myCC, 'topCountriesToday'=>$topCountriesToday, 'fastCountry'=>$fastCountry,
         'ok'=>true,'srv'=>'php2','time'=>date('Y-m-d H:i'),'today_key'=>'day_'.$today,
         'fw'=>(isset($d['features'])&&is_array($d['features']))?$d['features']:array(),
         'fwt'=>(isset($d['featDaily'][$today])&&is_array($d['featDaily'][$today]))?$d['featDaily'][$today]:array(),
@@ -3764,6 +3787,15 @@ if ($action === 'scan') {
             'tess'=>(isset($_REQUEST['tess'])?intval($_REQUEST['tess']):-1),
             'v'=>substr(isset($_REQUEST['v'])?$_REQUEST['v']:'',0,8));
         $d['recentScans'] = array_slice($d['recentScans'], -1000);   // cap (spec #8)
+        // (v370) PER-DESH ROZ ke scans — "aaj top desh" + "sabse tez badhta desh"
+        // ke liye. IP-geo desh ($__cc) ka aaj ka count. 35 din tak rakho.
+        $__ccu = strtoupper(substr(trim($__cc), 0, 4));
+        if ($__ccu !== '') {
+            if (!isset($d['countriesDaily'])||!is_array($d['countriesDaily'])) $d['countriesDaily']=array();
+            if (!isset($d['countriesDaily'][$today])) $d['countriesDaily'][$today]=array();
+            $d['countriesDaily'][$today][$__ccu] = intval(isset($d['countriesDaily'][$today][$__ccu])?$d['countriesDaily'][$today][$__ccu]:0) + $n;
+            if (count($d['countriesDaily'])>35){ ksort($d['countriesDaily']); $d['countriesDaily']=array_slice($d['countriesDaily'],-32,null,true); }
+        }
         update_peak($d, $now, $today);
     }
 } else if ($action === 'ping') {
