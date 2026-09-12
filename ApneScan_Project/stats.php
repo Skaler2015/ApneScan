@@ -307,6 +307,7 @@ function compute_stats($d, $client) {
                 && is_array($d['clients'][$client]['feats']))
              ? $d['clients'][$client]['feats'] : array();
     $frankCnt = array(); foreach ($RANKFEATS as $__f) $frankCnt[$__f] = 1;   // rank 1 se
+    $joinByDay = array();     // (v371) new-users trend ke liye
     foreach ($d['clients'] as $id => $c) {
         if (!empty($c['blocked'])) continue;
         $v =trim(isset($c['version'])?$c['version']:''); if($v!=='')  bump($versions,$v);
@@ -318,6 +319,7 @@ function compute_stats($d, $client) {
         if ($client!=='' && (string)$id===(string)$client) $mine=$sc;
         $fs=intval(isset($c['first'])?$c['first']:0);
         if ($fs && date('Y-m-d',$fs)===$today) $newToday++;
+        if ($fs) { $__jd=date('Y-m-d',$fs); $joinByDay[$__jd]=(isset($joinByDay[$__jd])?$joinByDay[$__jd]:0)+1; }  // (v371)
         // (v365) aaj koi bhi samay active (last-seen aaj) — "Today online"
         $ls=intval(isset($c['last'])?$c['last']:0);
         if ($ls && date('Y-m-d',$ls)===$today) $activeToday++;
@@ -362,6 +364,19 @@ function compute_stats($d, $client) {
             $__yv = intval(isset($__cdY[$__cc2])?$__cdY[$__cc2]:0);
             $__pct = ($__yv>0) ? intval(round(($__tv-$__yv)*100.0/$__yv)) : 100;
             if ($__pct > $__bestPct) { $__bestPct=$__pct; $fastCountry=array('cc'=>$__cc2,'today'=>$__tv,'pct'=>$__pct); }
+        }
+    }
+    // (v371) top scanner models (duniya) — scanners{} se
+    $__sc2 = (isset($d['scanners'])&&is_array($d['scanners']))?$d['scanners']:array();
+    arsort($__sc2); $topScanners = array_slice($__sc2, 0, 6, true);
+    // (v371) 30-din new-users trend
+    $newUsers = array();
+    for ($j=29;$j>=0;$j--){ $k=date('Y-m-d',$now-$j*86400); $newUsers[]=array($k, intval(isset($joinByDay[$k])?$joinByDay[$k]:0)); }
+    // (v371) har metric ka TOP DESH (featCountry se)
+    $featTopCountry = array();
+    if (isset($d['featCountry'])&&is_array($d['featCountry'])) {
+        foreach ($d['featCountry'] as $__ff=>$__mm2) {
+            if (is_array($__mm2)&&$__mm2){ $__t2=$__mm2; arsort($__t2); $__ks=array_keys($__t2); $featTopCountry[$__ff]=$__ks[0]; }
         }
     }
     rsort($scores);
@@ -428,6 +443,8 @@ function compute_stats($d, $client) {
         'activeToday'=>$activeToday,
         // (v370) mera desh + aaj top desh + sabse tez badhta desh
         'myCC'=>$myCC, 'topCountriesToday'=>$topCountriesToday, 'fastCountry'=>$fastCountry,
+        // (v371) top scanners + new-users trend + har metric ka top desh
+        'topScanners'=>$topScanners, 'newUsers'=>$newUsers, 'featTopCountry'=>$featTopCountry,
         'ok'=>true,'srv'=>'php2','time'=>date('Y-m-d H:i'),'today_key'=>'day_'.$today,
         'fw'=>(isset($d['features'])&&is_array($d['features']))?$d['features']:array(),
         'fwt'=>(isset($d['featDaily'][$today])&&is_array($d['featDaily'][$today]))?$d['featDaily'][$today]:array(),
@@ -3812,6 +3829,18 @@ if ($action === 'scan') {
         if ($client !== '' && !in_array($client, $d['featUsers'][$feat])) {
             $d['featUsers'][$feat][] = $client;
             $d['featUsers'][$feat] = array_slice($d['featUsers'][$feat], -5000);
+        }
+        // (v371) HAR-METRIC ka TOP DESH — feature × desh (IP-geo) ki ginti
+        $__fcc = '';
+        if (isset($d['clients'][$client])) {
+            $__fcc = strtoupper(trim(isset($d['clients'][$client]['gcc'])?$d['clients'][$client]['gcc']:''));
+            if ($__fcc==='') $__fcc = strtoupper(trim(isset($d['clients'][$client]['country'])?$d['clients'][$client]['country']:''));
+        }
+        if ($__fcc !== '') {
+            if(!isset($d['featCountry'])||!is_array($d['featCountry'])) $d['featCountry']=array();
+            if(!isset($d['featCountry'][$feat])||!is_array($d['featCountry'][$feat])) $d['featCountry'][$feat]=array();
+            $d['featCountry'][$feat][$__fcc]=intval(isset($d['featCountry'][$feat][$__fcc])?$d['featCountry'][$feat][$__fcc]:0)+1;
+            if(count($d['featCountry'][$feat])>60){ arsort($d['featCountry'][$feat]); $d['featCountry'][$feat]=array_slice($d['featCountry'][$feat],0,50,true); }
         }
         // per-client feature set (multi-feature analysis)
         if ($client !== '' && isset($d['clients'][$client])) {

@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "370"
+VERSION = "371"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -12405,6 +12405,19 @@ class ScannerWindow(QtWidgets.QMainWindow):
         fl.addWidget(t); fl.addWidget(n)
         return f
 
+    def _live_card_str(self, title, valstr, colour, rich=False):
+        """(v371) _live_card ka variant — value string (jaise '6-7PM','34h')."""
+        f = QtWidgets.QFrame()
+        f.setStyleSheet("QFrame{background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;}")
+        fl = QtWidgets.QVBoxLayout(f); fl.setContentsMargins(11, 8, 11, 8); fl.setSpacing(1)
+        t = QtWidgets.QLabel(title); t.setStyleSheet("color:#64748B;font-size:10.5px;border:none;")
+        n = QtWidgets.QLabel(valstr)
+        if rich:
+            n.setTextFormat(QtCore.Qt.RichText)
+        n.setStyleSheet("color:%s;font-size:19px;font-weight:800;border:none;" % colour)
+        fl.addWidget(t); fl.addWidget(n)
+        return f
+
     def _lead_label(self, title, pairs):
         """(v360) Leaderboard (desh/rajya) — chhoti HTML list."""
         rows = "".join(
@@ -12826,6 +12839,181 @@ class ScannerWindow(QtWidgets.QMainWindow):
             al.setStyleSheet("font-size:11.5px;color:#334155;background:#F8FAFC;"
                              "border:1px solid #E5E7EB;border-radius:10px;padding:8px 10px;")
             v.addWidget(al)
+
+        # ============ (v371) AUR NAYE SECTIONS ============
+        _pd = (self._pstats().get("days") or {})
+        _now3 = datetime.datetime.now()
+
+        def _rng(a, b):
+            s = 0
+            for i in range(a, a + b):
+                k = (_now3 - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+                s += int((_pd.get(k) or {}).get("pages", 0))
+            return s
+
+        v.addWidget(self._section_label("📅 " + L("Aapke pattern", "Your patterns")))
+        # #1 Streak calendar (30 din)
+        _cv = [int((_pd.get((_now3 - datetime.timedelta(days=i)).strftime("%Y-%m-%d")) or {}).get("pages", 0))
+               for i in range(29, -1, -1)]
+        _cmx = max(_cv) or 1
+
+        def _cc_col(x):
+            if x <= 0:
+                return "#E5E7EB"
+            r = x / float(_cmx)
+            return "#15803D" if r > 0.66 else ("#22C55E" if r > 0.33 else "#86EFAC")
+        _crows = ""
+        for _r in range(3):
+            _tds = "".join('<td bgcolor="%s" width="15" height="13"></td>' % _cc_col(_cv[_r * 10 + _cc])
+                           for _cc in range(10))
+            _crows += "<tr>%s</tr>" % _tds
+        _cal = QtWidgets.QLabel('<b style="color:#475569;font-size:11px;">🟩 %s</b>'
+                                '<table cellspacing="3" cellpadding="0" style="margin-top:4px;">%s</table>'
+                                % (L("Streak calendar (30 din)", "Streak calendar (30d)"), _crows))
+        _cal.setTextFormat(RT)
+        _cal.setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;padding:8px 10px;")
+        v.addWidget(_cal)
+        # #2 best hour + #3 day-of-week
+        _h24 = self._an_hours24() if hasattr(self, "_an_hours24") else []
+        _pat = QtWidgets.QHBoxLayout(); _pat.setSpacing(8)
+        if any(_h24):
+            _bh = _h24.index(max(_h24))
+
+            def _hr(hh):
+                ap = "AM" if hh < 12 else "PM"; return "%d%s" % ((hh % 12 or 12), ap)
+            _pat.addWidget(self._live_card_str("⏰ " + L("Aapka best time", "Your peak hour"),
+                                               "%s–%s" % (_hr(_bh), _hr((_bh + 1) % 24)), "#4F46E5"))
+        _dow = self._dow_pages()
+        if any(_dow):
+            _dowf = QtWidgets.QFrame()
+            _dowf.setStyleSheet("QFrame{background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;}")
+            _dl = QtWidgets.QVBoxLayout(_dowf); _dl.setContentsMargins(9, 6, 9, 6); _dl.setSpacing(2)
+            _dt = QtWidgets.QLabel("📆 " + L("Kaunsa din zyada", "Busiest weekday"))
+            _dt.setStyleSheet("color:#64748B;font-size:10px;border:none;")
+            _dl.addWidget(_dt); _dl.addWidget(SparkBar(_dow, "#0D9488", ["Mon", "Sun"]))
+            _pat.addWidget(_dowf, 1)
+        if _pat.count():
+            v.addLayout(_pat)
+        # #4 document types
+        _types = self._pstats().get("types") if isinstance(self._pstats().get("types"), dict) else {}
+        if _types:
+            _tt = sum(int(x) for x in _types.values()) or 1
+            _tp = sorted(_types.items(), key=lambda kv: -int(kv[1]))[:5]
+            _trows = "".join('<tr><td style="padding:2px 8px 2px 0;color:#334155;">%s</td>'
+                             '<td align="right" style="color:#4F46E5;"><b>%d%%</b></td></tr>'
+                             % (str(k)[:16], int(round(int(vv) * 100.0 / _tt))) for k, vv in _tp)
+            _tl2 = QtWidgets.QLabel('<b style="color:#475569;font-size:11px;">🗂 %s</b>'
+                                    '<table width="100%%" cellspacing="0" style="font-size:12px;margin-top:3px;">%s</table>'
+                                    % (L("Document types", "Document types"), _trows))
+            _tl2.setTextFormat(RT); _tl2.setWordWrap(True)
+            _tl2.setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;padding:8px 10px;")
+            v.addWidget(_tl2)
+
+        # ---- Aapki pragati: month / goal-streak / join / next-badge ----
+        v.addWidget(self._section_label("📊 " + L("Aapki pragati", "Your progress")))
+        _prog = QtWidgets.QHBoxLayout(); _prog.setSpacing(8)
+        _tm = _rng(0, 30); _lm = _rng(30, 30)
+        _mpct = int(round((_tm - _lm) * 100.0 / _lm)) if _lm > 0 else (100 if _tm else 0)
+        _marw = ("▲ %d%%" % _mpct) if _mpct >= 0 else ("▼ %d%%" % abs(_mpct))
+        _prog.addWidget(self._live_card_str("📅 " + L("Is mahine", "This month"),
+                                            "%s <span style='font-size:11px;color:%s'>%s</span>"
+                                            % (self._short_num(_tm), ("#16A34A" if _mpct >= 0 else "#DC2626"), _marw),
+                                            "#0D9488", rich=True))
+        _prog.addWidget(self._live_card("🎯 " + L("Goal-streak (din)", "Goal streak (d)"),
+                                        self._goal_hit_streak(), "#EA580C"))
+        _since, _act = self._days_since_join()
+        _prog.addWidget(self._live_card("🎂 " + L("Din saath", "Days aboard"), _since, "#7C3AED"))
+        v.addLayout(_prog)
+        # #8 next badge progress
+        _scans = self._my_sum("scan", None)
+        _bemo, _bname, _bnx = self._badge_tier(_scans)
+        if _bnx:
+            _nb = next(((e, nm) for thr, e, nm in self._BADGES if thr == _bnx), ("🏆", ""))
+            _bp = int(round(_scans * 100.0 / _bnx)) if _bnx else 0
+            _blab = QtWidgets.QLabel("🏅 %s %s → %s %s &nbsp; (%s <b>%s</b> %s)"
+                                     % (_bemo, _bname, _nb[0], _nb[1], L("aur", "need"),
+                                        "{:,}".format(max(0, _bnx - int(_scans))), L("scans", "scans")))
+            _blab.setTextFormat(RT); _blab.setStyleSheet("font-size:11.5px;color:#475569;")
+            v.addWidget(_blab)
+            _pbn = QtWidgets.QProgressBar(); _pbn.setRange(0, 100); _pbn.setValue(max(0, min(100, _bp)))
+            _pbn.setTextVisible(False); _pbn.setFixedHeight(12)
+            _pbn.setStyleSheet("QProgressBar{background:#E5E7EB;border:none;border-radius:6px;}"
+                               "QProgressBar::chunk{background:#F59E0B;border-radius:6px;}")
+            v.addWidget(_pbn)
+
+        # ---- World gehrai: version / new-users / country-per-metric / scanners ----
+        if w:
+            v.addWidget(self._section_label("🌍 " + L("World — aur gehrai", "World — deeper")))
+            # #9 version adoption
+            _vers = w.get("versions") if isinstance(w.get("versions"), dict) else {}
+            _nums = [int(k) for k in _vers.keys() if str(k).isdigit()]
+            if _nums:
+                _latest = max(_nums); _tv = sum(int(x) for x in _vers.values()) or 1
+                _onl = sum(int(vv) for k, vv in _vers.items() if str(k).isdigit() and int(k) >= _latest)
+                _vp = int(round(_onl * 100.0 / _tv))
+                _vlab = QtWidgets.QLabel("🆕 %s <b>v%d</b> — <b>%d%%</b> %s"
+                                         % (L("Latest", "Latest"), _latest, _vp, L("users update par", "users updated")))
+                _vlab.setTextFormat(RT); _vlab.setStyleSheet("font-size:11.5px;color:#475569;")
+                v.addWidget(_vlab)
+                _pbv = QtWidgets.QProgressBar(); _pbv.setRange(0, 100); _pbv.setValue(_vp)
+                _pbv.setTextVisible(False); _pbv.setFixedHeight(12)
+                _pbv.setStyleSheet("QProgressBar{background:#E5E7EB;border:none;border-radius:6px;}"
+                                   "QProgressBar::chunk{background:#4F46E5;border-radius:6px;}")
+                v.addWidget(_pbv)
+            # #10 new-users trend
+            _nu = w.get("newUsers")
+            if isinstance(_nu, list) and _nu and isinstance(_nu[0], (list, tuple)):
+                _nuv = [int(x[1]) for x in _nu]
+                if any(_nuv):
+                    v.addWidget(self._section_label("👥 " + L("Naye users (30 din)", "New users (30d)")))
+                    v.addWidget(SparkBar(_nuv, "#EA580C", []))
+            # #11 country per metric
+            _ftc = w.get("featTopCountry") if isinstance(w.get("featTopCountry"), dict) else {}
+            if _ftc:
+                _cmrows = ""
+                for _ff, _cc2 in list(_ftc.items())[:8]:
+                    _lb = self._CURATED_META.get(_ff, (None,))[0] or self._metric_style(_ff)[0]
+                    _cc2u = str(_cc2).upper()[:2]
+                    _cmrows += ('<tr><td style="padding:2px 8px 2px 0;color:#334155;">%s</td>'
+                                '<td align="right">%s <b style="color:#4F46E5;">%s</b></td></tr>'
+                                % (_lb, self._flag_img(_cc2u, 14, 10), _cc2u))
+                _cml = QtWidgets.QLabel('<b style="color:#475569;font-size:11px;">🌐 %s</b>'
+                                        '<table width="100%%" cellspacing="0" style="font-size:12px;margin-top:3px;">%s</table>'
+                                        % (L("Har kaam ka top desh", "Top country per action"), _cmrows))
+                _cml.setTextFormat(RT); _cml.setWordWrap(True)
+                _cml.setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;padding:8px 10px;")
+                v.addWidget(_cml)
+            # #12 top scanners
+            _tsc = w.get("topScanners") if isinstance(w.get("topScanners"), dict) else {}
+            if _tsc:
+                _st = sum(int(x) for x in _tsc.values()) or 1
+                _srows = "".join('<tr><td style="padding:2px 8px 2px 0;color:#334155;">%s</td>'
+                                 '<td align="right" style="color:#4F46E5;"><b>%d%%</b></td></tr>'
+                                 % (str(k)[:22], int(round(int(vv) * 100.0 / _st))) for k, vv in list(_tsc.items())[:6])
+                _sl = QtWidgets.QLabel('<b style="color:#475569;font-size:11px;">🖨 %s</b>'
+                                       '<table width="100%%" cellspacing="0" style="font-size:12px;margin-top:3px;">%s</table>'
+                                       % (L("Top scanner (duniya)", "Top scanners (world)"), _srows))
+                _sl.setTextFormat(RT); _sl.setWordWrap(True)
+                _sl.setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;padding:8px 10px;")
+                v.addWidget(_sl)
+
+        # #14 Yearly Wrapped card
+        _yr = str(_now3.year)
+        _yp = sum(int((dd or {}).get("pages", 0)) for ds, dd in _pd.items() if str(ds).startswith(_yr))
+        _ypdf = sum(int((dd or {}).get("pdfs", 0)) for ds, dd in _pd.items() if str(ds).startswith(_yr))
+        if _yp > 0:
+            _wf = QtWidgets.QFrame()
+            _wf.setStyleSheet("QFrame{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+                              "stop:0 #7C3AED,stop:1 #DB2777);border-radius:14px;}")
+            _wl3 = QtWidgets.QVBoxLayout(_wf); _wl3.setContentsMargins(16, 12, 16, 12); _wl3.setSpacing(2)
+            _w1 = QtWidgets.QLabel("🎊 %s %s" % (_yr, L("Wrapped", "Wrapped")))
+            _w1.setStyleSheet("color:#F5D0FE;font-size:12px;font-weight:700;border:none;background:transparent;")
+            _w2 = QtWidgets.QLabel("%s pages · %s PDF" % (self._short_num(_yp), self._short_num(_ypdf)))
+            _w2.setStyleSheet("color:#FFFFFF;font-size:24px;font-weight:800;border:none;background:transparent;")
+            _w3 = QtWidgets.QLabel(L("is saal aapka safar 🚀", "your year so far 🚀"))
+            _w3.setStyleSheet("color:#FBCFE8;font-size:11px;border:none;background:transparent;")
+            _wl3.addWidget(_w1); _wl3.addWidget(_w2); _wl3.addWidget(_w3)
+            v.addWidget(_wf)
         # ================= NAYE SECTIONS end =================
 
         # ---- leaderboards ----
@@ -12949,6 +13137,14 @@ class ScannerWindow(QtWidgets.QMainWindow):
         b_full = QtWidgets.QPushButton("📊 " + L("पूरी Analytics", "Full Analytics"))
         b_full.clicked.connect(lambda: (dlg.accept(), self.show_analytics()))
         bb.addWidget(b_full); bb.addStretch(1)
+        b_img = QtWidgets.QPushButton("📸")
+        b_img.setToolTip(L("Poora dashboard image banao (WhatsApp)", "Share dashboard as image"))
+        b_img.clicked.connect(lambda: self._share_dashboard_image(body))
+        bb.addWidget(b_img)
+        b_csv = QtWidgets.QPushButton("📥")
+        b_csv.setToolTip(L("Apne aankde CSV me download", "Export your stats as CSV"))
+        b_csv.clicked.connect(lambda: self._export_stats_csv())
+        bb.addWidget(b_csv)
         b_rep = QtWidgets.QPushButton("📄 " + L("Report", "Report"))
         b_rep.clicked.connect(lambda: self._open_report_pdf())
         bb.addWidget(b_rep)
@@ -12987,6 +13183,82 @@ class ScannerWindow(QtWidgets.QMainWindow):
             p = self._an_report_pdf_path()
             if p:
                 self._open_path(p)
+        except Exception:
+            pass
+
+    # ---- (v371) dashboard ke naye helper ----
+    def _dow_pages(self):
+        """Har weekday (Mon..Sun) ke kul pages (all-time)."""
+        wd = [0] * 7
+        for ds, dd in (self._pstats().get("days") or {}).items():
+            try:
+                w = datetime.datetime.strptime(ds, "%Y-%m-%d").weekday()
+                wd[w] += int((dd or {}).get("pages", 0))
+            except Exception:
+                pass
+        return wd
+
+    def _goal_hit_streak(self):
+        """Lagataar kitne din apna daily-goal poora kiya (aaj/kal se)."""
+        days = (self._pstats().get("days") or {})
+        goal = int(self._opts.get("daily_goal", 25) or 25)
+
+        def hit(off):
+            k = (datetime.datetime.now() - datetime.timedelta(days=off)).strftime("%Y-%m-%d")
+            return int((days.get(k) or {}).get("pages", 0)) >= goal
+        start = 0 if hit(0) else (1 if hit(1) else None)
+        if start is None:
+            return 0
+        c = 0; i = start
+        while hit(i) and i < 400:
+            c += 1; i += 1
+        return c
+
+    def _days_since_join(self):
+        """(saath-din, active-din)."""
+        fd = self._an_first_day()
+        since = 0
+        if fd:
+            try:
+                d0 = datetime.datetime.strptime(fd, "%Y-%m-%d").date()
+                since = (datetime.date.today() - d0).days + 1
+            except Exception:
+                since = 0
+        active = sum(1 for _ds, _dd in (self._pstats().get("days") or {}).items()
+                     if int((_dd or {}).get("pages", 0)) > 0)
+        return since, active
+
+    def _share_dashboard_image(self, body):
+        """(v371) Poore dashboard ki image banakar WhatsApp/clipboard."""
+        try:
+            pm = body.grab()
+            base = self._tmpdir if os.path.isdir(getattr(self, "_tmpdir", "") or "") \
+                else tempfile.gettempdir()
+            path = os.path.join(base, "ApneScan_dashboard.png")
+            pm.save(path, "PNG")
+            self.share_whatsapp(path)
+        except Exception:
+            pass
+
+    def _export_stats_csv(self):
+        """(v371) Apne roz ke aankde CSV me download."""
+        try:
+            dest, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self, self.L("CSV save karo", "Save CSV"),
+                os.path.join(os.path.expanduser("~"), "ApneScan_stats.csv"),
+                "CSV (*.csv)")
+            if not dest:
+                return
+            import csv as _csv
+            days = (self._pstats().get("days") or {})
+            with open(dest, "w", newline="", encoding="utf-8") as fh:
+                wtr = _csv.writer(fh)
+                wtr.writerow(["date", "pages", "pdfs", "shared", "imports", "prints"])
+                for ds in sorted(days.keys()):
+                    dd = days[ds] or {}
+                    wtr.writerow([ds, dd.get("pages", 0), dd.get("pdfs", 0),
+                                  dd.get("shared", 0), dd.get("imports", 0), dd.get("prints", 0)])
+            self._toast(self.L("✓ CSV save ho gaya", "✓ CSV saved"))
         except Exception:
             pass
 
