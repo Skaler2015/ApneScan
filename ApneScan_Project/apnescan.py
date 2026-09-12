@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "368"
+VERSION = "369"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -18237,7 +18237,10 @@ if the toggle is ticked).</p>
         _edit_btn.clicked.connect(lambda: self._pv_open_image_editor())
         pv.addWidget(_edit_btn)
         spl.addWidget(self.preview_panel)       # pehle parent, phir visibility
-        self.preview_panel.setVisible(bool(self._opts.get("ui_preview", False)))
+        # (v369) Preview panel HAMESHA band se shuru — sirf jab user kisi file/
+        # page par click kare tabhi khule (user request). ui_preview setting ab
+        # sirf "allow" hai; asli visibility selection se tay hoti hai.
+        self.preview_panel.setVisible(False)
         self.list.currentItemChanged.connect(lambda cur, prev: self._update_preview_panel())
         self.pv_scroll.viewport().installEventFilter(self)   # Ctrl+scroll zoom
 
@@ -18962,6 +18965,12 @@ if the toggle is ticked).</p>
             pass
 
     def _tick_scanner_state(self):
+        # (v369) safety-net: preview panel band karo agar kuch selected nahi
+        # (nav badla / My Files band hua par panel khula reh gaya)
+        try:
+            self._sync_preview_panel()
+        except Exception:
+            pass
         # IMPORTANT: do NOT poll the scanner over the network here. This HP scanner
         # allows only one eSCL connection at a time, so a background status poll
         # collides with the real scan and makes it fail with HTTP 503. The indicator
@@ -23686,6 +23695,41 @@ if the toggle is ticked).</p>
             return True
         return ext == ".pdf" and HAS_FITZ
 
+    def _file_preview_active(self):
+        """(v369) Kya abhi My Files se koi file GENUINELY preview me hai? —
+        yaani _pv_file_path set ho AUR My Files (tree/results) DIKH raha ho aur
+        usme koi file selected ho. My Files band -> return False (panel chhupega)."""
+        try:
+            fp = getattr(self, "_pv_file_path", None)
+            if not (fp and os.path.isfile(fp)):
+                return False
+            fr = getattr(self, "files_results", None)
+            if fr is not None and fr.isVisible() and fr.currentItem() is not None:
+                return True
+            ft = getattr(self, "files_tree", None)
+            if ft is not None and ft.isVisible() and ft.currentIndex().isValid():
+                p = self.files_model.filePath(ft.currentIndex())
+                if p and os.path.isfile(p):
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _sync_preview_panel(self):
+        """(v369) Preview panel SIRF tab dikhe jab: (a) thumbnail area me koi page
+        current ho, ya (b) My Files me koi file selected/preview me ho. Warna
+        chhupa do — chahe pehle kisi click se khula reh gaya ho."""
+        try:
+            pp = getattr(self, "preview_panel", None)
+            if pp is None or not pp.isVisible():
+                return
+            has_page = (self.list.count() > 0 and self.list.currentItem() is not None)
+            if has_page or self._file_preview_active():
+                return
+            self._hide_preview_panel()
+        except Exception:
+            pass
+
     def _hide_preview_panel(self):
         """(v352) Preview panel chhupa do (jab dikhane layak kuch na ho)."""
         try:
@@ -25787,10 +25831,15 @@ if the toggle is ticked).</p>
             pass
         it = self.list.currentItem()
         if it is None:
-            self.pv_img.clear(); self.pv_info.setText("")
-            self.pv_title.setText("Document Preview")
-            self.pv_info2.setText(""); self.pv_text.setPlainText("")
-            self._pv_pm = None
+            # (v369) thumbnail area me kuch current nahi. Agar My Files se koi
+            # file preview me hai to use rehne do; warna panel chhupa do.
+            if self._file_preview_active():
+                self.pv_img.clear(); self.pv_info.setText("")
+                self.pv_title.setText("Document Preview")
+                self.pv_info2.setText(""); self.pv_text.setPlainText("")
+                self._pv_pm = None
+            else:
+                self._hide_preview_panel()
             return
         path = it.data(QtCore.Qt.UserRole)
         row = self.list.row(it)
