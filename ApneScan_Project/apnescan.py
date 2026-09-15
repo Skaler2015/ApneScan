@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "371"
+VERSION = "372"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9614,6 +9614,10 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
         if not self._config.get("setup_done"):
             QtCore.QTimer.singleShot(600, self._run_wizard)
+        elif not self._config.get("hide_userguide_popup") and not auto_scan_profile:
+            # Har baar app khulte hi User-Guide popup (jab tak user "dobara na
+            # dikhao" na chune) — dono PDF (Hindi + English) view/download.
+            QtCore.QTimer.singleShot(900, self._show_userguide_popup)
 
         self._apply_simple_mode()
 
@@ -9807,6 +9811,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._ma(ms, "Import settings…", self.import_settings, "हिन्दी: Export की हुई settings फ़ाइल से सब वापस ले आओ।\nEnglish: Import settings from an exported file.")
 
         mh = mb.addMenu(tr("menu_help", self._lang)); mh.setToolTipsVisible(True)
+        self._ma(mh, self.L("📘 यूज़र गाइड (PDF — हिंदी/English)…", "📘 User Guide (PDF — Hindi/English)…"), self._show_userguide_popup, "हिन्दी: सुंदर सचित्र यूज़र गाइड (हिंदी और English) — देखें या डाउनलोड करें।\nEnglish: The illustrated User Guide (Hindi & English) — view or download.")
         self._ma(mh, "📖 Complete Guide (all options)…", self.show_guide, "हिन्दी: पूरे software की complete guide — हर option कहाँ है और क्या करता है (Hindi + English)। यह सूची ऐप के menus से खुद बनती है, इसलिए हर update में अपने-आप up-to-date रहती है।\nEnglish: The complete guide — every option, where it is and what it does (Hindi + English). Built automatically from the app's menus, so it stays up to date on every update.", "F1")
         self._ma(mh, tr("help_guide", self._lang), self.show_help, "हिन्दी: ऐप इस्तेमाल करने की guide।\nEnglish: How-to guide.")
         self._ma(mh, "Setup wizard", self._run_wizard, "हिन्दी: पहली बार वाला setup दोबारा चलाओ।\nEnglish: Re-run the first-time setup.")
@@ -16737,6 +16742,101 @@ class ScannerWindow(QtWidgets.QMainWindow):
         b_close.clicked.connect(dlg.accept)
         row.addWidget(b_copy); row.addWidget(b_save); row.addStretch(1); row.addWidget(b_close)
         lay.addLayout(row)
+        dlg.exec_()
+
+    # ---- Illustrated User-Guide PDFs (Hindi + English) ----
+    def _guide_pdf_path(self, lang):
+        fn = ("ApneScan_User_Guide_Hindi.pdf" if lang == "hi"
+              else "ApneScan_User_Guide_English.pdf")
+        return resource_path(fn)
+
+    def _open_guide_pdf(self, lang):
+        p = self._guide_pdf_path(lang)
+        if not os.path.exists(p):
+            self._warn(self.L("गाइड फ़ाइल नहीं मिली।", "Guide file not found."))
+            return
+        self._open_path(p)
+
+    def _download_guide_pdf(self, lang):
+        src = self._guide_pdf_path(lang)
+        if not os.path.exists(src):
+            self._warn(self.L("गाइड फ़ाइल नहीं मिली।", "Guide file not found."))
+            return
+        dl = os.path.join(os.path.expanduser("~"), "Downloads")
+        start = os.path.join(dl if os.path.isdir(dl) else os.path.expanduser("~"),
+                             os.path.basename(src))
+        dst, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("गाइड डाउनलोड करें", "Download guide"), start, "PDF (*.pdf)")
+        if not dst:
+            return
+        if not dst.lower().endswith(".pdf"):
+            dst += ".pdf"
+        try:
+            shutil.copy2(src, dst)
+            self.status.showMessage(
+                self.L("✅ गाइड सेव हो गई: ", "✅ Guide saved: ") + os.path.basename(dst), 7000)
+            try:
+                self._open_path(os.path.dirname(dst))
+            except Exception:
+                pass
+        except Exception as e:
+            self._warn(str(e))
+
+    def _show_userguide_popup(self, auto=False):
+        """Startup popup — dono PDF guide (Hindi + English) dikhata hai; user
+        apni bhasha chunkar dekh ya download kar sakta hai."""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(self.L("📘 ApneScan यूज़र गाइड", "📘 ApneScan User Guide"))
+        dlg.resize(580, 430)
+        v = QtWidgets.QVBoxLayout(dlg); v.setSpacing(14); v.setContentsMargins(22, 20, 22, 16)
+        head = QtWidgets.QLabel(self.L(
+            "<b style='font-size:17pt;color:#3730a3'>ApneScan यूज़र गाइड</b>"
+            "<br><span style='color:#64748b'>अपनी भाषा चुनें — देखें या डाउनलोड करें</span>",
+            "<b style='font-size:17pt;color:#3730a3'>ApneScan User Guide</b>"
+            "<br><span style='color:#64748b'>Choose your language — view or download</span>"))
+        head.setTextFormat(QtCore.Qt.RichText); v.addWidget(head)
+
+        row = QtWidgets.QHBoxLayout(); row.setSpacing(14)
+
+        def card(flag, title, sub, lang):
+            box = QtWidgets.QFrame(); box.setObjectName("gcard")
+            box.setStyleSheet("QFrame#gcard{background:#f8fafc;border:1px solid #e2e8f0;"
+                              "border-radius:12px;}")
+            cl = QtWidgets.QVBoxLayout(box); cl.setContentsMargins(16, 16, 16, 16); cl.setSpacing(9)
+            t = QtWidgets.QLabel("<span style='font-size:22pt'>%s</span>  "
+                                 "<b style='font-size:14pt'>%s</b>"
+                                 "<br><span style='color:#64748b'>%s</span>" % (flag, title, sub))
+            t.setTextFormat(QtCore.Qt.RichText); cl.addWidget(t)
+            bopen = QtWidgets.QPushButton(self.L("👁  देखें", "👁  View"))
+            bopen.setObjectName("primary")
+            bopen.clicked.connect(lambda: self._open_guide_pdf(lang))
+            bdl = QtWidgets.QPushButton(self.L("⬇  डाउनलोड", "⬇  Download"))
+            bdl.clicked.connect(lambda: self._download_guide_pdf(lang))
+            cl.addWidget(bopen); cl.addWidget(bdl); cl.addStretch(1)
+            return box
+
+        row.addWidget(card("📕", self.L("हिंदी गाइड", "Hindi Guide"),
+                           self.L("सचित्र · प्रीमियम", "Illustrated · premium"), "hi"))
+        row.addWidget(card("📘", self.L("English गाइड", "English Guide"),
+                           self.L("सचित्र · प्रीमियम", "Illustrated · premium"), "en"))
+        v.addLayout(row, 1)
+
+        frow = QtWidgets.QHBoxLayout()
+        chk = QtWidgets.QCheckBox(self.L("इसे दोबारा न दिखाएँ", "Don't show this again"))
+        chk.setChecked(bool(self._config.get("hide_userguide_popup")))
+        frow.addWidget(chk); frow.addStretch(1)
+        bclose = QtWidgets.QPushButton(self.L("बंद करें", "Close"))
+        bclose.clicked.connect(dlg.accept)
+        frow.addWidget(bclose)
+        v.addLayout(frow)
+
+        def _persist(*_a):
+            self._config["hide_userguide_popup"] = bool(chk.isChecked())
+            try:
+                save_config(self._config)
+            except Exception:
+                pass
+        dlg.finished.connect(_persist)
         dlg.exec_()
 
     def show_guide(self):

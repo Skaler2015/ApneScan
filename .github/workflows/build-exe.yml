@@ -33,7 +33,7 @@ jobs:
         working-directory: ApneScan_Project
         shell: pwsh
         run: |
-          python -m PyInstaller --noconfirm --clean --onedir --windowed --name "ApneScan" --icon apnescan.ico --add-data "apnescan.ico;." --add-data "apnescan_icon.png;." --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes --hidden-import twain --hidden-import PyQt5.QtMultimedia --hidden-import PyQt5.QtMultimediaWidgets --hidden-import PyQt5.QtNetwork --hidden-import qrcode --hidden-import qrcode.image.pil apnescan.py
+          python -m PyInstaller --noconfirm --clean --onedir --windowed --name "ApneScan" --icon apnescan.ico --add-data "apnescan.ico;." --add-data "apnescan_icon.png;." --add-data "ApneScan_User_Guide_Hindi.pdf;." --add-data "ApneScan_User_Guide_English.pdf;." --collect-all win32com --collect-all win32 --hidden-import pythoncom --hidden-import pywintypes --hidden-import twain --hidden-import PyQt5.QtMultimedia --hidden-import PyQt5.QtMultimediaWidgets --hidden-import PyQt5.QtNetwork --hidden-import qrcode --hidden-import qrcode.image.pil apnescan.py
           # (v280) ONEDIR — python312.dll + baaki DLL exe ke SAATH folder me
           # rehti hain (runtime par _MEI temp me extract nahi hoti). Isliye
           # antivirus/adhoori-copy wala 'Failed to load python312.dll' error
