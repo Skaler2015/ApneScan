@@ -1,0 +1,170 @@
+name: Deploy Website
+
+# Website ab HOSTINGER par apne aap publish hoti hai:
+#   apnescan.apnesoft.com  ->  /domains/apnesoft.com/public_html/apnescan
+# Jaise hi website ki koi file (ya app version) push hoti hai, GitHub Action
+# build karke FTP se seedha Hostinger ke us folder me upload kar deti hai —
+# koi manual upload nahi. (App ka version website ke code se nikaal kar daala
+# jata hai, taaki version.txt/download hamesha sahi rahein.)
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/content-review-jjokt7
+      - main
+    paths:
+      - 'ApneScan_Project/apnescan_website.html'
+      - 'ApneScan_Project/apnescan_logo*'
+      - 'ApneScan_Project/apnescan_icon.png'
+      - 'ApneScan_Project/apnescan.py'
+      - 'ApneScan_Project/website_extras/**'
+      - '.github/workflows/deploy-website.yml'
+
+permissions:
+  contents: read
+  actions: read   # exe/release download karne ke liye
+
+concurrency:
+  group: deploy-website
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build site (inject current app version)
+        run: |
+          mkdir -p _site
+          VERSION=$(grep -oP 'VERSION = "\K[0-9]+' ApneScan_Project/apnescan.py | head -1)
+          echo "App version: v$VERSION"
+          sed "s/{{VERSION}}/v$VERSION/g" ApneScan_Project/apnescan_website.html > _site/index.html
+          # Extra pages (guides, compare, privacy, about, changelog, tools, faq…)
+          for f in ApneScan_Project/website_extras/pages/*.html; do
+            [ -e "$f" ] || continue
+            sed "s/{{VERSION}}/v$VERSION/g" "$f" > "_site/$(basename "$f")"
+          done
+          # Clean URL: apnescan.apnesoft.com/share -> web-share tool (iframe wrapper)
+          if [ -f _site/share.html ]; then mkdir -p _site/share && cp _site/share.html _site/share/index.html; fi
+          cp ApneScan_Project/apnescan_logo.png _site/ 2>/dev/null || true
+          cp ApneScan_Project/apnescan_logo.svg _site/ 2>/dev/null || true
+          cp ApneScan_Project/apnescan_icon.png _site/ 2>/dev/null || true
+          cp ApneScan_Project/ApneScan_Guide.pdf _site/ 2>/dev/null || true
+          # App ka in-app update-check isi file se naya version pehchanta hai
+          echo "v$VERSION" > _site/version.txt
+          # SEO/GEO/AEO/LLMO files: robots.txt (AI crawlers allowed), llms.txt,
+          # llms-full.txt, ai.txt, manifest, humans.txt, security.txt
+          cp ApneScan_Project/website_extras/robots.txt _site/ 2>/dev/null || true
+          cp ApneScan_Project/website_extras/llms.txt _site/ 2>/dev/null || true
+          cp ApneScan_Project/website_extras/llms-full.txt _site/ 2>/dev/null || true
+          cp ApneScan_Project/website_extras/ai.txt _site/ 2>/dev/null || true
+          cp ApneScan_Project/website_extras/manifest.webmanifest _site/ 2>/dev/null || true
+          cp ApneScan_Project/website_extras/humans.txt _site/ 2>/dev/null || true
+          mkdir -p _site/.well-known
+          cp ApneScan_Project/website_extras/.well-known/security.txt _site/.well-known/ 2>/dev/null || true
+          # Google Search Console ownership verification
+          cp ApneScan_Project/website_extras/google*.html _site/ 2>/dev/null || true
+          TODAY=$(date -u +%Y-%m-%d)
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            echo "  <url><loc>https://apnescan.apnesoft.com/</loc><lastmod>$TODAY</lastmod><priority>1.0</priority></url>"
+            for f in _site/*.html; do
+              b=$(basename "$f")
+              [ "$b" = "index.html" ] && continue
+              case "$b" in google*.html) continue;; esac
+              echo "  <url><loc>https://apnescan.apnesoft.com/$b</loc><lastmod>$TODAY</lastmod><priority>0.7</priority></url>"
+            done
+            echo '</urlset>'
+          } > _site/sitemap.xml
+
+      # EXE + portable ZIP ko seedha website par rakho — "Download" button click
+      # karte hi apnescan.apnesoft.com/ApneScan-Setup.exe se download shuru ho.
+      # Isi version ka release banne ka intezaar (build parallel me chalti hai);
+      # na mile to branch ki sabse nayi release use hoti hai (site kabhi khaali na ho).
+      - name: Download ApneScan installer (GitHub Release) into site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(grep -m1 -oP 'VERSION = "\K[0-9]+' ApneScan_Project/apnescan.py)
+          echo "Chahiye version: v$V"
+          # Build (Build ApneScan EXE) alag workflow me PARALLEL chalti hai aur
+          # 32-bit PyInstaller + Tesseract bundle ~8-12 min leti hai. Isliye
+          # exact-version release ka ~22 min tak intezaar — taaki website par
+          # size HAMESHA isi version ke asli installer se aaye (purani na dikhe).
+          for i in $(seq 1 45); do
+            if gh release download "v$V" -R "$GITHUB_REPOSITORY" \
+                 -p "ApneScan-Setup.exe" -p "ApneScan-Portable.zip" -D _site/ --clobber 2>/dev/null; then
+              echo "Release v$V mil gaya"; break
+            fi
+            echo "Release v$V abhi ban raha hai... intezaar ($i/45)"; sleep 30
+          done
+          if [ ! -f _site/ApneScan-Setup.exe ]; then
+            echo "v$V na mila — latest release se le rahe hain"
+            gh release download -R "$GITHUB_REPOSITORY" \
+              -p "ApneScan-Setup.exe" -p "ApneScan-Portable.zip" -D _site/ --clobber || true
+          fi
+          # ---- ASLI download data website me daalo (size, SHA-256, date) ----
+          SETUPMB="?" ; SHA="checksum unavailable" ; RDATE=$(date -u +"%d %b %Y")
+          if [ -f _site/ApneScan-Setup.exe ]; then
+            SETUPMB=$(awk "BEGIN{printf \"%.1f\", $(stat -c%s _site/ApneScan-Setup.exe)/1048576}")
+            SHA=$(sha256sum _site/ApneScan-Setup.exe | cut -d' ' -f1)
+          fi
+          PDATE=$(gh release view "v$V" -R "$GITHUB_REPOSITORY" --json publishedAt -q .publishedAt 2>/dev/null || true)
+          if [ -n "$PDATE" ]; then RDATE=$(date -u -d "$PDATE" +"%d %b %Y" 2>/dev/null || echo "$RDATE"); fi
+          echo "Real data: ${SETUPMB} MB | $RDATE | sha256=$SHA"
+          for f in _site/*.html; do
+            sed -i "s/{{SETUPMB}}/$SETUPMB/g; s/{{RELDATE}}/$RDATE/g; s/{{SHA256}}/$SHA/g" "$f"
+          done
+          ls -la _site/
+
+      # ---- HOSTINGER par FTP se upload ----
+      # Sirf badli hui files chadhti hain (incremental) — .ftp-deploy-sync-state.json
+      # se track hota hai, isliye badi exe har baar dobara upload nahi hoti.
+      # Zaroori GitHub Secrets (Settings > Secrets and variables > Actions):
+      #   FTP_SERVER    = Hostinger FTP hostname (jaise ftp.apnesoft.com ya IP)
+      #   FTP_USERNAME  = FTP username
+      #   FTP_PASSWORD  = FTP password
+      # server-dir = subdomain ka folder (Hostinger FTP home ke andar).
+      #
+      # Pehle dekho ki FTP secrets set hain ya nahi. Nahi hain to upload SKIP
+      # karo (job GREEN rahegi, laal-fail NAHI) aur ek saaf notice do — taaki
+      # "Input required and not supplied: server" wala fail na aaye. Secrets
+      # daalte hi agli baar upload apne-aap hone lagega.
+      - name: Check FTP secrets
+        id: ftp
+        run: |
+          if [ -n "${{ secrets.FTP_SERVER }}" ] && [ -n "${{ secrets.FTP_USERNAME }}" ] && [ -n "${{ secrets.FTP_PASSWORD }}" ]; then
+            echo "have=yes" >> "$GITHUB_OUTPUT"
+            # FTP_SERVER ko saaf karo: 'ftp://'/'ftps://' prefix, koi path aur
+            # aas-paas ki space hata do (Hostinger 'ftp://82.180.164.152' dikhata
+            # hai — prefix rehne par getaddrinfo ENOTFOUND aata hai).
+            host="${{ secrets.FTP_SERVER }}"
+            host="${host#ftp://}"; host="${host#ftps://}"; host="${host#sftp://}"
+            host="${host%%/*}"
+            host="$(printf '%s' "$host" | tr -d '[:space:]')"
+            echo "::add-mask::$host"
+            echo "host=$host" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=no" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Website upload skipped::FTP secrets (FTP_SERVER/FTP_USERNAME/FTP_PASSWORD) set nahi hain. Site build ho gayi par Hostinger par upload nahi hui. Settings > Secrets and variables > Actions me ye 3 secrets daalein — phir apne-aap deploy hone lagega."
+          fi
+
+      - name: Deploy to Hostinger (apnescan.apnesoft.com) via FTP
+        if: steps.ftp.outputs.have == 'yes'
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ steps.ftp.outputs.host }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          local-dir: ./_site/
+          server-dir: ${{ vars.FTP_REMOTE_DIR || 'apnescan/' }}
+          dangerous-clean-slate: false
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/.DS_Store

@@ -1,0 +1,64 @@
+# ApneScan
+
+> ApneScan is a 100% free, open-source document scanner software for Windows
+> (10/11) with a Hindi + English interface. It scans to searchable PDF from
+> network scanners (eSCL — no drivers needed; HP, Canon, Epson, Brother) and
+> USB scanners (TWAIN/WIA), with ADF duplex support. All processing happens
+> locally on the user's PC — no ads, no tracking, no uploads.
+
+## Key facts
+
+- Website & direct download: https://apnescan.apnesoft.com (ApneScan.exe or ApneScan-Setup.exe installer)
+- Official website: https://apnescan.apnesoft.com/
+- Price: Free (no ads, no accounts, no telemetry of documents)
+- Languages: Hindi and English UI; partial Marathi, Gujarati, Punjabi, Tamil
+- OCR: Hindi + English searchable PDFs via Tesseract
+
+## Main features
+
+- One-click scan profiles; fast mode (200dpi B&W); duplex ADF scanning
+- Also scan from a webcam / USB camera when no scanner is available
+- Blank-page removal; auto-crop; deskew; auto-orient; auto colour-detect;
+  scanner backing (grey/black) whitened for clean prints
+- Smart auto-naming: teach a document's name once (F2) and the same form is
+  named automatically next time (English + Hindi); optionally appends the
+  detected bill/invoice/claim number and the date; learn a folder per name;
+  export/import learned names between PCs
+- Save as PDF / password PDF / searchable OCR PDF / images; print incl. 2-up ID
+- PDF tools: compress to 200KB–2MB targets, merge, split, page editor,
+  sign/stamp, page numbers, watermark, password removal, PDF→Word/Excel/JPG,
+  folder→PDF, archival PDF
+- Phone-photo to PDF (shadow removal), book-page split, business-card to
+  contacts (.vcf), old-photo restore, bundle auto-split by blank separator
+- WhatsApp / Email sharing of scanned PDFs
+- Built-in file manager panel (folder tree, in-folder search, drag-and-drop
+  save, favourites) and a live preview editor (zoom, per-page OCR text,
+  one-click rotate/crop/deskew/enhance/whiten/sign)
+- Premium Document Editor (Acrobat-class): pen/text/highlight/redact/blur/
+  stamps/notes, adjustment sliders, page thumbnails, undo/redo, status bar
+- Offline AI suite (no internet, free, unlimited): one-click AI Auto,
+  AI enhance (adaptive levels), colour restore for yellowed paper,
+  edge-preserving de-noise, smart content crop, 0.1-degree fine deskew,
+  stain/finger removal (structure-preserving inpainting), signature/stamp
+  extraction with transparent background
+- Scan quality guard (flags blurry / too-dark / faint pages right after the
+  scan), duplicate-document warning before re-saving, and automatic cleanup
+  of phone photos on arrival (perspective, shadows, colour, enhance)
+- Tesseract OCR is bundled with the installer (Hindi + English + OSD) and
+  self-installs on older setups — auto-rotate/OCR work out of the box
+- Tags, instant full-text search over saved PDFs (local index)
+- Personal + worldwide statistics dashboard with charts
+- Fully non-blocking: all saving/OCR/compression runs in the background
+- Customizable UI: dashboard, status header, job chips, preview panel,
+  Dark Pro theme, kiosk mode, collapsible sidebars — each toggleable
+- In-app one-click auto-update, portable mode, settings export/import,
+  touch mode, crash reporter, Excel register, monthly report, backups
+
+## Typical users
+
+Homes, shops, offices, schools, cyber cafes / CSC centers, and hospitals in
+India that scan documents to PDF and share them on WhatsApp or upload to
+government portals with strict file-size limits.
+
+ApneScan is a free Windows alternative to NAPS2 and to phone apps like
+CamScanner, with a Hindi-first interface.

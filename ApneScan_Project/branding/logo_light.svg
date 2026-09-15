@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="420" viewBox="0 0 1600 420">
 <defs>
   <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
     <stop offset="0" stop-color="#15283E"/><stop offset="1" stop-color="#0B1930"/>
@@ -45,8 +45,11 @@
     <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000000" flood-opacity="0.38"/>
   </filter>
 </defs>
+<!-- mark: icon ka artwork chhota karke -->
+<g transform="translate(30,30) scale(0.3515)">
+<rect x="8" y="8" width="1008" height="1008" rx="216" fill="url(#bg)"/>
+<rect x="8" y="8" width="1008" height="1008" rx="216" fill="none" stroke="#3A5573" stroke-opacity=".55" stroke-width="3"/>
 
-<!-- background -->
 <rect x="8" y="8" width="1008" height="1008" rx="216" fill="url(#bg)"/>
 <rect x="8" y="8" width="1008" height="1008" rx="216" fill="none" stroke="#3A5573" stroke-opacity=".55" stroke-width="3"/>
 
@@ -103,11 +106,10 @@
   <rect x="700" y="782" width="58" height="14" rx="7" fill="none" stroke="#7DF6F2" stroke-width="3" opacity=".6" filter="url(#soft4)"/>
 </g>
 
-<!-- wordmark -->
-<text x="512" y="912" text-anchor="middle"
-      font-family="Arial, 'DejaVu Sans', sans-serif" font-weight="800" font-size="118"
-      letter-spacing="1"><tspan fill="#FFFFFF">Apne</tspan><tspan fill="#2BD9CE">Scan</tspan></text>
-<text x="512" y="964" text-anchor="middle"
-      font-family="Arial, 'DejaVu Sans', sans-serif" font-weight="600" font-size="30"
-      letter-spacing="14" fill="#7E97AE">SCAN · SAVE · SHARE</text>
+
+</g>
+<text x="440" y="235" font-family="Arial, 'DejaVu Sans', sans-serif" font-weight="800"
+      font-size="190" letter-spacing="1"><tspan fill="#15283E">Apne</tspan><tspan fill="#14B4AC">Scan</tspan></text>
+<text x="448" y="316" font-family="Arial, 'DejaVu Sans', sans-serif" font-weight="600"
+      font-size="46" letter-spacing="20" fill="#5D7490">SCAN · SAVE · SHARE</text>
 </svg>

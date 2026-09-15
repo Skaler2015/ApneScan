@@ -7,4 +7,13 @@ numpy
 pyzbar
 pyinstaller
 pywin32
+pytwain
+python-docx
+qrcode
+# NOTE: pillow-heif (HEIC/HEIF) yahan NAHI — 32-bit Windows ka wheel nahi
+# milta aur source-build (libheif/MSYS2) CI par fail hota hai. App 32-bit
+# banti hai isliye HEIC->JPG tool bandled nahi; menu HAS_HEIF se apne-aap
+# chhup/disable ho jaata hai. (64-bit build ho to ye line wapas jodi ja sakti.)
+# behtar PDF import/render (sirf 64-bit — 32-bit ka wheel nahi milta)
+PyMuPDF; platform_machine == "AMD64" or platform_machine == "x86_64"
 # optional: PyMuPDF  (behtar PDF import ke liye)
