@@ -287,6 +287,111 @@ function update_peak(&$d, $now, $today) {
 }
 
 // ---------------- compute stats (App ko JSON) ----------------
+// (v372) DEEP WORLDWIDE AGGREGATE ANALYTICS — privacy-safe (koi naam/IP/file
+// nahi). App ke World-Live dashboard me "server analytics jaisa sab" dikhane ke
+// liye compute_stats() me merge hota hai. Admin dashboard apni alag ginti rakhta
+// hai (usme personal data bhi hota hai jo app ko NAHI bhejte).
+function deep_world($d) {
+    $now = time(); $today = today_str(); $yest = date('Y-m-d', $now-86400);
+    $total = intval(isset($d['total'])?$d['total']:0);
+    $days = (isset($d['days'])&&is_array($d['days']))?$d['days']:array();
+    $clients = (isset($d['clients'])&&is_array($d['clients']))?$d['clients']:array();
+    $hours = (isset($d['hours'])&&is_array($d['hours']))?$d['hours']:array();
+    $nUsers = max(1, count($clients));
+    $R = array();
+    // ---- pace ----
+    $R['yesterday'] = intval(isset($days[$yest])?$days[$yest]:0);
+    $wt=0; for($i=0;$i<7;$i++){ $k=date('Y-m-d',$now-$i*86400); $wt+=intval(isset($days[$k])?$days[$k]:0); } $R['weekTotal']=$wt;
+    $mt=0; for($i=0;$i<30;$i++){ $k=date('Y-m-d',$now-$i*86400); $mt+=intval(isset($days[$k])?$days[$k]:0); } $R['monthTotal']=$mt; $R['dailyAvg']=round($mt/30,1);
+    $lm=0; for($i=30;$i<60;$i++){ $k=date('Y-m-d',$now-$i*86400); $lm+=intval(isset($days[$k])?$days[$k]:0); } $R['thisMonth']=$mt; $R['lastMonth']=$lm; $R['momPct']=($lm>0)?round(100*($mt-$lm)/$lm):($mt>0?100:0);
+    $tw=0; for($i=0;$i<7;$i++){ $k=date('Y-m-d',$now-$i*86400); $tw+=intval(isset($days[$k])?$days[$k]:0); } $lw=0; for($i=7;$i<14;$i++){ $k=date('Y-m-d',$now-$i*86400); $lw+=intval(isset($days[$k])?$days[$k]:0); } $R['thisWeek7']=$tw; $R['lastWeek7']=$lw; $R['wowPct']=($lw>0)?round(100*($tw-$lw)/$lw):($tw>0?100:0);
+    $ty=0;$ly=0; $cy=date('Y'); $py=$cy-1; foreach($days as $k=>$v){ if(strpos($k,$cy.'-')===0)$ty+=intval($v); elseif(strpos($k,$py.'-')===0)$ly+=intval($v); } $R['thisYear']=$ty; $R['lastYear']=$ly;
+    // ---- per-client aggregates ----
+    $dau=$wau=$mau=0; $power=0; $onetime=0; $rep=0; $chn=0; $ntm=0; $nlm=0;
+    $ret=array(1=>array(0,0),7=>array(0,0),30=>array(0,0));
+    $seg=array('new'=>0,'regular'=>0,'power'=>0,'asleep'=>0);
+    $bk=array('1-5'=>0,'6-20'=>0,'21-50'=>0,'51-100'=>0,'100+'=>0);
+    $scByCo=array(); $usersByCo=array(); $langD=array(); $modeD=array();
+    $mf=array('0'=>0,'1'=>0,'2'=>0,'3'=>0,'4+'=>0); $coFirst=array();
+    $moStart=strtotime(date('Y-m-01')); $lmS=strtotime(date('Y-m-01',strtotime('-1 month'))); $lmE=$moStart-1;
+    foreach ($clients as $id=>$c) {
+        if (!empty($c['blocked'])) continue;
+        $sc=intval(isset($c['scans'])?$c['scans']:0); $last=intval(isset($c['last'])?$c['last']:0); $first=intval(isset($c['first'])?$c['first']:0);
+        if (date('Y-m-d',$last)===$today) $dau++;
+        if ($now-$last<=7*86400) $wau++;
+        if ($now-$last<=30*86400) $mau++;
+        if ($sc>=50) $power++;
+        if ($sc<=1) $onetime++;
+        $act=(isset($c['active'])&&is_array($c['active']))?$c['active']:array();
+        if (count($act)>=2) $rep++;
+        if ($now-$last>14*86400) $seg['asleep']++; elseif ($sc>=50) $seg['power']++; elseif ($first&&$now-$first<7*86400) $seg['new']++; else $seg['regular']++;
+        if ($sc>0){ if($sc<=5)$bk['1-5']++; elseif($sc<=20)$bk['6-20']++; elseif($sc<=50)$bk['21-50']++; elseif($sc<=100)$bk['51-100']++; else $bk['100+']++; }
+        $co=trim(isset($c['country'])?$c['country']:'');
+        if ($co!==''){ bump($scByCo,$co,$sc); bump($usersByCo,$co,1); if(!isset($coFirst[$co])||$first<$coFirst[$co])$coFirst[$co]=$first; }
+        $l=trim(isset($c['lang'])?$c['lang']:''); if($l!=='')bump($langD,$l,1);
+        $mo=trim(isset($c['mode'])?$c['mode']:''); if($mo!=='')bump($modeD,$mo,1);
+        $nn=count((isset($c['feats'])&&is_array($c['feats']))?$c['feats']:array());
+        if($nn<=0)$mf['0']++; elseif($nn==1)$mf['1']++; elseif($nn==2)$mf['2']++; elseif($nn==3)$mf['3']++; else $mf['4+']++;
+        if ($first>=$moStart) $ntm++; elseif ($first>=$lmS && $first<=$lmE) $nlm++;
+        if ($now-$last>=14*86400 && $sc>=1) $chn++;
+        if ($first && $now-$first>=1*86400){ $ret[1][0]++; foreach($act as $ad){ if($ad>date('Y-m-d',$first)){$ret[1][1]++;break;} } }
+        if ($first && $now-$first>=7*86400){ $ret[7][0]++; $c7=date('Y-m-d',$first+7*86400); foreach($act as $ad){ if($ad>=$c7){$ret[7][1]++;break;} } }
+        if ($first && $now-$first>=30*86400){ $ret[30][0]++; $c30=date('Y-m-d',$first+28*86400); foreach($act as $ad){ if($ad>=$c30){$ret[30][1]++;break;} } }
+    }
+    $R['dau']=$dau; $R['wau']=$wau; $R['mau']=$mau; $R['powerUsers']=$power; $R['oneTime']=$onetime;
+    $R['stickiness']=$mau?round(100*$dau/$mau):0; $R['repeatRate']=round(100*$rep/$nUsers);
+    $R['segments']=$seg; $R['scanDist']=$bk; $R['avgPerUser']=round($total/$nUsers,1);
+    arsort($scByCo); $R['scansByCountry']=array_slice($scByCo,0,10,true);
+    arsort($usersByCo); $R['usersByCountry']=array_slice($usersByCo,0,10,true);
+    $newCos=array(); foreach($coFirst as $co=>$f){ if($f>=$moStart)$newCos[]=$co; } $R['newCountries']=$newCos;
+    $R['langDist']=$langD; $R['modeDist']=$modeD; $R['multiFeature']=$mf;
+    $R['ret1']=$ret[1][0]?round(100*$ret[1][1]/$ret[1][0]):0;
+    $R['ret7']=$ret[7][0]?round(100*$ret[7][1]/$ret[7][0]):0;
+    $R['ret30']=$ret[30][0]?round(100*$ret[30][1]/$ret[30][0]):0;
+    $R['newThisMonth']=$ntm; $R['newLastMonth']=$nlm; $R['userGrowthPct']=$nlm?round(100*($ntm-$nlm)/$nlm):($ntm?100:0);
+    $R['churnCount']=$chn; $R['churnRate']=round(100*$chn/$nUsers); $R['netGrowthMo']=$ntm-$chn;
+    // ---- time patterns ----
+    $dow=array_fill(0,7,0); foreach($days as $k=>$v){ $ts=strtotime($k); if($ts)$dow[intval(date('w',$ts))]+=intval($v); }
+    $R['dow']=array($dow[1],$dow[2],$dow[3],$dow[4],$dow[5],$dow[6],$dow[0]);
+    $R['weekdayTotal']=$dow[1]+$dow[2]+$dow[3]+$dow[4]+$dow[5]; $R['weekendTotal']=$dow[6]+$dow[0];
+    $mbm=array(); for($i=11;$i>=0;$i--){ $mk=date('Y-m',strtotime("first day of -$i month",$now)); $sum=0; foreach($days as $k=>$v){ if(strpos($k,$mk.'-')===0)$sum+=intval($v); } $mbm[]=array(date('M y',strtotime($mk.'-01')),$sum); } $R['monthByMonth']=$mbm;
+    $hoursAll=array_fill(0,24,0); $hw=array(); for($i=0;$i<7;$i++)$hw[$i]=array_fill(0,24,0);
+    foreach ($hours as $hk=>$hv){ $p=strrpos($hk,'-'); if($p!==false){ $hh=intval(substr($hk,$p+1)); if($hh>=0&&$hh<24){ $hoursAll[$hh]+=intval($hv); $ts=strtotime(substr($hk,0,$p)); if($ts)$hw[intval(date('w',$ts))][$hh]+=intval($hv); } } }
+    $R['hoursAll']=$hoursAll; $R['heat7x24']=array($hw[1],$hw[2],$hw[3],$hw[4],$hw[5],$hw[6],$hw[0]);
+    $R['lastHour']=intval(isset($hours[hour_key()])?$hours[hour_key()]:0);
+    $l24=0; for($i=0;$i<24;$i++){ $hk=date('Y-m-d-H',$now-$i*3600); $l24+=intval(isset($hours[$hk])?$hours[$hk]:0); } $R['last24h']=$l24;
+    // ---- versions / scanners / settings ----
+    $vers=array(); foreach($clients as $c){ if(!empty($c['blocked']))continue; $v=trim(isset($c['version'])?$c['version']:''); if($v!=='')bump($vers,$v,1); }
+    $tv=array_sum($vers); $latest=0; foreach($vers as $k=>$v){ if(is_numeric($k)&&intval($k)>$latest)$latest=intval($k); } $old=0; foreach($vers as $k=>$v){ if(intval($k)!==$latest)$old+=$v; }
+    $R['oldVersionPct']=$tv?round(100*$old/$tv):0; $R['latestVersion']=$latest;
+    $brands=array(); foreach((isset($d['scanners'])&&is_array($d['scanners'])?$d['scanners']:array()) as $mm=>$cnt){ $bw=trim(strtok($mm,' ')); if($bw!=='')bump($brands,$bw,$cnt); } arsort($brands); $R['brands']=array_slice($brands,0,8,true);
+    $R['scanEvents']=intval(isset($d['scanEvents'])?$d['scanEvents']:0); $R['avgPages']=$R['scanEvents']?round($total/max(1,$R['scanEvents']),1):0;
+    $tk=function($a){ if(!is_array($a)||!$a)return array('—',0); arsort($a); $k=key($a); return array((string)$k,intval($a[$k])); };
+    $R['topDpi']=$tk(isset($d['dpis'])?$d['dpis']:array()); $R['topColor']=$tk(isset($d['colors'])?$d['colors']:array()); $R['topSize']=$tk(isset($d['sizes'])?$d['sizes']:array());
+    $__srt=function($a){ if(!is_array($a))return array(); arsort($a); return array_slice($a,0,8,true); };
+    $R['dpis']=$__srt(isset($d['dpis'])?$d['dpis']:array()); $R['colors']=$__srt(isset($d['colors'])?$d['colors']:array()); $R['sizes']=$__srt(isset($d['sizes'])?$d['sizes']:array());
+    $adopt=array(); foreach((isset($d['featUsers'])&&is_array($d['featUsers'])?$d['featUsers']:array()) as $f=>$us){ $adopt[(string)$f]=round(100*(is_array($us)?count($us):0)/$nUsers); } arsort($adopt); $R['featAdoption']=array_slice($adopt,0,12,true);
+    // ---- milestone / streak / forecast ----
+    $miles=array(100,500,1000,5000,10000,25000,50000,100000,250000,500000,1000000);
+    $next=null; foreach($miles as $m){ if($total<$m){$next=$m;break;} } $prevM=0; foreach($miles as $m){ if($m<=$total)$prevM=$m; }
+    $R['nextMilestone']=$next; $R['milestoneLeft']=$next?($next-$total):0; $R['milestonePct']=$next?round(100*($total-$prevM)/max(1,($next-$prevM))):100;
+    $streak=0; for($i=0;$i<400;$i++){ $k=date('Y-m-d',$now-$i*86400); if(intval(isset($days[$k])?$days[$k]:0)>0)$streak++; elseif($i>0)break; } $R['globalStreak']=$streak;
+    $R['forecastMonth']=round($R['dailyAvg']*30);
+    $dLeft=(intval(date('z',mktime(0,0,0,12,31,intval($cy))))-intval(date('z'))); $R['yearEndProj']=$ty+round($R['dailyAvg']*max(0,$dLeft));
+    $rcv=array(); foreach(array(1,3,7,14,30) as $dd){ $e=0;$r=0; foreach($clients as $c){ if(!empty($c['blocked']))continue; $first=intval(isset($c['first'])?$c['first']:0); if(!$first||$now-$first<$dd*86400)continue; $e++; $act=(isset($c['active'])&&is_array($c['active']))?$c['active']:array(); $cut=date('Y-m-d',$first+$dd*86400); foreach($act as $ad){ if($ad>=$cut){$r++;break;} } } $rcv[]=array($dd,$e?round(100*$r/$e):0); } $R['retCurve']=$rcv;
+    // ---- impact ----
+    $imports=intval(isset($d['imports'])?$d['imports']:0);
+    $met=(isset($d['metrics'])&&is_array($d['metrics']))?$d['metrics']:array();
+    $mbSaved=round(intval(isset($met['kbSaved'])?$met['kbSaved']:0)/1024,1);
+    $feats=(isset($d['features'])&&is_array($d['features']))?$d['features']:array();
+    $shr=intval(isset($feats['whatsapp'])?$feats['whatsapp']:0)+intval(isset($feats['email'])?$feats['email']:0);
+    $paper=$total+$imports;
+    $R['impactDocs']=$R['scanEvents']+$imports; $R['impactPaper']=$paper; $R['impactDataMB']=$mbSaved;
+    $R['impactTrees']=round($paper/8333,2); $R['impactShares']=$shr;
+    $R['impactMinutes']=round($paper*0.5 + $shr*2); $R['impactHours']=round($R['impactMinutes']/60);
+    return $R;
+}
+
 function compute_stats($d, $client) {
     $today = today_str(); $now = time();
     $online = 0;
@@ -433,7 +538,7 @@ function compute_stats($d, $client) {
     }
     arsort($__st); $topStates = array_slice($__st, 0, 8, true);
 
-    return array(
+    $out = array(
         // (v360) per-metric doers + desh/rajya leaderboard
         'fu'=>$__fu, 'au'=>$__au,
         'topCountries'=>$topCountries, 'topStates'=>$topStates,
@@ -477,6 +582,9 @@ function compute_stats($d, $client) {
         'umsg'=>$umsg,'umsgId'=>$umsgId,'freply'=>$freply,'freplyId'=>$freplyId,
         'rconfig'=>isset($d['rconfig'])?$d['rconfig']:array()
     );
+    // (v372) deep worldwide aggregate analytics — app ko "server jaisa sab" dikhane ke liye
+    foreach (deep_world($d) as $__dk=>$__dv) { if (!isset($out[$__dk])) $out[$__dk]=$__dv; }
+    return $out;
 }
 
 // helper: 30-din ka cumulative + naye

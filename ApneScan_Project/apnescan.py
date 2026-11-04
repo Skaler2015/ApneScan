@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "372"
+VERSION = "373"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13130,6 +13130,201 @@ class ScannerWindow(QtWidgets.QMainWindow):
             ms.setStyleSheet("background:#FEF3C7;border:1px solid #F59E0B;border-radius:10px;"
                              "padding:7px 10px;color:#92400E;font-size:12px;font-weight:700;")
             v.addWidget(ms)
+
+        # ========= (v372) DEEP WORLDWIDE ANALYTICS — "server jaisa sab" =========
+        # Sab anonymous aggregate (koi naam/IP/file nahi). Server (stats.php) ke
+        # deep_world() se aate hain; purane server par ye keys na huey to section
+        # chup-chaap skip ho jata hai.
+        try:
+            IND = "#4F46E5"; TEAL = "#0D9488"; AMBER = "#B45309"
+            ROSE = "#BE123C"; VIO = "#7C3AED"; SLATE = "#334155"; GRN = "#059669"
+
+            def fmt(n):
+                try:
+                    return "{:,}".format(int(n))
+                except Exception:
+                    return str(n)
+
+            def wd(k):      # dict (safe)
+                x = w.get(k)
+                return x if isinstance(x, dict) else {}
+
+            def wl(k):      # list (safe)
+                x = w.get(k)
+                return x if isinstance(x, list) else []
+
+            def grid(items, cols=3):
+                gw = QtWidgets.QWidget()
+                g = QtWidgets.QGridLayout(gw)
+                g.setContentsMargins(0, 0, 0, 0)
+                g.setHorizontalSpacing(8); g.setVerticalSpacing(8)
+                for i, (t, val, col) in enumerate(items):
+                    rich = ("<" in str(val))
+                    g.addWidget(self._live_card_str(t, str(val), col, rich=rich),
+                                i // cols, i % cols)
+                return gw
+
+            def pctv(p):
+                try:
+                    p = int(round(float(p or 0)))
+                except Exception:
+                    p = 0
+                col = "#059669" if p >= 0 else "#DC2626"
+                ar = "▲" if p >= 0 else "▼"
+                return '<span style="color:%s;">%s%d%%</span>' % (col, ar, abs(p))
+
+            def pairs(k, n=8):
+                out = []
+                for kk, vv in list(wd(k).items())[:n]:
+                    try:
+                        out.append((kk, int(vv)))
+                    except Exception:
+                        out.append((kk, 0))
+                return out
+
+            have_deep = any(x in w for x in ("weekTotal", "dau", "dow", "impactTrees"))
+            if have_deep:
+                hd2 = QtWidgets.QLabel(
+                    '<b style="font-size:16px;color:#111827;">📊 %s</b>'
+                    % L("पूरी दुनिया के गहरे आँकड़े", "Full World Analytics (Deep)"))
+                hd2.setTextFormat(RT); v.addWidget(hd2)
+
+                # ---- Pace ----
+                v.addWidget(self._section_label("⏱ " + L("दुनिया की रफ़्तार", "World pace")))
+                v.addWidget(grid([
+                    (L("कल", "Yesterday"), fmt(gi("yesterday")), IND),
+                    (L("इस हफ़्ते", "This week"), fmt(gi("weekTotal")), TEAL),
+                    (L("इस महीने", "This month"), fmt(gi("monthTotal")), VIO),
+                    (L("रोज़ औसत", "Daily avg"), str(w.get("dailyAvg") or 0), AMBER),
+                    (L("पिछले 1 घंटा", "Last hour"), fmt(gi("lastHour")), ROSE),
+                    (L("पिछले 24 घंटे", "Last 24h"), fmt(gi("last24h")), SLATE),
+                ]))
+
+                # ---- Growth ----
+                v.addWidget(self._section_label("📈 " + L("बढ़ोतरी", "Growth")))
+                yoy = 0
+                try:
+                    _ly = int(w.get("lastYear") or 0)
+                    yoy = round(100 * (int(w.get("thisYear") or 0) - _ly) / _ly) if _ly > 0 else (100 if int(w.get("thisYear") or 0) > 0 else 0)
+                except Exception:
+                    yoy = 0
+                v.addWidget(grid([
+                    (L("इस हफ़्ते बनाम पिछले", "Week-over-week"), pctv(w.get("wowPct")), SLATE),
+                    (L("इस महीने बनाम पिछले", "Month-over-month"), pctv(w.get("momPct")), SLATE),
+                    (L("इस साल बनाम पिछले", "Year-over-year"), pctv(yoy), SLATE),
+                    (L("नए यूज़र (बढ़त)", "User growth"), pctv(w.get("userGrowthPct")), SLATE),
+                    (L("इस महीने नए यूज़र", "New users (month)"), fmt(gi("newThisMonth")), GRN),
+                    (L("शुद्ध बढ़त (माह)", "Net growth (month)"), fmt(gi("netGrowthMo")), IND),
+                    (L("इस महीने अनुमान", "Forecast (month)"), fmt(gi("forecastMonth")), TEAL),
+                    (L("साल-अंत अनुमान", "Year-end proj."), fmt(gi("yearEndProj")), VIO),
+                    (L("Churn दर", "Churn rate"), pctv(-abs(int(w.get("churnRate") or 0))), SLATE),
+                ]))
+
+                # ---- Active users ----
+                v.addWidget(self._section_label("👥 " + L("सक्रिय उपयोगकर्ता", "Active users")))
+                v.addWidget(grid([
+                    (L("आज (DAU)", "Today (DAU)"), fmt(gi("dau")), IND),
+                    (L("7 दिन (WAU)", "7-day (WAU)"), fmt(gi("wau")), TEAL),
+                    (L("30 दिन (MAU)", "30-day (MAU)"), fmt(gi("mau")), VIO),
+                    (L("चिपकाव (DAU/MAU)", "Stickiness"), str(int(w.get("stickiness") or 0)) + "%", AMBER),
+                    (L("पावर यूज़र (50+)", "Power users (50+)"), fmt(gi("powerUsers")), ROSE),
+                    (L("एक-बार वाले", "One-time"), fmt(gi("oneTime")), SLATE),
+                    (L("दोहराव दर", "Repeat rate"), str(int(w.get("repeatRate") or 0)) + "%", GRN),
+                    (L("कुल यूज़र", "Total users"), fmt(gi("users")), IND),
+                    (L("औसत/यूज़र", "Avg / user"), str(w.get("avgPerUser") or 0), TEAL),
+                ]))
+
+                # ---- When (time patterns) ----
+                v.addWidget(self._section_label("📅 " + L("कब सबसे ज़्यादा", "When the world scans")))
+                _dow = wl("dow")
+                if len(_dow) == 7:
+                    dn = (["सोम", "मंगल", "बुध", "गुरु", "शुक्र", "शनि", "रवि"]
+                          if self._lang != "en" else ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+                    v.addWidget(self._lead_label(L("दिन के हिसाब से", "By day of week"),
+                                                 list(zip(dn, [int(x) for x in _dow]))))
+                v.addWidget(grid([
+                    (L("वर्किंग-डे कुल", "Weekday total"), fmt(gi("weekdayTotal")), IND),
+                    (L("वीकेंड कुल", "Weekend total"), fmt(gi("weekendTotal")), VIO),
+                ], cols=2))
+                _mbm = wl("monthByMonth")
+                if _mbm:
+                    mp = []
+                    for it in _mbm[-6:]:
+                        try:
+                            mp.append((str(it[0]), int(it[1])))
+                        except Exception:
+                            pass
+                    if mp:
+                        v.addWidget(self._lead_label(L("पिछले महीने (6)", "Recent months"), mp))
+
+                # ---- Country depth ----
+                v.addWidget(self._section_label("🌍 " + L("देश-गहराई", "Country depth")))
+                if pairs("scansByCountry"):
+                    v.addWidget(self._lead_label(L("सबसे ज़्यादा स्कैन (देश)", "Top countries — scans"),
+                                                 pairs("scansByCountry")))
+                if pairs("usersByCountry"):
+                    v.addWidget(self._lead_label(L("सबसे ज़्यादा यूज़र (देश)", "Top countries — users"),
+                                                 pairs("usersByCountry")))
+                _nc = wl("newCountries")
+                if _nc:
+                    v.addWidget(grid([(L("इस माह नए देश", "New countries (month)"),
+                                       str(len(_nc)) + "  " + ", ".join([str(x) for x in _nc[:6]]), TEAL)], cols=1))
+
+                # ---- Worldwide scanner & settings ----
+                v.addWidget(self._section_label("🖨 " + L("स्कैनर व सेटिंग्स (दुनिया)", "Scanners & settings")))
+                _td = wl("topDpi"); _tc = wl("topColor"); _ts = wl("topSize")
+                v.addWidget(grid([
+                    (L("सबसे आम DPI", "Top DPI"), str(_td[0]) if _td else "—", IND),
+                    (L("सबसे आम रंग", "Top colour"), str(_tc[0]) if _tc else "—", VIO),
+                    (L("सबसे आम साइज़", "Top size"), str(_ts[0]) if _ts else "—", TEAL),
+                    (L("औसत पेज/स्कैन", "Avg pages/scan"), str(w.get("avgPages") or 0), AMBER),
+                    (L("कुल स्कैन-इवेंट", "Scan events"), fmt(gi("scanEvents")), ROSE),
+                    (L("नवीनतम वर्शन", "Latest version"), "v" + str(w.get("latestVersion") or "—"), SLATE),
+                ]))
+                if pairs("brands"):
+                    v.addWidget(self._lead_label(L("स्कैनर ब्रांड (दुनिया)", "Scanner brands"), pairs("brands")))
+                if pairs("dpis"):
+                    v.addWidget(self._lead_label(L("DPI बँटवारा", "DPI breakdown"), pairs("dpis", 6)))
+
+                # ---- Preferences ----
+                v.addWidget(self._section_label("🗣 " + L("पसंद व उपयोग", "Preferences & usage")))
+                if pairs("langDist"):
+                    v.addWidget(self._lead_label(L("भाषा", "Language"), pairs("langDist", 6)))
+                if pairs("featAdoption"):
+                    v.addWidget(self._lead_label(L("फ़ीचर अपनाना (% यूज़र)", "Feature adoption (% users)"),
+                                                 pairs("featAdoption", 10)))
+                if pairs("multiFeature"):
+                    v.addWidget(self._lead_label(L("कितने फ़ीचर इस्तेमाल", "How many features used"),
+                                                 pairs("multiFeature", 6)))
+
+                # ---- Distribution & segments ----
+                v.addWidget(self._section_label("🧩 " + L("वितरण व वर्ग", "Distribution & segments")))
+                if pairs("scanDist"):
+                    v.addWidget(self._lead_label(L("स्कैन बँटवारा (यूज़र)", "Scan distribution (users)"),
+                                                 pairs("scanDist", 6)))
+                if pairs("segments"):
+                    v.addWidget(self._lead_label(L("यूज़र वर्ग", "User segments"), pairs("segments", 6)))
+
+                # ---- Retention ----
+                v.addWidget(self._section_label("🔁 " + L("टिकाव (Retention)", "Retention")))
+                v.addWidget(grid([
+                    (L("1-दिन", "Day-1"), str(int(w.get("ret1") or 0)) + "%", IND),
+                    (L("7-दिन", "Day-7"), str(int(w.get("ret7") or 0)) + "%", TEAL),
+                    (L("30-दिन", "Day-30"), str(int(w.get("ret30") or 0)) + "%", VIO),
+                ], cols=3))
+
+                # ---- World impact ----
+                v.addWidget(self._section_label("🌱 " + L("दुनिया का असर", "World impact")))
+                v.addWidget(grid([
+                    (L("कुल दस्तावेज़", "Documents"), fmt(gi("impactDocs")), IND),
+                    (L("कागज़ बचा (शीट)", "Paper sheets"), fmt(gi("impactPaper")), GRN),
+                    (L("पेड़ बचे (~)", "Trees saved (~)"), str(w.get("impactTrees") or 0), TEAL),
+                    (L("डेटा बचा (MB)", "Data saved (MB)"), str(w.get("impactDataMB") or 0), VIO),
+                    (L("कुल शेयर", "Shares"), fmt(gi("impactShares")), AMBER),
+                    (L("समय बचा (घंटे)", "Time saved (h)"), fmt(gi("impactHours")) + "h", ROSE),
+                ]))
+        except Exception:
+            pass
 
         v.addStretch(1)
         note = QtWidgets.QLabel(L("🔒 Sab aankde anonymous hain — kisi ka naam/file nahi.",
