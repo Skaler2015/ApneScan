@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "374"
+VERSION = "375"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13419,15 +13419,19 @@ class ScannerWindow(QtWidgets.QMainWindow):
         search.setClearButtonEnabled(True); v.addWidget(search)
 
         cols = [L("नाम", "Name"), L("स्कैन", "Scans"), L("देश", "Country"), L("क्षेत्र", "Region"),
-                L("वर्शन", "Ver"), L("मॉडल", "Model"), L("भाषा", "Lang"), L("पहली बार", "First"),
-                L("आख़िरी", "Last seen"), L("ऑनलाइन", "Online")]
+                L("शहर", "City"), L("वर्शन", "Ver"), L("मॉडल", "Model"), L("भाषा", "Lang"),
+                L("मोड", "Mode"), L("पहली बार", "First"), L("आख़िरी", "Last seen"),
+                L("स्थिति", "Status")]
+        STAT = len(cols) - 1
         tbl = QtWidgets.QTableWidget(len(users), len(cols))
         tbl.setHorizontalHeaderLabels(cols)
         tbl.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         tbl.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        tbl.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         tbl.setAlternatingRowColors(True)
         tbl.verticalHeader().setVisible(False)
         tbl.setSortingEnabled(False)
+        UR = QtCore.Qt.UserRole
 
         def ago(ts):
             ts = int(ts or 0)
@@ -13446,22 +13450,36 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 it.setText("" if text is None else str(text))
             return it
 
+        def row_status(online, blocked):
+            return "🚫" if blocked else ("🟢" if online else "")
+
+        def style_row(r, blocked):
+            col = QtGui.QColor("#9CA3AF") if blocked else QtGui.QColor("#111827")
+            for c in range(tbl.columnCount()):
+                itx = tbl.item(r, c)
+                if itx:
+                    itx.setForeground(col)
+
         for r, u in enumerate(users):
-            tbl.setItem(r, 0, cell(u.get("name", "—")))
+            blocked = bool(u.get("blocked"))
+            nm = cell(u.get("name", "—"))
+            nm.setData(UR, str(u.get("id", "")))        # user id (block/unblock ke liye)
+            nm.setData(UR + 1, 1 if blocked else 0)     # blocked flag
+            nm.setData(UR + 2, 1 if u.get("online") else 0)
+            tbl.setItem(r, 0, nm)
             tbl.setItem(r, 1, cell(num=u.get("scans", 0)))
             tbl.setItem(r, 2, cell(u.get("country", "")))
             tbl.setItem(r, 3, cell(u.get("region", "")))
-            tbl.setItem(r, 4, cell(u.get("version", "")))
-            tbl.setItem(r, 5, cell(u.get("model", "")))
-            tbl.setItem(r, 6, cell(u.get("lang", "")))
-            tbl.setItem(r, 7, cell(ago(u.get("first"))))
-            tbl.setItem(r, 8, cell(ago(u.get("last"))))
-            tbl.setItem(r, 9, cell("🟢" if u.get("online") else ""))
-            if u.get("blocked"):
-                for c in range(len(cols)):
-                    itx = tbl.item(r, c)
-                    if itx:
-                        itx.setForeground(QtGui.QColor("#9CA3AF"))
+            tbl.setItem(r, 4, cell(u.get("city", "")))
+            tbl.setItem(r, 5, cell(u.get("version", "")))
+            tbl.setItem(r, 6, cell(u.get("model", "")))
+            tbl.setItem(r, 7, cell(u.get("lang", "")))
+            tbl.setItem(r, 8, cell(u.get("mode", "")))
+            tbl.setItem(r, 9, cell(ago(u.get("first"))))
+            tbl.setItem(r, 10, cell(ago(u.get("last"))))
+            tbl.setItem(r, STAT, cell(row_status(u.get("online"), blocked)))
+            if blocked:
+                style_row(r, True)
         tbl.setSortingEnabled(True)
         tbl.sortItems(1, QtCore.Qt.DescendingOrder)
         try:
@@ -13475,15 +13493,23 @@ class ScannerWindow(QtWidgets.QMainWindow):
             q = (q or "").strip().lower()
             for r in range(tbl.rowCount()):
                 hay = " ".join((tbl.item(r, c).text() if tbl.item(r, c) else "")
-                               for c in (0, 2, 3, 4, 5)).lower()
+                               for c in (0, 2, 3, 4, 5, 6)).lower()
                 tbl.setRowHidden(r, bool(q) and q not in hay)
         search.textChanged.connect(filt)
+
+        # double-click a row = block/unblock toggle
+        tbl.cellDoubleClicked.connect(lambda r, c: self._admin_toggle_block(tbl, STAT))
 
         brow = QtWidgets.QHBoxLayout()
         note = QtWidgets.QLabel(L("🔒 सिर्फ़ admin — यह डेटा किसी आम यूज़र को नहीं दिखता।",
                                   "🔒 Admin only — regular users never see this."))
         note.setStyleSheet("color:#94A3B8;font-size:10px;")
         brow.addWidget(note); brow.addStretch(1)
+        bblk = QtWidgets.QPushButton("🚫 " + L("Block / Unblock", "Block / Unblock"))
+        bblk.setToolTip(L("चुने हुए यूज़र को block/unblock करें (double-click भी चलेगा)",
+                          "Block/unblock the selected user (double-click works too)"))
+        bblk.clicked.connect(lambda: self._admin_toggle_block(tbl, STAT))
+        brow.addWidget(bblk)
         bexp = QtWidgets.QPushButton("📥 CSV")
         bexp.clicked.connect(lambda: self._export_admin_users_csv(users))
         brow.addWidget(bexp)
@@ -13491,6 +13517,69 @@ class ScannerWindow(QtWidgets.QMainWindow):
         brow.addWidget(bclose)
         v.addLayout(brow)
         dlg.exec_()
+
+    def _admin_toggle_block(self, tbl, stat_col):
+        """Chune hue user ko block/unblock karo (admin-password se, server par)."""
+        L = self.L
+        UR = QtCore.Qt.UserRole
+        r = tbl.currentRow()
+        if r < 0:
+            self._warn(L("पहले किसी यूज़र को चुनें।", "Select a user first."))
+            return
+        nm = tbl.item(r, 0)
+        if not nm:
+            return
+        uid = nm.data(UR)
+        blocked = int(nm.data(UR + 1) or 0)
+        name = nm.text()
+        if not uid:
+            self._warn(L("इस यूज़र का id नहीं मिला (पुराना server?)।",
+                         "No id for this user (old server?)."))
+            return
+        newblk = 0 if blocked else 1
+        if newblk:
+            msg = L("'%s' को ब्लॉक करें? यह world-stats से हट जाएगा।",
+                    "Block '%s'? They will be removed from world stats.") % name
+        else:
+            msg = L("'%s' को अनब्लॉक करें?", "Unblock '%s'?") % name
+        if QtWidgets.QMessageBox.question(
+                self, L("Block / Unblock", "Block / Unblock"), msg,
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            return
+        pwd = self._opts.get("admin_pass", "")
+
+        def on(data):
+            if not isinstance(data, dict) or not data.get("ok"):
+                err = (data or {}).get("error", "") if isinstance(data, dict) else ""
+                if err == "auth":
+                    self._opts["admin_pass"] = ""
+                    try:
+                        self._save_opts()
+                    except Exception:
+                        pass
+                    self._warn(L("ग़लत password — यूज़र-विंडो दोबारा खोलें।",
+                                 "Wrong password — reopen the users window."))
+                else:
+                    self._warn(L("नहीं हो पाया: ", "Failed: ")
+                               + str(err or L("कनेक्शन नहीं हुआ", "no connection")))
+                return
+            nm.setData(UR + 1, newblk)
+            online = int(nm.data(UR + 2) or 0)
+            st = tbl.item(r, stat_col)
+            if st:
+                st.setText("🚫" if newblk else ("🟢" if online else ""))
+            col = QtGui.QColor("#9CA3AF") if newblk else QtGui.QColor("#111827")
+            for c in range(tbl.columnCount()):
+                itx = tbl.item(r, c)
+                if itx:
+                    itx.setForeground(col)
+            self.status.showMessage(
+                (L("🚫 Block किया: ", "🚫 Blocked: ") if newblk
+                 else L("✅ Unblock किया: ", "✅ Unblocked: ")) + name, 6000)
+
+        self._an_fetch({"action": "adminblock", "apass": pwd, "uid": str(uid),
+                        "block": str(newblk), "client": self._get_client_id(),
+                        "v": VERSION}, on)
 
     def _export_admin_users_csv(self, users):
         import csv

@@ -3869,6 +3869,7 @@ if ($action === 'adminusers') {
         $last = intval(isset($c['last'])?$c['last']:0);
         $isOn = (($now-$last)<=300) ? 1 : 0; if ($isOn) $online++;
         $ul[] = array(
+            'id'      => (string)$id,
             'name'    => ($nm!==''?$nm:'—'),
             'scans'   => intval(isset($c['scans'])?$c['scans']:0),
             'country' => trim(isset($c['country'])?$c['country']:''),
@@ -3891,6 +3892,25 @@ if ($action === 'adminusers') {
     $ul = array_slice($ul, 0, 800);   // payload cap
     echo json_encode(array('ok'=>true,'users'=>$ul,'count'=>$cnt,'online'=>$online,
         'srvtotal'=>intval($d['total']),'time'=>date('Y-m-d H:i'))); exit;
+}
+
+// (v374) ADMIN BLOCK/UNBLOCK — ek user ko block/unblock karo (admin-only).
+// Blocked user world-stats se nikal jaata hai (compute_stats use chhod deti hai).
+if ($action === 'adminblock') {
+    header('Content-Type: application/json');
+    $apass = isset($_REQUEST['apass']) ? (string)$_REQUEST['apass'] : '';
+    if ($ADMIN_PASS === '' || !hash_equals($ADMIN_PASS, $apass)) {
+        echo json_encode(array('ok'=>false,'error'=>'auth')); exit;
+    }
+    $uid = isset($_REQUEST['uid']) ? _clean_str($_REQUEST['uid'], 64) : '';
+    if ($uid === '' || !isset($d['clients'][$uid])) {
+        echo json_encode(array('ok'=>false,'error'=>'nouser')); exit;
+    }
+    $blk = intval(isset($_REQUEST['block']) ? $_REQUEST['block'] : 0);
+    if ($blk) $d['clients'][$uid]['blocked'] = 1;
+    else unset($d['clients'][$uid]['blocked']);
+    save_data($DATA_FILE, $d);
+    echo json_encode(array('ok'=>true,'uid'=>$uid,'blocked'=>$blk?1:0)); exit;
 }
 
 if ($action === 'scan') {
