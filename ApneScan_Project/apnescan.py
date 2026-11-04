@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "380"
+VERSION = "381"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13718,6 +13718,15 @@ class ScannerWindow(QtWidgets.QMainWindow):
         hrow.addWidget(badge_lbl, 0, QtCore.Qt.AlignTop)
         v.addLayout(hrow)
 
+        blk_banner = QtWidgets.QLabel(
+            "🚫 " + L("यह यूज़र BLOCKED है — world-stats में नहीं गिना जाता।",
+                      "This user is BLOCKED — excluded from world stats."))
+        blk_banner.setWordWrap(True)
+        blk_banner.setStyleSheet("background:#FEE2E2;border:1px solid #FCA5A5;border-radius:8px;"
+                                 "padding:7px 11px;color:#B91C1C;font-weight:800;font-size:12px;")
+        blk_banner.setVisible(bool(state["blocked"]))
+        v.addWidget(blk_banner)
+
         # ---- profile grid ----
         def row2(a, b):
             return '<tr><td style="color:#64748B;padding:2px 10px 2px 0;">%s</td>' \
@@ -13860,6 +13869,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 state["blocked"] = newblk
                 refresh_btn()
                 badge_lbl.setText(badge_html())
+                blk_banner.setVisible(bool(newblk))
                 if tbl is not None and nm_item is not None:
                     self._apply_block_to_row(tbl, nm_item, newblk)
                 self.status.showMessage(
