@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "375"
+VERSION = "376"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13408,15 +13408,25 @@ class ScannerWindow(QtWidgets.QMainWindow):
         dlg.setWindowTitle(L("👤 यूज़र डिटेल्स (Admin)", "👤 User details (Admin)"))
         dlg.resize(780, 580)
         v = QtWidgets.QVBoxLayout(dlg)
+        nblk = sum(1 for u in users if u.get("blocked"))
         hdr = QtWidgets.QLabel(
-            (L("कुल यूज़र: <b>%s</b> &nbsp;·&nbsp; 🟢 online: <b>%s</b> &nbsp;·&nbsp; कुल स्कैन: <b>%s</b>",
-               "Total users: <b>%s</b> &nbsp;·&nbsp; 🟢 online: <b>%s</b> &nbsp;·&nbsp; total scans: <b>%s</b>"))
+            (L("कुल यूज़र: <b>%s</b> &nbsp;·&nbsp; 🟢 online: <b>%s</b> &nbsp;·&nbsp; 🚫 blocked: <b>%s</b> &nbsp;·&nbsp; कुल स्कैन: <b>%s</b>",
+               "Total users: <b>%s</b> &nbsp;·&nbsp; 🟢 online: <b>%s</b> &nbsp;·&nbsp; 🚫 blocked: <b>%s</b> &nbsp;·&nbsp; total scans: <b>%s</b>"))
             % ("{:,}".format(int(data.get("count") or 0)), int(data.get("online") or 0),
-               "{:,}".format(int(data.get("srvtotal") or 0))))
+               "{:,}".format(nblk), "{:,}".format(int(data.get("srvtotal") or 0))))
         hdr.setTextFormat(QtCore.Qt.RichText); v.addWidget(hdr)
+        frow0 = QtWidgets.QHBoxLayout()
         search = QtWidgets.QLineEdit()
         search.setPlaceholderText(L("🔍 नाम/देश/वर्शन/मॉडल खोजें…", "🔍 Search name/country/version/model…"))
-        search.setClearButtonEnabled(True); v.addWidget(search)
+        search.setClearButtonEnabled(True)
+        frow0.addWidget(search, 1)
+        mode_cb = QtWidgets.QComboBox()
+        mode_cb.addItems([L("सब", "All"), "🟢 " + L("Online", "Online"),
+                          "🚫 " + L("Blocked", "Blocked")])
+        mode_cb.setToolTip(L("दिखाएँ: सब / सिर्फ़ online / सिर्फ़ blocked",
+                             "Show: all / online only / blocked only"))
+        frow0.addWidget(mode_cb)
+        v.addLayout(frow0)
 
         cols = [L("नाम", "Name"), L("स्कैन", "Scans"), L("देश", "Country"), L("क्षेत्र", "Region"),
                 L("शहर", "City"), L("वर्शन", "Ver"), L("मॉडल", "Model"), L("भाषा", "Lang"),
@@ -13489,13 +13499,24 @@ class ScannerWindow(QtWidgets.QMainWindow):
             pass
         v.addWidget(tbl, 1)
 
-        def filt(q):
-            q = (q or "").strip().lower()
+        def apply_filters(*_a):
+            q = (search.text() or "").strip().lower()
+            mode = mode_cb.currentIndex()        # 0=all, 1=online, 2=blocked
             for r in range(tbl.rowCount()):
+                nmit = tbl.item(r, 0)
+                blocked = int(nmit.data(UR + 1) or 0) if nmit else 0
+                online = int(nmit.data(UR + 2) or 0) if nmit else 0
                 hay = " ".join((tbl.item(r, c).text() if tbl.item(r, c) else "")
                                for c in (0, 2, 3, 4, 5, 6)).lower()
-                tbl.setRowHidden(r, bool(q) and q not in hay)
-        search.textChanged.connect(filt)
+                hide = bool(q) and q not in hay
+                if mode == 1 and not online:
+                    hide = True
+                if mode == 2 and not blocked:
+                    hide = True
+                tbl.setRowHidden(r, hide)
+        search.textChanged.connect(apply_filters)
+        mode_cb.currentIndexChanged.connect(apply_filters)
+        tbl._reapply_filters = apply_filters      # block/unblock ke baad dobara lagane ke liye
 
         # double-click a row = block/unblock toggle
         tbl.cellDoubleClicked.connect(lambda r, c: self._admin_toggle_block(tbl, STAT))
@@ -13576,6 +13597,12 @@ class ScannerWindow(QtWidgets.QMainWindow):
             self.status.showMessage(
                 (L("🚫 Block किया: ", "🚫 Blocked: ") if newblk
                  else L("✅ Unblock किया: ", "✅ Unblocked: ")) + name, 6000)
+            fn = getattr(tbl, "_reapply_filters", None)
+            if callable(fn):
+                try:
+                    fn()
+                except Exception:
+                    pass
 
         self._an_fetch({"action": "adminblock", "apass": pwd, "uid": str(uid),
                         "block": str(newblk), "client": self._get_client_id(),
