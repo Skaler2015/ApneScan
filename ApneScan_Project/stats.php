@@ -3913,6 +3913,46 @@ if ($action === 'adminblock') {
     echo json_encode(array('ok'=>true,'uid'=>$uid,'blocked'=>$blk?1:0)); exit;
 }
 
+// (v378) ADMIN SINGLE-USER DETAIL — ek user ke SAARE feature-counts + recent
+// activity + poora profile (admin-only, read-only).
+if ($action === 'adminuser') {
+    header('Content-Type: application/json');
+    $apass = isset($_REQUEST['apass']) ? (string)$_REQUEST['apass'] : '';
+    if ($ADMIN_PASS === '' || !hash_equals($ADMIN_PASS, $apass)) {
+        echo json_encode(array('ok'=>false,'error'=>'auth')); exit;
+    }
+    $uid = isset($_REQUEST['uid']) ? _clean_str($_REQUEST['uid'], 64) : '';
+    if ($uid === '' || !isset($d['clients'][$uid])) {
+        echo json_encode(array('ok'=>false,'error'=>'nouser')); exit;
+    }
+    $c = $d['clients'][$uid];
+    $g = function($k) use ($c) { return isset($c[$k]) ? $c[$k] : ''; };
+    $last = intval($g('last'));
+    $feats = (isset($c['feats']) && is_array($c['feats'])) ? $c['feats'] : array();
+    arsort($feats);
+    $fl = array(); foreach ($feats as $fk=>$fv) { $fl[] = array((string)$fk, intval($fv)); }
+    $acts = (isset($c['actions']) && is_array($c['actions'])) ? $c['actions'] : array();
+    arsort($acts);
+    $al = array(); foreach ($acts as $ak=>$av) { $al[] = array((string)$ak, intval($av)); }
+    $ev = array();
+    foreach (array_slice((isset($c['ev']) && is_array($c['ev'])) ? $c['ev'] : array(), -30) as $e) {
+        if (is_array($e) && count($e) >= 2) $ev[] = array(intval($e[0]), (string)$e[1]);
+    }
+    $ev = array_reverse($ev);
+    echo json_encode(array('ok'=>true,
+        'name'=>trim((string)$g('name')), 'scans'=>intval($g('scans')),
+        'country'=>trim((string)$g('country')), 'region'=>trim((string)$g('region')),
+        'city'=>trim((string)$g('city')), 'version'=>trim((string)$g('version')),
+        'method'=>trim((string)$g('method')), 'model'=>trim((string)$g('model')),
+        'lang'=>trim((string)$g('lang')), 'mode'=>trim((string)$g('mode')),
+        'first'=>intval($g('first')), 'last'=>$last, 'online'=>(($now-$last)<=300)?1:0,
+        'blocked'=>!empty($c['blocked'])?1:0,
+        'activeDays'=>count((isset($c['active'])&&is_array($c['active']))?$c['active']:array()),
+        'note'=>trim((string)$g('note')), 'tags'=>trim((string)$g('tags')),
+        'feats'=>$fl, 'actions'=>$al, 'ev'=>$ev,
+        'nfeats'=>count($feats))); exit;
+}
+
 if ($action === 'scan') {
     if ($SECRET !== '' && (!isset($_REQUEST['secret']) || $_REQUEST['secret'] !== $SECRET)) {
         header('Content-Type: application/json'); echo json_encode(array('ok'=>false,'error'=>'bad secret')); exit;

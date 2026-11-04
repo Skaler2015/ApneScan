@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "377"
+VERSION = "378"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13520,8 +13520,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         mode_cb.currentIndexChanged.connect(apply_filters)
         tbl._reapply_filters = apply_filters      # block/unblock ke baad dobara lagane ke liye
 
-        # double-click a row = block/unblock toggle
-        tbl.cellDoubleClicked.connect(lambda r, c: self._admin_toggle_block(tbl, STAT))
+        # double-click a row = open full per-user detail (features + activity)
+        tbl.cellDoubleClicked.connect(lambda r, c: self._show_admin_user_detail(tbl))
 
         brow = QtWidgets.QHBoxLayout()
         note = QtWidgets.QLabel(L("🔒 सिर्फ़ admin — यह डेटा किसी आम यूज़र को नहीं दिखता।",
@@ -13529,8 +13529,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         note.setStyleSheet("color:#94A3B8;font-size:10px;")
         brow.addWidget(note); brow.addStretch(1)
         bblk = QtWidgets.QPushButton("🚫 " + L("Block / Unblock", "Block / Unblock"))
-        bblk.setToolTip(L("चुने हुए यूज़र को block/unblock करें (double-click भी चलेगा)",
-                          "Block/unblock the selected user (double-click works too)"))
+        bblk.setToolTip(L("चुने हुए यूज़र को block/unblock करें (यूज़र पर double-click = पूरी detail)",
+                          "Block/unblock the selected user (double-click a user = full detail)"))
         bblk.clicked.connect(lambda: self._admin_toggle_block(tbl, STAT))
         brow.addWidget(bblk)
         bexp = QtWidgets.QPushButton("📥 CSV")
@@ -13609,6 +13609,160 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._an_fetch({"action": "adminblock", "apass": pwd, "uid": str(uid),
                         "block": str(newblk), "client": self._get_client_id(),
                         "v": VERSION}, on)
+
+    def _show_admin_user_detail(self, tbl):
+        """Ek user ki poori detail — SAARE feature-counts + recent activity +
+        profile (admin-only, read-only). Row double-click se khulta hai."""
+        L = self.L
+        UR = QtCore.Qt.UserRole
+        r = tbl.currentRow()
+        if r < 0:
+            return
+        nm = tbl.item(r, 0)
+        if not nm:
+            return
+        uid = nm.data(UR)
+        if not uid:
+            self._warn(L("इस यूज़र का id नहीं मिला (पुराना server?)।",
+                         "No id for this user (old server?)."))
+            return
+        pwd = self._opts.get("admin_pass", "")
+        self.status.showMessage(L("यूज़र की detail लाई जा रही है…", "Fetching user detail…"), 4000)
+
+        def on(data):
+            if not isinstance(data, dict) or not data.get("ok"):
+                err = (data or {}).get("error", "") if isinstance(data, dict) else ""
+                if err == "nouser":
+                    self._warn(L("यह यूज़र नहीं मिला।", "User not found."))
+                elif err == "auth":
+                    self._opts["admin_pass"] = ""
+                    try:
+                        self._save_opts()
+                    except Exception:
+                        pass
+                    self._warn(L("ग़लत password — यूज़र-विंडो दोबारा खोलें।",
+                                 "Wrong password — reopen the users window."))
+                else:
+                    self._warn(L("detail नहीं मिली।", "Could not load detail."))
+                return
+            self._render_admin_user_detail(data)
+
+        self._an_fetch({"action": "adminuser", "apass": pwd, "uid": str(uid),
+                        "client": self._get_client_id(), "v": VERSION}, on)
+
+    def _render_admin_user_detail(self, u):
+        L = self.L
+        RT = QtCore.Qt.RichText
+        import html as _html
+
+        def ago(ts):
+            ts = int(ts or 0)
+            if ts <= 0:
+                return "—"
+            try:
+                return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                return "—"
+
+        name = u.get("name") or "—"
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(L("👤 यूज़र detail", "👤 User detail") + " — " + name)
+        dlg.resize(560, 620)
+        outer = QtWidgets.QVBoxLayout(dlg); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
+        scroll = QtWidgets.QScrollArea(); scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        body = QtWidgets.QWidget(); v = QtWidgets.QVBoxLayout(body)
+        v.setContentsMargins(16, 14, 16, 12); v.setSpacing(10)
+        scroll.setWidget(body); outer.addWidget(scroll, 1)
+
+        badge = ("🚫 " + L("Blocked", "Blocked")) if u.get("blocked") else \
+                ("🟢 " + L("Online", "Online")) if u.get("online") else ("⚪ " + L("Offline", "Offline"))
+        head = QtWidgets.QLabel(
+            '<b style="font-size:18px;color:#111827;">%s</b> &nbsp; '
+            '<span style="color:#64748B;">%s</span><br>'
+            '<span style="color:#4F46E5;font-weight:800;font-size:15px;">%s</span> %s'
+            % (_html.escape(name), badge, "{:,}".format(int(u.get("scans") or 0)),
+               L("स्कैन", "scans")))
+        head.setTextFormat(RT); head.setWordWrap(True); v.addWidget(head)
+
+        # ---- profile grid ----
+        def row2(a, b):
+            return '<tr><td style="color:#64748B;padding:2px 10px 2px 0;">%s</td>' \
+                   '<td style="color:#111827;">%s</td></tr>' % (a, _html.escape(str(b) if b not in (None, "") else "—"))
+        prof = (row2(L("देश", "Country"), u.get("country")) +
+                row2(L("क्षेत्र", "Region"), u.get("region")) +
+                row2(L("शहर", "City"), u.get("city")) +
+                row2(L("वर्शन", "Version"), u.get("version")) +
+                row2(L("मॉडल", "Model"), u.get("model")) +
+                row2(L("तरीक़ा", "Method"), u.get("method")) +
+                row2(L("भाषा", "Language"), u.get("lang")) +
+                row2(L("मोड", "Mode"), u.get("mode")) +
+                row2(L("पहली बार", "First seen"), ago(u.get("first"))) +
+                row2(L("आख़िरी बार", "Last seen"), ago(u.get("last"))) +
+                row2(L("सक्रिय दिन", "Active days"), u.get("activeDays")) +
+                row2(L("कुल फ़ीचर", "Features used"), u.get("nfeats")))
+        if u.get("note"):
+            prof += row2(L("नोट", "Note"), u.get("note"))
+        if u.get("tags"):
+            prof += row2(L("टैग", "Tags"), u.get("tags"))
+        pl = QtWidgets.QLabel('<table cellspacing="0" style="font-size:12.5px;">%s</table>' % prof)
+        pl.setTextFormat(RT); pl.setWordWrap(True)
+        pl.setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;padding:10px 12px;")
+        v.addWidget(pl)
+
+        # ---- ALL feature counts ----
+        feats = u.get("feats") or []
+        v.addWidget(self._section_label("🧩 " + L("सारे फ़ीचर (गिनती के साथ)", "All features (with counts)")))
+        if feats:
+            ft = QtWidgets.QTableWidget(len(feats), 2)
+            ft.setHorizontalHeaderLabels([L("फ़ीचर", "Feature"), L("कितनी बार", "Count")])
+            ft.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+            ft.verticalHeader().setVisible(False)
+            ft.setMinimumHeight(min(260, 34 + 26 * len(feats)))
+            for i, fc in enumerate(feats):
+                try:
+                    fname, fcnt = str(fc[0]), int(fc[1])
+                except Exception:
+                    fname, fcnt = str(fc), 0
+                it0 = QtWidgets.QTableWidgetItem(fname)
+                it1 = QtWidgets.QTableWidgetItem(); it1.setData(QtCore.Qt.DisplayRole, fcnt)
+                ft.setItem(i, 0, it0); ft.setItem(i, 1, it1)
+            ft.setSortingEnabled(True); ft.sortItems(1, QtCore.Qt.DescendingOrder)
+            ft.resizeColumnsToContents()
+            ft.horizontalHeader().setStretchLastSection(True)
+            v.addWidget(ft)
+        else:
+            v.addWidget(QtWidgets.QLabel(L("कोई फ़ीचर इस्तेमाल नहीं किया।", "No features used yet.")))
+
+        # ---- recent activity ----
+        ev = u.get("ev") or []
+        if ev:
+            v.addWidget(self._section_label("🕑 " + L("हाल की गतिविधि", "Recent activity")))
+            rows = ""
+            for e in ev[:30]:
+                try:
+                    et, en = int(e[0]), str(e[1])
+                except Exception:
+                    continue
+                rows += ('<tr><td style="color:#94A3B8;padding:2px 10px 2px 0;white-space:nowrap;">%s</td>'
+                         '<td style="color:#111827;">%s</td></tr>' % (ago(et), _html.escape(en)))
+            el = QtWidgets.QLabel('<table cellspacing="0" style="font-size:12px;">%s</table>' % rows)
+            el.setTextFormat(RT); el.setWordWrap(True)
+            el.setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;border-radius:10px;padding:8px 10px;")
+            v.addWidget(el)
+
+        v.addStretch(1)
+        note = QtWidgets.QLabel(L("🔒 सिर्फ़ admin — यह डेटा किसी आम यूज़र को नहीं दिखता।",
+                                  "🔒 Admin only — regular users never see this."))
+        note.setStyleSheet("color:#94A3B8;font-size:10px;")
+        v.addWidget(note)
+
+        bb = QtWidgets.QHBoxLayout(); bb.setContentsMargins(14, 8, 14, 10)
+        bb.addStretch(1)
+        bclose = QtWidgets.QPushButton(L("बंद करें", "Close")); bclose.clicked.connect(dlg.accept)
+        bb.addWidget(bclose)
+        outer.addLayout(bb)
+        dlg.exec_()
 
     def _export_admin_users_csv(self, users):
         import csv
