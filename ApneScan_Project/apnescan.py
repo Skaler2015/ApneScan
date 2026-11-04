@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "381"
+VERSION = "382"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3162,15 +3162,22 @@ class ScanWorker(QtCore.QThread):
                 fd, out = tempfile.mkstemp(suffix=".jpg", dir=self.tmpdir)
                 os.close(fd)
                 try:
-                    # (v237) NAPS2 jaisa: master q90 (NAPS2 q75 se behtar, par
-                    # v232 wale q95+4:4:4 se KAAFI chhota — file bahut badi ho
-                    # rahi thi). Normal subsampling (NAPS2 bhi wahi).
+                    # (v382) HD master pages: q95 + 4:4:4 (koi chroma loss nahi).
+                    # Master = ARCHIVE copy; yahi se PDF/preview/re-save banta hai,
+                    # isliye yahan koi kami nahi — zoom/print par bhi ekdam sharp.
+                    # (Pehle q90 tha file-size ke liye; ab quality-first.)
                     if im.mode == "L":
-                        im.save(out, "JPEG", quality=90, dpi=_dpi)
+                        im.save(out, "JPEG", quality=95, dpi=_dpi,
+                                subsampling=0)
                     else:
-                        im.convert("RGB").save(out, "JPEG", quality=90, dpi=_dpi)
+                        im.convert("RGB").save(out, "JPEG", quality=95,
+                                               dpi=_dpi, subsampling=0)
                 except Exception:
-                    im.convert("RGB").save(out, "JPEG", quality=90)
+                    try:
+                        im.convert("RGB").save(out, "JPEG", quality=95,
+                                               subsampling=0)
+                    except Exception:
+                        im.convert("RGB").save(out, "JPEG", quality=95)
             self.kept += 1
             # (v356) seq ke saath: UI is final ko usi seq ke preview par replace
             # karega (seq=-1 -> naya page append, jaise split ka doosra half).
@@ -32361,12 +32368,13 @@ if the toggle is ticked).</p>
             # PDF quality mode (Settings): best = quality-first (koi downscale
             # nahi, q95 — print/zoom/archive ke liye); balanced/compact chhoti
             # file ke liye.
-            # (v237) NAPS2 jaisa size/quality: NAPS2 default q75 use karta hai.
-            # Pehle 'best' q95 + 4:4:4 tha -> file 2-3x badi. Ab 'best' q85
-            # (NAPS2 se behtar par kaafi chhota), normal subsampling.
+            # (v382) HD: 'best' wapas poori q95 + 4:4:4 (near-lossless) par —
+            # master-q95 ke upar PDF me DOBARA q85 lagne se scan soft/maila dikh
+            # raha tha. Ab best = ekdam sharp (file thodi badi, par quality-first).
+            # Chhoti file chahiye to user balanced/compact chune.
             _pm = str(self._opts.get("pdf_quality_mode", "best") or "best").lower()
             q, _cap = {"balanced": (78, 4400),
-                       "compact": (70, 3300)}.get(_pm, (85, 0))
+                       "compact": (70, 3300)}.get(_pm, (95, 0))
         wm = self._opts.get("watermark")
         wt = self._opts.get("watermark_text", "")
         imgs, res = self._pdf_ready_pages(paths, max_side=_cap)
@@ -32405,8 +32413,11 @@ if the toggle is ticked).</p>
         if not any(im.mode == "1" for im in imgs):
             kw["quality"] = max(1, min(95, q))
             kw["optimize"] = True     # muft ~3-8% chhoti (huffman optimize)
-            # (v237) NAPS2 normal chroma-subsampling (4:2:0) use karta hai —
-            # hum bhi wahi (chhoti file). Pehle 4:4:4 se file badi ho rahi thi.
+            # (v382) HD: high-quality (q>=90, yaani 'best') par 4:4:4 — koi
+            # chroma-subsampling nahi, taaki rangeen text/lines ke edges sharp
+            # rahein. balanced/compact par normal 4:2:0 (chhoti file).
+            if q >= 90:
+                kw["subsampling"] = 0
         def _save_pdf(dst):
             # subsampling kuch purane Pillow me PDF-save par na chale to bina
             # uske dobara — save kabhi fail na ho.
