@@ -3854,6 +3854,45 @@ if ($__ip !== '' && !filter_var($__ip, FILTER_VALIDATE_IP)) {
 if (!empty($HAS_STORAGE)) storageLockExclusive($DATA_FILE);
 $d = load_data($DATA_FILE);
 
+// (v373) ADMIN USER DETAILS — app ke admin-only "User details" screen ke liye.
+// SIRF sahi admin-password (apass === $ADMIN_PASS) par chalti hai; aam user ko
+// kuchh personal data NAHI milta. Read-only (data badalti nahi).
+if ($action === 'adminusers') {
+    header('Content-Type: application/json');
+    $apass = isset($_REQUEST['apass']) ? (string)$_REQUEST['apass'] : '';
+    if ($ADMIN_PASS === '' || !hash_equals($ADMIN_PASS, $apass)) {
+        echo json_encode(array('ok'=>false,'error'=>'auth')); exit;
+    }
+    $ul = array(); $online = 0;
+    foreach ($d['clients'] as $id=>$c) {
+        $nm = trim(isset($c['name'])?$c['name']:'');
+        $last = intval(isset($c['last'])?$c['last']:0);
+        $isOn = (($now-$last)<=300) ? 1 : 0; if ($isOn) $online++;
+        $ul[] = array(
+            'name'    => ($nm!==''?$nm:'—'),
+            'scans'   => intval(isset($c['scans'])?$c['scans']:0),
+            'country' => trim(isset($c['country'])?$c['country']:''),
+            'region'  => trim(isset($c['region'])?$c['region']:''),
+            'city'    => trim(isset($c['city'])?$c['city']:''),
+            'version' => trim(isset($c['version'])?$c['version']:''),
+            'method'  => trim(isset($c['method'])?$c['method']:''),
+            'model'   => trim(isset($c['model'])?$c['model']:''),
+            'lang'    => trim(isset($c['lang'])?$c['lang']:''),
+            'mode'    => trim(isset($c['mode'])?$c['mode']:''),
+            'first'   => intval(isset($c['first'])?$c['first']:0),
+            'last'    => $last,
+            'online'  => $isOn,
+            'nfeats'  => count((isset($c['feats'])&&is_array($c['feats']))?$c['feats']:array()),
+            'blocked' => !empty($c['blocked'])?1:0
+        );
+    }
+    usort($ul, function($a,$b){ return $b['scans']-$a['scans']; });
+    $cnt = count($ul);
+    $ul = array_slice($ul, 0, 800);   // payload cap
+    echo json_encode(array('ok'=>true,'users'=>$ul,'count'=>$cnt,'online'=>$online,
+        'srvtotal'=>intval($d['total']),'time'=>date('Y-m-d H:i'))); exit;
+}
+
 if ($action === 'scan') {
     if ($SECRET !== '' && (!isset($_REQUEST['secret']) || $_REQUEST['secret'] !== $SECRET)) {
         header('Content-Type: application/json'); echo json_encode(array('ok'=>false,'error'=>'bad secret')); exit;

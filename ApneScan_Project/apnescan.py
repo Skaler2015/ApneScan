@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "373"
+VERSION = "374"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13351,10 +13351,166 @@ class ScannerWindow(QtWidgets.QMainWindow):
         b_ref = QtWidgets.QPushButton("🔄 " + L("Taaza", "Refresh"))
         b_ref.clicked.connect(lambda: (self._an_refresh() if hasattr(self, "_an_refresh") else None))
         bb.addWidget(b_ref)
+        b_users = QtWidgets.QPushButton("👤 " + L("यूज़र", "Users"))
+        b_users.setToolTip(L("Admin-only: har user ki detail (admin password chahiye)",
+                             "Admin-only: per-user details (needs admin password)"))
+        b_users.clicked.connect(lambda: self._show_admin_users())
+        bb.addWidget(b_users)
         b_close = QtWidgets.QPushButton(L("बंद करो", "Close")); b_close.clicked.connect(dlg.accept)
         bb.addWidget(b_close)
         outer.addLayout(bb)
         dlg.exec_()
+
+    # ---- (v373) ADMIN-ONLY: per-user details (password-gated, server-enforced) ----
+    def _show_admin_users(self):
+        """Admin (owner) ko har user ki detail dikhata hai — server sirf sahi
+        admin-password par ye data bhejta hai, isliye aam user ko kuchh nahi milta."""
+        L = self.L
+        pwd = self._opts.get("admin_pass", "")
+        if not pwd:
+            pwd, ok = QtWidgets.QInputDialog.getText(
+                self, L("Admin — यूज़र डिटेल्स", "Admin — user details"),
+                L("Admin password डालें:", "Enter admin password:"),
+                QtWidgets.QLineEdit.Password)
+            if not ok or not pwd:
+                return
+        self.status.showMessage(L("यूज़र डिटेल्स लाई जा रही हैं…", "Fetching user details…"), 4000)
+
+        def on(data):
+            if not isinstance(data, dict):
+                self._warn(L("कनेक्शन नहीं हुआ। इंटरनेट जाँचें।", "Could not connect. Check internet."))
+                return
+            if not data.get("ok"):
+                if data.get("error") == "auth":
+                    self._opts["admin_pass"] = ""
+                    try:
+                        self._save_opts()
+                    except Exception:
+                        pass
+                    self._warn(L("ग़लत admin password।", "Wrong admin password."))
+                else:
+                    self._warn(L("नहीं मिला: ", "Error: ") + str(data.get("error")))
+                return
+            self._opts["admin_pass"] = pwd          # sahi -> yaad rakho
+            try:
+                self._save_opts()
+            except Exception:
+                pass
+            self._render_admin_users(data)
+
+        self._an_fetch({"action": "adminusers", "apass": pwd,
+                        "client": self._get_client_id(), "v": VERSION}, on)
+
+    def _render_admin_users(self, data):
+        L = self.L
+        users = data.get("users") or []
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(L("👤 यूज़र डिटेल्स (Admin)", "👤 User details (Admin)"))
+        dlg.resize(780, 580)
+        v = QtWidgets.QVBoxLayout(dlg)
+        hdr = QtWidgets.QLabel(
+            (L("कुल यूज़र: <b>%s</b> &nbsp;·&nbsp; 🟢 online: <b>%s</b> &nbsp;·&nbsp; कुल स्कैन: <b>%s</b>",
+               "Total users: <b>%s</b> &nbsp;·&nbsp; 🟢 online: <b>%s</b> &nbsp;·&nbsp; total scans: <b>%s</b>"))
+            % ("{:,}".format(int(data.get("count") or 0)), int(data.get("online") or 0),
+               "{:,}".format(int(data.get("srvtotal") or 0))))
+        hdr.setTextFormat(QtCore.Qt.RichText); v.addWidget(hdr)
+        search = QtWidgets.QLineEdit()
+        search.setPlaceholderText(L("🔍 नाम/देश/वर्शन/मॉडल खोजें…", "🔍 Search name/country/version/model…"))
+        search.setClearButtonEnabled(True); v.addWidget(search)
+
+        cols = [L("नाम", "Name"), L("स्कैन", "Scans"), L("देश", "Country"), L("क्षेत्र", "Region"),
+                L("वर्शन", "Ver"), L("मॉडल", "Model"), L("भाषा", "Lang"), L("पहली बार", "First"),
+                L("आख़िरी", "Last seen"), L("ऑनलाइन", "Online")]
+        tbl = QtWidgets.QTableWidget(len(users), len(cols))
+        tbl.setHorizontalHeaderLabels(cols)
+        tbl.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        tbl.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        tbl.setAlternatingRowColors(True)
+        tbl.verticalHeader().setVisible(False)
+        tbl.setSortingEnabled(False)
+
+        def ago(ts):
+            ts = int(ts or 0)
+            if ts <= 0:
+                return "—"
+            try:
+                return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+            except Exception:
+                return "—"
+
+        def cell(text=None, num=None):
+            it = QtWidgets.QTableWidgetItem()
+            if num is not None:
+                it.setData(QtCore.Qt.DisplayRole, int(num))
+            else:
+                it.setText("" if text is None else str(text))
+            return it
+
+        for r, u in enumerate(users):
+            tbl.setItem(r, 0, cell(u.get("name", "—")))
+            tbl.setItem(r, 1, cell(num=u.get("scans", 0)))
+            tbl.setItem(r, 2, cell(u.get("country", "")))
+            tbl.setItem(r, 3, cell(u.get("region", "")))
+            tbl.setItem(r, 4, cell(u.get("version", "")))
+            tbl.setItem(r, 5, cell(u.get("model", "")))
+            tbl.setItem(r, 6, cell(u.get("lang", "")))
+            tbl.setItem(r, 7, cell(ago(u.get("first"))))
+            tbl.setItem(r, 8, cell(ago(u.get("last"))))
+            tbl.setItem(r, 9, cell("🟢" if u.get("online") else ""))
+            if u.get("blocked"):
+                for c in range(len(cols)):
+                    itx = tbl.item(r, c)
+                    if itx:
+                        itx.setForeground(QtGui.QColor("#9CA3AF"))
+        tbl.setSortingEnabled(True)
+        tbl.sortItems(1, QtCore.Qt.DescendingOrder)
+        try:
+            tbl.resizeColumnsToContents()
+            tbl.horizontalHeader().setStretchLastSection(True)
+        except Exception:
+            pass
+        v.addWidget(tbl, 1)
+
+        def filt(q):
+            q = (q or "").strip().lower()
+            for r in range(tbl.rowCount()):
+                hay = " ".join((tbl.item(r, c).text() if tbl.item(r, c) else "")
+                               for c in (0, 2, 3, 4, 5)).lower()
+                tbl.setRowHidden(r, bool(q) and q not in hay)
+        search.textChanged.connect(filt)
+
+        brow = QtWidgets.QHBoxLayout()
+        note = QtWidgets.QLabel(L("🔒 सिर्फ़ admin — यह डेटा किसी आम यूज़र को नहीं दिखता।",
+                                  "🔒 Admin only — regular users never see this."))
+        note.setStyleSheet("color:#94A3B8;font-size:10px;")
+        brow.addWidget(note); brow.addStretch(1)
+        bexp = QtWidgets.QPushButton("📥 CSV")
+        bexp.clicked.connect(lambda: self._export_admin_users_csv(users))
+        brow.addWidget(bexp)
+        bclose = QtWidgets.QPushButton(L("बंद करें", "Close")); bclose.clicked.connect(dlg.accept)
+        brow.addWidget(bclose)
+        v.addLayout(brow)
+        dlg.exec_()
+
+    def _export_admin_users_csv(self, users):
+        import csv
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, self.L("CSV सेव करें", "Save CSV"),
+            os.path.join(self._opts.get("save_folder", os.path.expanduser("~")), "apnescan_users.csv"),
+            "CSV (*.csv)")
+        if not path:
+            return
+        keys = ["name", "scans", "country", "region", "city", "version", "method",
+                "model", "lang", "mode", "first", "last", "online", "nfeats", "blocked"]
+        try:
+            with open(path, "w", newline="", encoding="utf-8-sig") as f:
+                wtr = csv.writer(f)
+                wtr.writerow(keys)
+                for u in users:
+                    wtr.writerow([u.get(k, "") for k in keys])
+            self.status.showMessage(self.L("✅ CSV सेव: ", "✅ CSV saved: ") + os.path.basename(path), 6000)
+        except Exception as e:
+            self._warn(str(e))
 
     def _set_daily_goal(self):
         """(v370) Aaj ka page-target set karo (World Dashboard ke goal-ring se)."""
