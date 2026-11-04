@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "379"
+VERSION = "380"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13745,6 +13745,36 @@ class ScannerWindow(QtWidgets.QMainWindow):
 
         # ---- ALL feature counts ----
         feats = u.get("feats") or []
+        # ---- feature-usage bar chart (top 12) ----
+        if feats:
+            v.addWidget(self._section_label("📊 " + L("फ़ीचर-उपयोग", "Feature usage")))
+            try:
+                maxc = max(int(fc[1]) for fc in feats) or 1
+            except Exception:
+                maxc = 1
+            pal = ["#4F46E5", "#0D9488", "#7C3AED", "#B45309", "#BE123C", "#2563EB",
+                   "#059669", "#DB2777", "#EA580C", "#0891B2", "#9333EA", "#CA8A04"]
+            rows = ""
+            for i, fc in enumerate(feats[:12]):
+                try:
+                    fname, fcnt = str(fc[0]), int(fc[1])
+                except Exception:
+                    fname, fcnt = str(fc), 0
+                wpx = max(3, int(round(fcnt / maxc * 190)))
+                colr = pal[i % len(pal)]
+                rows += ('<tr>'
+                         '<td style="padding:3px 8px 3px 0;color:#334155;white-space:nowrap;">%s</td>'
+                         '<td><table cellspacing="0" cellpadding="0"><tr>'
+                         '<td width="%d" height="13" bgcolor="%s">&#160;</td></tr></table></td>'
+                         '<td style="padding:3px 0 3px 8px;color:#4F46E5;font-weight:700;'
+                         'white-space:nowrap;">%s</td></tr>'
+                         % (_html.escape(fname), wpx, colr, "{:,}".format(fcnt)))
+            chart = QtWidgets.QLabel('<table cellspacing="0" style="font-size:12px;">%s</table>' % rows)
+            chart.setTextFormat(RT); chart.setWordWrap(False)
+            chart.setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;"
+                                "border-radius:10px;padding:9px 12px;")
+            v.addWidget(chart)
+
         v.addWidget(self._section_label("🧩 " + L("सारे फ़ीचर (गिनती के साथ)", "All features (with counts)")))
         if feats:
             ft = QtWidgets.QTableWidget(len(feats), 2)
