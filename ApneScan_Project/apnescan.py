@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "376"
+VERSION = "377"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13428,7 +13428,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
         frow0.addWidget(mode_cb)
         v.addLayout(frow0)
 
-        cols = [L("नाम", "Name"), L("स्कैन", "Scans"), L("देश", "Country"), L("क्षेत्र", "Region"),
+        cols = [L("नाम", "Name"), L("स्कैन", "Scans"), L("फ़ीचर", "Features"),
+                L("देश", "Country"), L("क्षेत्र", "Region"),
                 L("शहर", "City"), L("वर्शन", "Ver"), L("मॉडल", "Model"), L("भाषा", "Lang"),
                 L("मोड", "Mode"), L("पहली बार", "First"), L("आख़िरी", "Last seen"),
                 L("स्थिति", "Status")]
@@ -13478,15 +13479,16 @@ class ScannerWindow(QtWidgets.QMainWindow):
             nm.setData(UR + 2, 1 if u.get("online") else 0)
             tbl.setItem(r, 0, nm)
             tbl.setItem(r, 1, cell(num=u.get("scans", 0)))
-            tbl.setItem(r, 2, cell(u.get("country", "")))
-            tbl.setItem(r, 3, cell(u.get("region", "")))
-            tbl.setItem(r, 4, cell(u.get("city", "")))
-            tbl.setItem(r, 5, cell(u.get("version", "")))
-            tbl.setItem(r, 6, cell(u.get("model", "")))
-            tbl.setItem(r, 7, cell(u.get("lang", "")))
-            tbl.setItem(r, 8, cell(u.get("mode", "")))
-            tbl.setItem(r, 9, cell(ago(u.get("first"))))
-            tbl.setItem(r, 10, cell(ago(u.get("last"))))
+            tbl.setItem(r, 2, cell(num=u.get("nfeats", 0)))
+            tbl.setItem(r, 3, cell(u.get("country", "")))
+            tbl.setItem(r, 4, cell(u.get("region", "")))
+            tbl.setItem(r, 5, cell(u.get("city", "")))
+            tbl.setItem(r, 6, cell(u.get("version", "")))
+            tbl.setItem(r, 7, cell(u.get("model", "")))
+            tbl.setItem(r, 8, cell(u.get("lang", "")))
+            tbl.setItem(r, 9, cell(u.get("mode", "")))
+            tbl.setItem(r, 10, cell(ago(u.get("first"))))
+            tbl.setItem(r, 11, cell(ago(u.get("last"))))
             tbl.setItem(r, STAT, cell(row_status(u.get("online"), blocked)))
             if blocked:
                 style_row(r, True)
@@ -13507,7 +13509,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 blocked = int(nmit.data(UR + 1) or 0) if nmit else 0
                 online = int(nmit.data(UR + 2) or 0) if nmit else 0
                 hay = " ".join((tbl.item(r, c).text() if tbl.item(r, c) else "")
-                               for c in (0, 2, 3, 4, 5, 6)).lower()
+                               for c in (0, 3, 4, 5, 6, 7)).lower()
                 hide = bool(q) and q not in hay
                 if mode == 1 and not online:
                     hide = True
