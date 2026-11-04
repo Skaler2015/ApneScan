@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "378"
+VERSION = "379"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -13645,12 +13645,35 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 else:
                     self._warn(L("detail नहीं मिली।", "Could not load detail."))
                 return
-            self._render_admin_user_detail(data)
+            self._render_admin_user_detail(data, uid, tbl, nm)
 
         self._an_fetch({"action": "adminuser", "apass": pwd, "uid": str(uid),
                         "client": self._get_client_id(), "v": VERSION}, on)
 
-    def _render_admin_user_detail(self, u):
+    def _apply_block_to_row(self, tbl, nm_item, newblk):
+        """Admin user-table ki ek row ka blocked-look update karo (detail/button se)."""
+        try:
+            UR = QtCore.Qt.UserRole
+            r = tbl.row(nm_item)
+            if r < 0:
+                return
+            nm_item.setData(UR + 1, 1 if newblk else 0)
+            online = int(nm_item.data(UR + 2) or 0)
+            st = tbl.item(r, tbl.columnCount() - 1)
+            if st:
+                st.setText("🚫" if newblk else ("🟢" if online else ""))
+            col = QtGui.QColor("#9CA3AF") if newblk else QtGui.QColor("#111827")
+            for c in range(tbl.columnCount()):
+                itx = tbl.item(r, c)
+                if itx:
+                    itx.setForeground(col)
+            fn = getattr(tbl, "_reapply_filters", None)
+            if callable(fn):
+                fn()
+        except Exception:
+            pass
+
+    def _render_admin_user_detail(self, u, uid=None, tbl=None, nm_item=None):
         L = self.L
         RT = QtCore.Qt.RichText
         import html as _html
@@ -13665,6 +13688,8 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 return "—"
 
         name = u.get("name") or "—"
+        online = int(u.get("online") or 0)
+        state = {"blocked": 1 if u.get("blocked") else 0}
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(L("👤 यूज़र detail", "👤 User detail") + " — " + name)
         dlg.resize(560, 620)
@@ -13675,15 +13700,23 @@ class ScannerWindow(QtWidgets.QMainWindow):
         v.setContentsMargins(16, 14, 16, 12); v.setSpacing(10)
         scroll.setWidget(body); outer.addWidget(scroll, 1)
 
-        badge = ("🚫 " + L("Blocked", "Blocked")) if u.get("blocked") else \
-                ("🟢 " + L("Online", "Online")) if u.get("online") else ("⚪ " + L("Offline", "Offline"))
+        def badge_html():
+            if state["blocked"]:
+                return '<span style="color:#BE123C;font-weight:800;">🚫 %s</span>' % L("Blocked", "Blocked")
+            if online:
+                return '<span style="color:#15803D;font-weight:800;">🟢 %s</span>' % L("Online", "Online")
+            return '<span style="color:#94A3B8;font-weight:800;">⚪ %s</span>' % L("Offline", "Offline")
+
+        badge_lbl = QtWidgets.QLabel(badge_html()); badge_lbl.setTextFormat(RT)
         head = QtWidgets.QLabel(
-            '<b style="font-size:18px;color:#111827;">%s</b> &nbsp; '
-            '<span style="color:#64748B;">%s</span><br>'
+            '<b style="font-size:18px;color:#111827;">%s</b><br>'
             '<span style="color:#4F46E5;font-weight:800;font-size:15px;">%s</span> %s'
-            % (_html.escape(name), badge, "{:,}".format(int(u.get("scans") or 0)),
+            % (_html.escape(name), "{:,}".format(int(u.get("scans") or 0)),
                L("स्कैन", "scans")))
-        head.setTextFormat(RT); head.setWordWrap(True); v.addWidget(head)
+        head.setTextFormat(RT); head.setWordWrap(True)
+        hrow = QtWidgets.QHBoxLayout(); hrow.addWidget(head); hrow.addStretch(1)
+        hrow.addWidget(badge_lbl, 0, QtCore.Qt.AlignTop)
+        v.addLayout(hrow)
 
         # ---- profile grid ----
         def row2(a, b):
@@ -13758,7 +13791,57 @@ class ScannerWindow(QtWidgets.QMainWindow):
         v.addWidget(note)
 
         bb = QtWidgets.QHBoxLayout(); bb.setContentsMargins(14, 8, 14, 10)
-        bb.addStretch(1)
+        bblk = QtWidgets.QPushButton()
+        bblk.setEnabled(bool(uid))
+
+        def refresh_btn():
+            bblk.setText(("✅ " + L("Unblock", "Unblock")) if state["blocked"]
+                         else ("🚫 " + L("Block", "Block")))
+        refresh_btn()
+
+        def do_toggle():
+            if not uid:
+                return
+            newblk = 0 if state["blocked"] else 1
+            if newblk:
+                msg = L("'%s' को ब्लॉक करें? यह world-stats से हट जाएगा।",
+                        "Block '%s'? They will be removed from world stats.") % name
+            else:
+                msg = L("'%s' को अनब्लॉक करें?", "Unblock '%s'?") % name
+            if QtWidgets.QMessageBox.question(
+                    dlg, L("Block / Unblock", "Block / Unblock"), msg,
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+                return
+            pwd = self._opts.get("admin_pass", "")
+
+            def on2(data):
+                if not isinstance(data, dict) or not data.get("ok"):
+                    err = (data or {}).get("error", "") if isinstance(data, dict) else ""
+                    if err == "auth":
+                        self._opts["admin_pass"] = ""
+                        try:
+                            self._save_opts()
+                        except Exception:
+                            pass
+                        self._warn(L("ग़लत password।", "Wrong password."))
+                    else:
+                        self._warn(L("नहीं हो पाया।", "Failed."))
+                    return
+                state["blocked"] = newblk
+                refresh_btn()
+                badge_lbl.setText(badge_html())
+                if tbl is not None and nm_item is not None:
+                    self._apply_block_to_row(tbl, nm_item, newblk)
+                self.status.showMessage(
+                    (L("🚫 Block किया: ", "🚫 Blocked: ") if newblk
+                     else L("✅ Unblock किया: ", "✅ Unblocked: ")) + name, 6000)
+
+            self._an_fetch({"action": "adminblock", "apass": pwd, "uid": str(uid),
+                            "block": str(newblk), "client": self._get_client_id(),
+                            "v": VERSION}, on2)
+
+        bblk.clicked.connect(do_toggle)
+        bb.addWidget(bblk); bb.addStretch(1)
         bclose = QtWidgets.QPushButton(L("बंद करें", "Close")); bclose.clicked.connect(dlg.accept)
         bb.addWidget(bclose)
         outer.addLayout(bb)
