@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "382"
+VERSION = "383"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3308,7 +3308,7 @@ class EditProfileDialog(QtWidgets.QDialog):
         self.setWindowTitle("Profile settings")
         self.setMinimumWidth(420)
         self.profile = dict(profile) if profile else {
-            "name": "", "source_name": None, "dpi": 150, "color": "color", "duplex": False}
+            "name": "", "source_name": None, "dpi": 300, "color": "color", "duplex": False}
         form = QtWidgets.QFormLayout(self)
 
         def qh(text, tip):
@@ -3397,7 +3397,7 @@ class EditProfileDialog(QtWidgets.QDialog):
         try:
             self.profile["dpi"] = max(50, min(1200, int(self.cmb_dpi.currentText().strip())))
         except Exception:
-            self.profile["dpi"] = 150
+            self.profile["dpi"] = 300
         self.profile["color"] = COLOUR_MODES[self.cmb_color.currentText()]
         self.profile["duplex"] = self.chk_duplex.isChecked()
         self.profile["page_size"] = self._PSIZES[self.cmb_psize.currentIndex()][1]
@@ -9412,6 +9412,26 @@ class ScannerWindow(QtWidgets.QMainWindow):
                 save_config(self._config)
             except Exception:
                 pass
+        # (v382) HD-RESTORE: v242 ne saari profiles ko 150 dpi par gira diya tha
+        # (NAPS2-match ke liye) — isi se scan soft/low-quality dikh raha tha.
+        # User ne "ekdam original / best quality" maanga, isliye ab SAARI
+        # profiles ek baar wapas kam-se-kam 300 dpi (HD document standard) par
+        # le aao. User baad me kisi bhi profile ka DPI Settings se ghata sakta
+        # hai; ye upgrade dobara zabardasti nahi hota.
+        if not self._config.get("hd_dpi300_v382"):
+            self._config["hd_dpi300_v382"] = True
+            for _p in (self._profiles or []):
+                try:
+                    if int(_p.get("dpi", 0) or 0) < 300:
+                        _p["dpi"] = 300
+                except Exception:
+                    _p["dpi"] = 300
+            if self._profiles:
+                self._config["profiles"] = self._profiles
+            try:
+                save_config(self._config)
+            except Exception:
+                pass
         # Layout v168 (one-time): scan-settings ab TOOLBAR ke neeche ek patti
         # me aur 'Meri Files' BAAYIN taraf — purani saved 'right' side ek baar
         # left kar rahe hain (Customize se wapas badla ja sakta hai).
@@ -9902,7 +9922,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
             Display Name : Default
             Device       : jo user select kare wahi (auto-detect / device chunne
                            par is profile me apne aap bhar jaata hai)
-            Resolution   : 150 DPI
+            Resolution   : 300 DPI (HD)
             Colour Mode  : Colour
             Page Size    : Auto
         Device pehli-baar khaali reh sakta hai; user ke device chunte hi
@@ -9911,8 +9931,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
             return
         self._profiles = [{
             "name": "Default",
-            "dpi": 150,                # (v242) NAPS2-EXACT: NAPS2 bhi 150 dpi par
-                                       # scan karta hai — wahi look + file-size.
+            "dpi": 300,                # (v382) HD: 300 dpi = document scanning ka
+                                       # quality standard (sharp + OCR-ready).
+                                       # User Settings se ghata sakta hai.
             "color": "color",          # Colour
             "duplex": False,
             "page_size": "auto",       # Auto
@@ -10026,7 +10047,7 @@ class ScannerWindow(QtWidgets.QMainWindow):
         try:
             dpi = int(self.cmb_dpi.currentText().split()[0])
         except Exception:
-            dpi = int(prof.get("dpi", 200))
+            dpi = int(prof.get("dpi", 300))
         d = self.cmb_depth.currentText()
         color = "color" if d.startswith("24") else ("gray" if d.startswith("Gray") else "bw")
         duplex = "Both" in self.cmb_sides.currentText()
@@ -10039,9 +10060,9 @@ class ScannerWindow(QtWidgets.QMainWindow):
         badal jata hai — panel/profile nahi badalta."""
         prof = prof or {}
         try:
-            dpi = int(dpi_override) if dpi_override else int(prof.get("dpi", 150))
+            dpi = int(dpi_override) if dpi_override else int(prof.get("dpi", 300))
         except Exception:
-            dpi = 150
+            dpi = 300
         color = prof.get("color", "color")
         if color not in ("color", "gray", "bw"):
             color = "color"
