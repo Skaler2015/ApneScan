@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "386"
+VERSION = "387"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3182,7 +3182,21 @@ class ScanWorker(QtCore.QThread):
                     # scan khatam hote hi user ko page-number ke saath chetavni
                     if self.opts.get("quality_watch", True):
                         try:
-                            _qi = ai_scan_quality(img)
+                            # (v387) KHAALI page ko "too faint" MAT batao — wo
+                            # quality-defect nahi, blank page hai (remove_blank ON
+                            # ho to waise bhi upar hi hat jata). Pehle duplex ke
+                            # khaali back-side par galat "Page X: too faint"
+                            # warning aata tha + re-scan/enhance ka galat sujhaav.
+                            _blankish = False
+                            try:
+                                _pw, _ph = img.size
+                                _m = 0.06
+                                _ipc = img.crop((int(_pw * _m), int(_ph * _m),
+                                                 int(_pw * (1 - _m)), int(_ph * (1 - _m))))
+                                _blankish = is_blank_page(_ipc, 0.0015)
+                            except Exception:
+                                _blankish = False
+                            _qi = [] if _blankish else ai_scan_quality(img)
                             if _qi:
                                 if not hasattr(self, "q_warns"):
                                     self.q_warns = []
