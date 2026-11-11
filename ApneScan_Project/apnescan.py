@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "384"
+VERSION = "385"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -1064,6 +1064,10 @@ DEFAULT_OPTIONS = {
     "daily_jpeg_backup": True,
     "daily_jpeg_folder": os.path.join(os.path.expanduser("~"), "Documents", "ApneScan_DailyScans"),
     "scanner_method": "twain",   # "twain" ya "wia"
+    # (v385) Continuous ADF feed: ON par agar scanner network (eSCL) par ADF ke
+    # saath mile to WIA/TWAIN ke bajaye eSCL se scan (ek job = saare page bina
+    # ruke). OFF par hamesha chuni hui method. Koi dikkat ho to apne-aap wapas.
+    "continuous_feed": True,
     # (v282) WIA me UNCOMPRESSED transfer (koi JPEG-artifact nahi) = best quality.
     # OFF karne par tez (JPEG) transfer. TWAIN/eSCL par asar nahi (wo uncompressed hi).
     "scan_best_quality": True,
@@ -2922,6 +2926,80 @@ class ImportWorker(QtCore.QThread):
         self.done.emit(count)
 
 
+# ---------------------------------------------------------------------------
+# (v385) CONTINUOUS ADF FEED helpers — network (eSCL) scanners pull EVERY page
+# in ONE job without stopping. WIA (aur kuch TWAIN driver) har page ke baad ADF
+# rok dete hain ("ek page scan karke rukta hai"). Isliye scan se pehle agar
+# scanner network par eSCL + ADF ke saath mil jaye, to usi se continuous scan
+# karo. Koi bhi dikkat -> chupchaap original method par wapas.
+# ---------------------------------------------------------------------------
+_ESCL_IP_CACHE = {}   # session-bhar cache: {device_key: ip_or_empty} (dobara discover na ho)
+
+def _escl_status_ok(ip, timeout=2.5):
+    try:
+        import urllib.request as _u
+        r = _u.urlopen("http://%s/eSCL/ScannerStatus" % ip, timeout=timeout)
+        return (getattr(r, "status", None) or r.getcode()) == 200
+    except Exception:
+        return False
+
+def _escl_has_adf(ip, timeout=4.0):
+    try:
+        import urllib.request as _u
+        r = _u.urlopen("http://%s/eSCL/ScannerCapabilities" % ip, timeout=timeout)
+        xml = r.read().decode("utf-8", "ignore")
+        return ("Adf" in xml) or ("Feeder" in xml) or ("Duplex" in xml)
+    except Exception:
+        return False
+
+def _discover_escl(prefer="", cap_time=2.5):
+    """Quick bounded subnet probe for a network (eSCL) scanner with an ADF.
+    Returns its IP, or '' if none found within cap_time. prefer: device/model
+    tokens (e.g. 'N4000') — matching scanner ko pehle chuno (multi-scanner LAN)."""
+    import socket as _s, concurrent.futures as _cf, urllib.request as _u, time as _t
+    try:
+        s = _s.socket(_s.AF_INET, _s.SOCK_DGRAM); s.connect(("8.8.8.8", 80))
+        myip = s.getsockname()[0]; s.close()
+    except Exception:
+        return ""
+    net = myip.rsplit(".", 1)[0]
+    pref = [t.lower() for t in re.findall(r"[A-Za-z0-9]+", prefer or "") if len(t) >= 3]
+    t0 = _t.time()
+    def probe(i):
+        if _t.time() - t0 > cap_time:
+            return None
+        ip = "%s.%d" % (net, i)
+        try:
+            c = _s.create_connection((ip, 80), timeout=0.25); c.close()
+        except Exception:
+            return None
+        try:
+            r = _u.urlopen("http://%s/eSCL/ScannerCapabilities" % ip, timeout=1.5)
+            xml = r.read(4000).decode("utf-8", "ignore")
+        except Exception:
+            return None
+        if not (("Adf" in xml) or ("Feeder" in xml) or ("Duplex" in xml)):
+            return None
+        m = re.search(r"MakeAndModel>\s*([^<]+)", xml)
+        return (ip, (m.group(1).strip() if m else ""))
+    found = []
+    try:
+        with _cf.ThreadPoolExecutor(max_workers=64) as ex:
+            for res in ex.map(probe, range(1, 255)):
+                if res:
+                    found.append(res)
+    except Exception:
+        pass
+    if not found:
+        return ""
+    if pref:
+        for ip, model in found:
+            ml = model.lower()
+            if any(t in ml for t in pref):
+                return ip
+    return found[0][0]
+
+
 class ScanWorker(QtCore.QThread):
     page_done = QtCore.pyqtSignal(str, int)   # (final_path, seq) — seq matches the preview
     done = QtCore.pyqtSignal(int, int)
@@ -3231,6 +3309,33 @@ class ScanWorker(QtCore.QThread):
 
         err = None
         method = self.opts.get("scanner_method", "twain")
+        # (v385) CONTINUOUS FEED auto-route: WIA/TWAIN page-by-page par ADF har
+        # page ke baad ruk sakta hai. Agar scanner network (eSCL) par ADF ke
+        # saath mil jaye to usi se scan karo — ek job me saare page bina ruke.
+        # Pehle saved scanner_ip (turant); warna EK baar halki discovery (cache).
+        # Koi bhi dikkat -> chupchaap original method par wapas.
+        self.used_escl_ip = ""
+        if method in ("wia", "twain") and self.opts.get("continuous_feed", True):
+            try:
+                _eip = (self.opts.get("scanner_ip") or "").strip()
+                if _eip and not _escl_status_ok(_eip):
+                    _eip = ""
+                if not _eip:
+                    _ck = (self.source_name or "any")
+                    if _ck in _ESCL_IP_CACHE:
+                        _eip = _ESCL_IP_CACHE[_ck]            # cached (ip ya "" = mila hi nahi)
+                        if _eip and not _escl_status_ok(_eip):
+                            _eip = ""
+                    else:
+                        _eip = _discover_escl(prefer=self.source_name or "")
+                        _ESCL_IP_CACHE[_ck] = _eip            # negative bhi cache -> dobara der na ho
+                if _eip and _escl_status_ok(_eip) and _escl_has_adf(_eip):
+                    method = "escl"
+                    self.opts = dict(self.opts)
+                    self.opts["scanner_ip"] = _eip
+                    self.used_escl_ip = _eip
+            except Exception:
+                pass
         # (v235) SIRF scanner-acquire ka samay naapo (consumer parallel chalta
         # hai, isliye ye WIA/eSCL/TWAIN ki asli raftaar hai — hamare OCR/process
         # ka samay ismein nahi aata). Isi se 'WIA dheema?' faisla hota hai.
@@ -20984,6 +21089,15 @@ if the toggle is ticked).</p>
     def _on_scan_done(self, kept, skipped):
         self._scan_place = None          # rescan/insert mode khatam
         self._keep_awake(False)          # (v315) scan khatam — normal sleep
+        # (v385) continuous-feed ke liye eSCL IP khud-ba-khud mila to yaad rakho —
+        # agli baar discovery na karni pade (turant continuous scan).
+        try:
+            _eip = getattr(self._worker, "used_escl_ip", "") if self._worker else ""
+            if _eip and self._opts.get("scanner_ip", "") != _eip:
+                self._opts["scanner_ip"] = _eip
+                self._save_opts()
+        except Exception:
+            pass
         try:
             save_config(self._config)    # dialog position (agar badli) yaad rahe
         except Exception:
