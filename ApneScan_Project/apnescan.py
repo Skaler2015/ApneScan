@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "385"
+VERSION = "386"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -3050,21 +3050,11 @@ class ScanWorker(QtCore.QThread):
                     # flatten, enhance, HD-clear, adaptive-BW sab CHHOD do. Sirf
                     # sidha-karna/crop (geometry) chalega, jo rang nahi chhoota.
                     _true = bool(self.opts.get("true_colour"))
-                    if self.opts.get("remove_blank"):
-                        _sens = {"kam": 0.0003, "normal": 0.0008, "zyada": 0.004}
-                        _thr = _sens.get(self.opts.get("blank_sensitivity", "normal"), 0.0008)
-                        if is_blank_page(img, _thr):
-                            self.skipped += 1
-                            try:
-                                self.page_dropped.emit(self.skipped, "blank")
-                            except Exception:
-                                pass
-                            # (v356) is page ka jo raw preview dikha diya tha use hatao
-                            try:
-                                self.preview_drop.emit(_seq)
-                            except Exception:
-                                pass
-                            continue
+                    # (v386) NOTE: blank-page check YAHAN se HATAKAR backing-removal
+                    # ke BAAD le gaye (neeche). Pehle yahan raw img par chalta tha —
+                    # blank back-side ke KINARE ki dark/gray scanner-backing band ko
+                    # 'ink' gin kar page ko non-blank samajh leta tha, isliye khaali
+                    # duplex-back page hat hi nahi rahe the (user ki shikayat).
                     # (v240) ADF ki dark/gray backing (choti sheet ke SIDE/NECHE
                     # dikhne wali patti) ko GRAY ki jagah WHITE karo — user ki
                     # maang. whiten_outside_paper: paper ka kinara bright-FRACTION
@@ -3081,6 +3071,42 @@ class ScanWorker(QtCore.QThread):
                             img = whiten_outside_paper(img)      # gray -> WHITE
                     elif self.opts.get("auto_whiten_backing", False):
                         img = whiten_dark_background(img)
+                    # (v386) BLANK-PAGE check — AB backing hatane ke BAAD. Detection
+                    # ke liye ek WHITENED copy par jaancho (chahe backing_mode kuch
+                    # bhi ho): is se khaali page ke KINARE ki scanner-backing band
+                    # 'ink' me nahi ginti, aur asli blank (duplex-back) page theek
+                    # se hat jaata hai. Crease/bleed-through halka-gray (>75) hai —
+                    # is_blank_page use waise bhi ignore karta hai.
+                    if self.opts.get("remove_blank"):
+                        _sens = {"kam": 0.0003, "normal": 0.0008, "zyada": 0.004}
+                        _thr = _sens.get(self.opts.get("blank_sensitivity", "normal"), 0.0008)
+                        _probe = img
+                        try:
+                            _probe = whiten_outside_paper(img)   # backing halki karo (asli img nahi badalti)
+                        except Exception:
+                            _probe = img
+                        # (v386) KINARE ka ~6% margin chhod kar page ke ANDAR hi ink
+                        # gino — scanner-backing/ADF band hamesha KINARE par hoti hai,
+                        # asli content (text/mohar/footer) ANDAR. Is se dark backing
+                        # band 'ink' me nahi ginti par asli content bachta hai.
+                        try:
+                            _pw, _ph = _probe.size
+                            _mg = 0.06
+                            _probe = _probe.crop((int(_pw * _mg), int(_ph * _mg),
+                                                  int(_pw * (1 - _mg)), int(_ph * (1 - _mg))))
+                        except Exception:
+                            pass
+                        if is_blank_page(_probe, _thr):
+                            self.skipped += 1
+                            try:
+                                self.page_dropped.emit(self.skipped, "blank")
+                            except Exception:
+                                pass
+                            try:
+                                self.preview_drop.emit(_seq)   # raw preview bhi hatao
+                            except Exception:
+                                pass
+                            continue
                     # Photocopy jaisi GRAY-maili background asli safed karo
                     # (streak/shading bhi) — text gehra, print/PDF ekdam saaf.
                     # Photo/X-ray par apne aap no-op. Settings se band ho
