@@ -255,7 +255,7 @@ except Exception:
 
 
 APP_NAME = "ApneScan"
-VERSION = "383"
+VERSION = "384"
 UPDATE_API = "https://api.github.com/repos/Skaler2015/ApneScan/releases/latest"
 DOWNLOAD_PAGE = "https://github.com/Skaler2015/ApneScan/releases/latest"
 # App ko phailane (share/QR/poster) ke liye
@@ -9994,6 +9994,34 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self._config["selected_profile"] = name; save_config(self._config)
         self._load_profile_to_panel(self._selected_profile())
 
+    def _on_panel_sides_changed(self, txt):
+        """(v384) Panel ka 'Scan sides' (Single/Both) badalte hi use ACTIVE
+        PROFILE me save kar do. Pehle ye sirf panel ke bade Scan-button par
+        asar karta tha — Enter/toolbar/dashboard se scan PROFILE ki saved
+        'duplex' value padhte the, jo reinstall ke baad False thi. Isliye
+        user 'Both sides' chunne ke baad bhi sirf ek side scan hota tha.
+        Ab dropdown badalte hi profile me duplex set -> SAARE scan-tareeke
+        (Enter/toolbar/dashboard/panel) dono side scan karte hain."""
+        prof = self._selected_profile()
+        if not prof:
+            return
+        want = ("both" in txt.lower()) or ("duplex" in txt.lower())
+        if bool(prof.get("duplex")) == bool(want):
+            return
+        prof["duplex"] = bool(want)
+        try:
+            self._save_profiles()
+        except Exception:
+            pass
+        try:
+            self.status.showMessage(
+                self.L("दोनों तरफ़ (duplex) ON — अब हर scan दोनों side करेगा।",
+                       "Both sides (duplex) ON — every scan now does both sides.")
+                if want else
+                self.L("एक तरफ़ (single side) ON।", "Single side ON."), 3500)
+        except Exception:
+            pass
+
 
     def open_profiles(self):
         dlg = ProfileManagerDialog(self, self._profiles)
@@ -10094,7 +10122,11 @@ class ScannerWindow(QtWidgets.QMainWindow):
         self.cmb_depth.setCurrentText("24-bit Colour" if c == "color"
                                       else ("Grayscale" if c == "gray" else "Black & White"))
         self.cmb_source.setCurrentText("Feeder (ADF)")
+        # (v384) profile-load par sides set karte waqt signal block — warna
+        # _on_panel_sides_changed wahi value dobara save karega (redundant).
+        self.cmb_sides.blockSignals(True)
         self.cmb_sides.setCurrentText("Both sides (duplex)" if prof.get("duplex") else "Single side")
+        self.cmb_sides.blockSignals(False)
         # page size (per-profile)
         if hasattr(self, "cmb_pagesize"):
             _ps = (prof.get("page_size") or "auto").lower()
@@ -18541,6 +18573,9 @@ if the toggle is ticked).</p>
         self.cmb_sides = QtWidgets.QComboBox()
         self.cmb_sides.addItems(["Single side", "Both sides (duplex)"])
         self.cmb_sides.setToolTip("Both side = scan both sides of the paper (duplex)")
+        # (v384) sides badalte hi active profile me duplex save -> Enter/toolbar/
+        # dashboard se scan bhi dono side kare (sirf panel-button nahi).
+        self.cmb_sides.currentTextChanged.connect(self._on_panel_sides_changed)
         sb.addWidget(_col("Scan sides", self.cmb_sides, 100))      # (v188) main line par
 
         # ---- ⚙ Auto-fixes quick chips (yahin on/off) ----
